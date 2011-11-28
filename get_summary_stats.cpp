@@ -303,7 +303,7 @@ void parse_args (int argc, char ** argv,
   }
 }
 
-/** \brief Load the 3-column file feature<tab>snp<tab>coord into a map 
+/** \brief Load the 2-column file feature<tab>snp|coord into a map 
  *  which keys are feature names and values are vectors of snp-coord.
  */
 map<string, vector<string> >
@@ -344,7 +344,7 @@ loadLinksFtr2Snps (const string linksFile,
     {
       cerr << line << endl;
       cerr << "ERROR: format of file " << linksFile
-	   << " should be feature<space/tab>snp" << endl;
+	   << " should be feature<space/tab>snp|coord" << endl;
       exit (1);
     }
     if (! vFtrsToKeep.empty() &&
@@ -352,10 +352,12 @@ loadLinksFtr2Snps (const string linksFile,
     {
       continue;
     }
-    if (! vSnpsToKeep.empty() &&
-	find(vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1]) == vSnpsToKeep.end())
+    if (! vSnpsToKeep.empty())
     {
-      continue;
+      vector<string> tokens2 = split (tokens[1], '|');
+      if (find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens2[1])
+	  == vSnpsToKeep.end())
+	continue;
     }
     line_id++;
     if (ftrName2CisSnpNameCoords.find(tokens[0]) == ftrName2CisSnpNameCoords.end())
@@ -461,8 +463,7 @@ indexSnps (const string genoFile,
   map<string, long int> snpNameCoord2Pos;
   ifstream genoStream;
   string line;
-  vector<string> tokensLine;
-  vector<string> tokensSnp;
+  vector<string> tokens;
   long int snpPos;
   
   genoStream.open(genoFile.c_str());
@@ -485,16 +486,17 @@ indexSnps (const string genoFile,
       break;
     }
     if (line.find('\t') != string::npos)
-      split (line, '\t', tokensLine);
+      split (line, '\t', tokens);
     else
-      split (line, ' ', tokensLine);
-    stringstream ss;
-    ss << tokensLine[1] << "|" << tokensLine[2];  // SNP_name|SNP_coord
+      split (line, ' ', tokens);
     if (! vSnpsToKeep.empty() &&
-	find(vSnpsToKeep.begin(), vSnpsToKeep.end(), ss.str()) == vSnpsToKeep.end())
+	find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2])
+	== vSnpsToKeep.end())
     {
       continue;
     }
+    stringstream ss;
+    ss << tokens[1] << "|" << tokens[2];  // SNP_name|SNP_coord
     snpNameCoord2Pos.insert( make_pair(ss.str(), snpPos) );
   }
   
@@ -865,7 +867,8 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   vector<string> cisSnpNameCoords, tokens;
   string ftrName, snpNameCoord, snpName;
   size_t ftrPos, n_y = 0;
-  double nbFtrs = 0, step = floor(ftrName2CisSnpNameCoords.size() / 5);
+  size_t nbFtrs = 0;
+  vector<size_t> vCounters = getCounters (ftrName2CisSnpNameCoords.size());
   double * y = NULL;
   int * idx = NULL;
   ifstream phenoStream, genoStream;
@@ -900,9 +903,9 @@ void computeAndWriteSummaryStatsFtrPerFtr (
        ftrName2CisSnpNameCoords_it != ftrName2CisSnpNameCoords.end();
        ++ftrName2CisSnpNameCoords_it)
   {
-    nbFtrs++;
-    if (verbose > 0 && fmod(nbFtrs, step) == 0.0)
-      printf ("%.0f%%\n", 100 * nbFtrs / ftrName2CisSnpNameCoords.size());
+    ++nbFtrs;
+    if (verbose > 0)
+      printCounter (nbFtrs, vCounters);
     ftrName = (*ftrName2CisSnpNameCoords_it).first;
     if (ftrName2Pos.find(ftrName) == ftrName2Pos.end())
       continue;
@@ -938,6 +941,8 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   phenoStream.close();
   genoStream.close();
   outStream.close();
+  if (verbose > 0)
+    cout << "results written in " << outFile << endl;
 }
 
 int main (int argc, char ** argv)
