@@ -161,10 +161,13 @@ void convertImputeFilesToBimbamFiles (string input,
   ofstream outStream;
   size_t nbSamples = 0;
   
-  for (int chrNb = 21; chrNb <= 22; ++chrNb)
+  for (int chrNb = 1; chrNb <= 22; ++chrNb)
   {
     if (verbose > 0)
+    {
       cout << "convert genotypes on chr" << chrNb << "..." << endl;
+      fflush (stdout);
+    }
     
     string inFile = copyString (input);
     replaceAll (inFile, "XX", toString(chrNb));
