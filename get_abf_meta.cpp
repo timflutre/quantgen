@@ -80,55 +80,6 @@ public:
 };
 
 //-----------------------------------------------------------------------------
-// list of all functions
-
-void help (char ** argv);
-void version (char ** argv);
-void parse_args (int argc, char ** argv,
-		 string * pt_inDir,
-		 string * pt_gridFile,
-		 string * pt_outFile,
-		 string * pt_ftrsFile,
-		 string * pt_snpsFile,
-		 int * pt_verbose);
-vector<string> scanInputDirectory (string inDir,
-				   int verbose);
-void indexInputFiles (vector<string> vInFiles,
-		      vector<string> vFtrsToKeep,
-		      vector<string> vSnpsToKeep,
-		      map<Pair, vector<size_t> > & mPairs2Positions,
-		      int verbose);
-vector< vector<double> > loadGrid (string gridFile, int verbose);
-void getSummaryStatsForPair (Pair iPair,
-			     vector<size_t> vPositions,
-			     vector<ifstream *> vPtInStreams,
-			     map<size_t, vector<double> > & allSumStats,
-			     int * pt_nbSubgroupsUsed,
-			     int * pt_nbSamplesUsed,
-			     int verbose);
-vector<double> correctSummaryStats (const vector<double> sumStats,
-				    int verbose);
-double getAbfFromStdSumStats (vector< vector<double> > stdSumStats,
-			      double phi2,
-			      double oma2,
-			      int verbose);
-double log10_weighted_sum (double * vec, double * weights, size_t size);
-void computeAbfsForPairOverGrid (vector< vector<double> > grid, 
-				 const map<size_t, vector<double> > & allSumStats,
-				 double * pt_abf_meta,
-				 double * pt_abf_fix,
-				 double * pt_abf_maxh,
-				 int * pt_nbSubgroupsUsed,
-				 int * pt_nbSamplesUsed,
-				 int verbose);
-void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
-				     const map<Pair, vector<size_t> > & mPairs2Positions,
-				     string gridFile,
-				     string outFile,
-				     int verbose);
-
-//-----------------------------------------------------------------------------
-// functions
 
 /** \brief Display the usage on stdout.
  */
@@ -146,16 +97,18 @@ void help (char ** argv)
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (default=1)" << endl
        << "  -i, --input\tdirectory with the summary stats for each subgroup" << endl
-       << "\t\t(3-column files: betahat sebetahat sigmahat)" << endl
+       << "\t\t(8-column files: gene snp coord n betahat sebetahat sigmahat Pval)" << endl
        << "  -g, --grid\tfile with the grid of values for psi2 and omega2 (ES model)" << endl
        << "  -o, --out\tgzipped output file" << endl
-       << "  -k, --keep\tkeep summary stats in the output" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
        << "  -s, --snp\tgzipped file with a list of SNP coordinates to analyze" << endl
        << "  "
        << endl
        << "Examples:" << endl
-       << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl;
+       << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl
+       << endl
+       << "References:" << endl
+       << "Wen and Stephens (2011)" << endl;
 }
 
 void version (char ** argv)
@@ -314,6 +267,7 @@ vector<string> scanInputDirectory (string inDir,
 
 /** \brief Index the files with a map to know which pairs feature-SNP are 
  *  in common among subgroups.
+ *  \note Use a struct for the pair.
  */
 void indexInputFiles (vector<string> vInFiles,
 		      vector<string> vFtrsToKeep,
@@ -398,6 +352,94 @@ void indexInputFiles (vector<string> vInFiles,
 	  mPairs2Positions.insert ( make_pair (iPair_obs, vPositions) );
 	}
       }
+    }
+    inStream.close ();
+    if (verbose > 0)
+    {
+      cout << " (" << line_id << " lines)" << endl;
+      fflush (stdout);
+    }
+  }
+  
+  if (verbose > 0)
+  {
+    cout << "nb of pairs feature-SNP: " << mPairs2Positions.size() << endl;
+  }
+}
+
+/** \brief Index the files with a map to know which pairs feature-SNP are 
+ *  in common among subgroups.
+ *  \note Use a string feature|coord for the pair id.
+ */
+void indexInputFiles (vector<string> vInFiles,
+		      vector<string> vFtrsToKeep,
+		      vector<string> vSnpsToKeep,
+		      map<string, vector<size_t> > & mPairs2Positions,
+		      int verbose)
+{
+  size_t subgroup = 0, line_id = 0, pos = 0;
+  string line;
+  vector<string> tokens;
+  map<string, vector<size_t> >::iterator it_mP2P;
+  
+  if (verbose > 0)
+  {
+    cout << "index input files..." << endl;
+  }
+  
+  for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+  {
+    ifstream inStream;
+    inStream.open (vInFiles[subgroup].c_str());
+    if (! inStream.good())
+    {
+      cerr << "ERROR: can't open file " << vInFiles[subgroup] << endl;
+      exit (1);
+    }
+    if (verbose > 0)
+    {
+      cout << "s" << subgroup+1 << " " << vInFiles[subgroup] << " ...";
+      fflush (stdout);
+    }
+    
+    line_id = 0;
+    while (inStream.good())
+    {
+      pos = inStream.tellg();
+      getline (inStream, line);
+      if (line.empty())
+      {
+	break;
+      }
+      ++line_id;
+      split (line, ' ', tokens);
+      if (tokens.size() < 7)
+      {
+	cerr << endl << "ERROR: file " << vInFiles[subgroup] 
+	     << " at line " << line_id 
+	     << " should have at least 7 fields:" << endl
+	     << "feature<space>SNP<space>coord<space>n<space>betahat<space>sebetahat<space>sigmahat"
+	     << endl;
+	exit (1);
+      }
+      if (! vFtrsToKeep.empty() &&
+	  find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0]) == vFtrsToKeep.end())
+      {
+	continue;  // skip line, based on feature name
+      }
+      if (! vSnpsToKeep.empty() &&
+	  find(vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2]) == vSnpsToKeep.end())
+      {
+	continue;  // skip line, based on SNP coordinate
+      }
+      stringstream ss;
+      ss << tokens[0] << "|" << tokens[2];  // feature|coord
+      if (mPairs2Positions.find(ss.str()) == mPairs2Positions.end())
+      {
+	vector<size_t> vPositions (vInFiles.size(), string::npos);
+	mPairs2Positions.insert ( make_pair (ss.str(), vPositions) );
+      }
+      mPairs2Positions[ss.str()][subgroup] = pos;
     }
     inStream.close ();
     if (verbose > 0)
@@ -525,13 +567,92 @@ void getSummaryStatsForPair (Pair iPair,
   }
 }
 
+/** \brief Retrieve the summary stats (n,betahat,sebetahat,sigmahat) for a 
+ *  given pair feature-SNP in each  subgroup in which this pair is present.
+ *
+ *  \note If the pair is not present in the given subgroup (missing value),
+ *  n will be 0 and the other summary stats will be NaN. If the pair is present
+ *  but has infinite summary stats (should be coded as Inf in input file), only
+ *  n will be an integer, the other summary stats remaining Inf.
+ */
+void getSummaryStatsForPair (string pairId,
+			     vector<size_t> vPositions,
+			     vector<ifstream *> vPtInStreams,
+			     map<size_t, vector<double> > & allSumStats,
+			     int * pt_nbSubgroupsUsed,
+			     int * pt_nbSamplesUsed,
+			     int verbose)
+{
+  size_t subgroup = 0, colIdx = 0;
+  string line;
+  vector<string> tokens;
+  
+  allSumStats.clear();
+  *pt_nbSubgroupsUsed = 0;
+  *pt_nbSamplesUsed = 0;
+  
+  for (subgroup = 0; subgroup < vPositions.size(); ++subgroup)
+  {
+    vector<double> vSumStats (4, numeric_limits<double>::quiet_NaN());
+    
+    if (vPositions[subgroup] == string::npos)
+    {
+      vSumStats[0] = 0;
+      if (verbose > 0)
+	cout << "subgroup " << subgroup+1
+	     << ": skip because pair not present in this subgroup"
+	     << endl;
+    }
+    
+    else
+    {
+      ++(*pt_nbSubgroupsUsed);
+      vPtInStreams[subgroup]->seekg (vPositions[subgroup]);
+      getline (*(vPtInStreams[subgroup]), line);
+      if (line.find('\t') != string::npos)
+	split (line, '\t', tokens);
+      else
+	split (line, ' ', tokens);
+      stringstream ss;
+      ss << tokens[0] << "|" << tokens[2];  // feature|coord
+      if (ss.str() != pairId)
+      {
+	cerr << "ERROR: stream position is wrong for pair " << pairId
+	     << " in subgroup " << subgroup+1 << endl;
+	cerr << line << endl;
+	exit (1);
+      }
+      
+      if (atof(tokens[4].c_str()) == numeric_limits<double>::infinity())
+      {
+	--(*pt_nbSubgroupsUsed);
+	vSumStats[0] = 0;
+	if (verbose > 0)
+	  cout << "subgroup " << subgroup+1
+	       << ": skip because betahat=Inf" << endl;
+      }
+      
+      else
+      {
+	*pt_nbSamplesUsed += atoi (tokens[3].c_str());
+	for (colIdx = 3; colIdx < 7; ++colIdx)
+	{
+	  vSumStats[colIdx-3] = atof (tokens[colIdx].c_str());
+	}
+      }
+    }
+    
+    allSumStats.insert (make_pair(subgroup, vSumStats) );
+  }
+}
+
 /** \brief Apply the small sample size correction and return the standardized
  *  summary stats (bhat,sebhat,t).
  *
- *  \note If there is no variation in the phenotypes of the given  subgroup,
+ *  \note If there is no variation in the phenotypes of the given subgroup,
  *  t is practically 0, and bhat and sebhat will be 0 too. If there is no 
- *  variation in the genotype, t will be NaN whereas both bhat and sebhat will
- *  be 0.
+ *  variation in the genotype (beta=Inf), t will be NaN whereas both bhat and 
+ *  sebhat will be 0.
  */
 vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
 {
@@ -545,8 +666,8 @@ vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
     sebhat = sumStats[2] / sumStats[3];    // before correction
 #ifdef DEBUG
     if (verbose > 0)
-      printf ("betahat=%e sebetahat=%e sigmahat=%e bhat=%e sebhat=%e\n",
-	      sumStats[1], sumStats[2], sumStats[3], bhat, sebhat);
+      printf ("n=%i betahat=%e sebetahat=%e sigmahat=%e bhat=%e sebhat=%e\n",
+	      (int) n, sumStats[1], sumStats[2], sumStats[3], bhat, sebhat);
 #endif
     t = gsl_cdf_gaussian_Pinv(gsl_cdf_tdist_P(-fabs(bhat/sebhat), n-2), 1.0);
 #ifdef DEBUG
@@ -853,6 +974,144 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   }
 }
 
+/** \brief Loop over all pairs to compute ABFs and write results.
+ *  \note Use a string feature|coord for the pair id.
+ */
+void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
+				     const map<string, vector<size_t> > & mPairs2Positions,
+				     string gridFile,
+				     string outFile,
+				     int verbose)
+{
+  size_t subgroup = 0, i = 0, nbPairs = 0;
+  vector<ifstream *> vPtInStreams;
+  map<string, vector<size_t> >::const_iterator it_mP2P;
+  string pairId;
+  vector<string> tokens;
+  vector<size_t> vPositions;
+  map<size_t, vector<double> > allSumStats;  // 1 vector of doubles per subgroup
+  double abf_meta = 0, abf_fix = 0, abf_maxh = 0;
+  int nbSamplesUsed = 0, nbSubgroupsUsed = 0;
+  ogzstream outStream;
+  vector<size_t> vNbSubgroups2Occurrences (vInFiles.size()+1, 0);
+  vector<size_t> vCounters = getCounters (mPairs2Positions.size());
+  
+  if (verbose > 0)
+  {
+    cout << "compute the approximate Bayes factors..." << endl;
+    fflush (stdout);
+  }
+  
+  // open the input files once for all
+  for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+  {
+    ifstream * pt_inStream = new ifstream;
+    pt_inStream->open (vInFiles[subgroup].c_str());
+    if (! pt_inStream->good())
+    {
+      cerr << "ERROR: can't open file '" << vInFiles[subgroup] << "' for reading." << endl;
+      exit (1);
+    }
+    vPtInStreams.push_back (pt_inStream);
+  }
+  
+  // prepare the output file
+  outStream.open (outFile.c_str());
+  if (! outStream.good())
+  {
+    cerr << "ERROR: can't open file '" << outFile << "' for writing." << endl;
+    exit (1);
+  }
+  outStream << "feature"
+	    << " variant"
+	    << " coord"
+	    << " nb.subgroups"
+	    << " nb.samples"
+	    << " abf.avg"
+	    << " abf.fix"
+	    << " abf.maxh";
+  for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+  {
+    outStream << " betahat.s" << subgroup+1
+	      << " sebetahat.s" << subgroup+1
+	      << " sigmahat.s" << subgroup+1;
+  }
+  outStream << endl;
+  
+  vector< vector<double> > grid = loadGrid (gridFile, verbose);
+  
+  // for each pair feature-SNP
+  for (it_mP2P = mPairs2Positions.begin();
+       it_mP2P != mPairs2Positions.end();
+       ++it_mP2P)
+  {
+    ++nbPairs;
+    if (verbose > 0)
+      printCounter (nbPairs, vCounters);
+    pairId = it_mP2P->first;
+    vPositions = it_mP2P->second;
+    
+    // retrieve its summary statistics
+    getSummaryStatsForPair (pairId, vPositions, vPtInStreams, allSumStats,
+			    &nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
+    ++vNbSubgroups2Occurrences[nbSubgroupsUsed];
+    if (verbose > 1)
+      cout << "#" << nbPairs << " " << pairId
+	   << " " << nbSubgroupsUsed << " subgroups" << endl;
+    
+    // compute the Bayes Factors for the 3 models over the grid
+    computeAbfsForPairOverGrid (grid, allSumStats, &abf_meta, &abf_fix, &abf_maxh,
+				&nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
+    
+    // write the results
+    split (pairId, '|', tokens);
+    outStream << tokens[0]
+	      << " " << "--"
+	      << " " << tokens[1]
+	      << " " << nbSubgroupsUsed
+	      << " " << nbSamplesUsed
+	      << " " << abf_meta
+	      << " " << abf_fix
+	      << " " << abf_maxh;
+    for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+    {
+      outStream << " " << allSumStats[subgroup][1]  // betahat
+		<< " " << allSumStats[subgroup][2]  // sebetahat
+		<< " " << allSumStats[subgroup][3]; // sigmahat
+    }
+    outStream << endl;
+  }
+  
+  // close all files
+  outStream.close();
+  for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+  {
+    vPtInStreams[subgroup]->close();
+    delete vPtInStreams[subgroup];
+  }
+  vPtInStreams.clear();
+  if (verbose > 0)
+  {
+    cout << "results written in " << outFile << endl;
+    int sumPerc = 0;
+    int perc = 0;
+    for(i = 0; i < vNbSubgroups2Occurrences.size()-1; ++i)
+    {
+      perc = (int) round (100 * vNbSubgroups2Occurrences[i] / mPairs2Positions.size());
+      sumPerc += perc;
+      cout << "nb of pairs gene-SNP with " << i
+	   << " subgroup" << ((i < 2) ? "" : "s")
+	   << ": " << vNbSubgroups2Occurrences[i]
+	   << " (" << perc << "%)" << endl;
+    }
+    i = vNbSubgroups2Occurrences.size() - 1;
+    cout << "nb of pairs gene-SNP with " << i
+	 << " subgroups: " << vNbSubgroups2Occurrences[i]
+	 << " (" << (int) 100 - sumPerc
+	 << "%)" << endl;
+  }
+}
+
 int main (int argc, char ** argv)
 {
   string inDir, gridFile, outFile, ftrsFile, snpsFile;
@@ -872,7 +1131,8 @@ int main (int argc, char ** argv)
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
   
-  map<Pair, vector<size_t> > mPairs2Positions;
+//  map<Pair, vector<size_t> > mPairs2Positions;
+  map<string, vector<size_t> > mPairs2Positions;
   indexInputFiles (vInFiles,
 		   vFtrsToKeep,
 		   vSnpsToKeep,
