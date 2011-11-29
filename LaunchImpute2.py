@@ -2,8 +2,8 @@
 
 # Author: Tim Flutre
 # License: GPL-3
-# Aim: launch IMPUTE2 on a whole-chromosome
-# (split into chunks, and concatenate the results)
+# Aim: launch IMPUTE2 on a whole-chromosome (split into chunks, and concatenate the results)
+# help2man -o LaunchImpute2.man ./LaunchImpute2.py
 
 
 import sys
@@ -23,7 +23,7 @@ class LaunchImpute2(object):
         self.gmapDir = ""
         self.studyDir = ""
         self.fixStrand = False
-        self.Ne = 14000
+        self.Ne = 20000
         self.chunkLength = 5000000  # 5Mb
         self.force = False
         self.gzipOut = False
@@ -34,57 +34,76 @@ class LaunchImpute2(object):
         self.templateGmapFile = ""
         
         
-    def usage( self ):
-        msg = "usage: %s.py <options>" % self.__class__.__name__
-        msg += "\noptions:"
-        msg += "\n     -h: this help"
-        msg += "\n     -r: path to the directory with the reference data"
-        msg += "\n         e.g. '~/data/hapmap3_r2_plus_1000g_jun2010_b36_ceu/'"
-        msg += "\n         or '~/data/1000Genomes.Dec2010.haplotypes_b37/'"
-        msg += "\n         or '~/data/ALL_1000G_phase1interim_jun2011_impute/'"
-        msg += "\n     --rfsp: reference file stem pattern (in the dir given by '-r')"
-        msg += "\n         e.g. 'AFR.CHR.impute.hap'"
-        msg += "\n         or 'pilot1.jun2010.b36.CEU.CHR.snpfilt.haps'"
-        msg += "\n         or 'ALL_1000G_phase1interim_jun2011_CHR_impute.hap.gz'"
-        msg += "\n         or '<rfsp1>,<rfsp2>'"
-        msg += "\n         the '.legend' files should also be there"
-        msg += "\n     -g: path to the directory with the genetic maps"
-        msg += "\n         e.g. 'genetic_maps_b37/'"
-        msg += "\n         default is directory given by '-r'"
-        msg += "\n     -s: path to the directory with the study data"
-        msg += "\n         default is current directory"
-        msg += "\n         should contain files named 'chr1.study.gens', ..."
-        msg += "\n     --fix-strand: strand argument for IMPUTE2"
-        msg += "\n         '-fix_strand_g', otherwise assume files exist"
-        msg += "\n         e.g. '-strand_g chr1.study.strand' and so on"
-        msg += "\n     --Ne: effective population size (default=14000)"
-        msg += "\n     -l: chunk length (default=5000000)"
-        msg += "\n     -c: chromosome (e.g. '12', all autosomes by default)"
-        msg += "\n     --force: force to recompute each chunk"
-        msg += "\n     --oz: write output as gzipped files"
-        msg += "\n     --clean: clean (remove chunk files from IMPUTE2)"
-        msg += "\n     -v: verbosity level (0/default=1/2/...)"
-        msg += "\n     --debug: for debugging purposes"
-        msg += "\n         run only the two first chunks of each chr"
-        msg += "\nnote:"
-        msg += "\n* here is a command-line example to launch in parallel:"
-        msg += "\nfor chrNb in {1..22}; do echo \"LaunchImpute2.py -r 1000Genomes.Dec2010.haplotypes_b37/ --rfsp EUR.CHR.impute.hap -g genetic_maps_b37/ -s CEU_b37_impute2/ --force -c ${chrNb} -v 1\" | qsub -cwd -j y -V -l h_vmem=2g -N \"job_chr\"$chrNb; done"
+    def help(self):
+        msg = "`%s' launches IMPUTE v2 on a whole-chromosome\n" % os.path.basename(sys.argv[0])
+        msg += "by splitting the data into chunks, and concatenating the results.\n"
+        msg += "\n"
+        msg += "Usage: %s [OPTIONS] ...\n" % os.path.basename(sys.argv[0])
+        msg += "\n"
+        msg += "Options:\n"
+        msg += " -h, --help\tdisplay the help and exit\n"
+        msg += " -V, --version\toutput version information and exit\n"
+        msg += " -v, --verbose\tverbosity level (default=1)\n"
+        msg += " -r\t\tpath to the directory with the reference data\n"
+        msg += "\t\te.g. '~/data/hapmap3_r2_plus_1000g_jun2010_b36_ceu/'\n"
+        msg += "\t\tor '~/data/1000Genomes.Dec2010.haplotypes_b37/'\n"
+        msg += "\t\tor '~/data/ALL_1000G_phase1interim_jun2011_impute/'\n"
+        msg += " --rfsp\t\treference file stem pattern (in the dir given by '-r')\n"
+        msg += "\t\te.g. 'AFR.CHR.impute.hap'\n"
+        msg += "\t\tor 'pilot1.jun2010.b36.CEU.CHR.snpfilt.haps'\n"
+        msg += "\t\tor 'ALL_1000G_phase1interim_jun2011_CHR_impute.hap.gz'\n"
+        msg += "\t\tor '<rfsp1>,<rfsp2>'\n"
+        msg += "\t\tthe '.legend' files should also be there\n"
+        msg += " -g\t\tpath to the directory with the genetic maps\n"
+        msg += "\t\te.g. 'genetic_maps_b37/'\n"
+        msg += "\t\tdefault is directory given by '-r'\n"
+        msg += " -s\t\tpath to the directory with the study data\n"
+        msg += "\t\tdefault is current directory\n"
+        msg += "\t\tshould contain files named 'chr1.study.gens', ...\n"
+        msg += " --fix-strand\tstrand argument for IMPUTE2\n"
+        msg += "\t\t'-fix_strand_g', otherwise assume files exist\n"
+        msg += "\t\te.g. '-strand_g chr1.study.strand' and so on\n"
+        msg += " --Ne\t\teffective population size (default=%i)\n" % self.Ne
+        msg += " -l\t\tchunk length (default=%i)\n" % self.chunkLength
+        msg += " -c\t\tchromosome (e.g. '12', all autosomes by default)\n"
+        msg += " --force\tforce to recompute each chunk\n"
+        msg += " --oz\t\twrite output as gzipped files\n"
+        msg += " --clean\tclean (remove intermediary chunk files)\n"
+        msg += " --debug\tfor debugging purposes\n"
+        msg += "\t\trun only the two first chunks of each chr\n"
+        msg += "Examples:\n"
+        msg += "for chrNb in {1..22}; do echo \"LaunchImpute2.py -r 1000Genomes.Dec2010.haplotypes_b37/ --rfsp EUR.CHR.impute.hap -g genetic_maps_b37/ -s CEU_b37_impute2/ --force -c ${chrNb} -v 1\" | qsub -cwd -j y -V -l h_vmem=10g -N \"job_chr\"$chrNb; done\n"
+        print msg; sys.stdout.flush()
+        
+        
+    def version(self):
+        msg = "%s 0.1\n" % os.path.basename(sys.argv[0])
+        msg += "\n"
+        msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
+        msg += "This is free software; see the source for copying conditions.  There is NO\n"
+        msg += "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
         print msg; sys.stdout.flush()
         
         
     def setAttributesFromCmdLine(self):
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hr:g:s:l:c:v:",
-                                        ["rfsp=", "fix-strand", "Ne=", 
+            opts, args = getopt.getopt( sys.argv[1:], "hVv:r:g:s:l:c:",
+                                        ["help", "version", "verbose=", 
+                                         "rfsp=", "fix-strand", "Ne=", 
                                          "force", "oz", "clean", "debug"] )
         except getopt.GetoptError, err:
             sys.stderr.write("%s\n" % str(err))
-            self.usage()
+            self.help()
             sys.exit(2)
         for o, a in opts:
-            if o == "-h":
-                self.usage()
+            if o in ("-h", "--help"):
+                self.help()
                 sys.exit(0)
+            elif o in ("-V", "--version"):
+                self.version()
+                sys.exit(0)
+            elif o in ("-v", "--verbose"):
+                self.verbose = int(a)
             elif o == "-r":
                 self.refDir = a
             elif o == "--rfsp":
@@ -107,8 +126,6 @@ class LaunchImpute2(object):
                 self.gzipOut = True
             elif o == "--clean":
                 self.clean = True
-            elif o == "-v":
-                self.verbose = int(a)
             elif o == "--debug":
                 self.debug = True
             else:
@@ -119,7 +136,7 @@ class LaunchImpute2(object):
         if self.refDir == "":
             msg = "ERROR: missing reference directory"
             sys.stderr.write("%s\n" % msg)
-            self.usage()
+            self.help()
             sys.exit(1)
         if self.studyDir == "":
             self.studyDir = os.getcwd()
