@@ -18,6 +18,7 @@
  */
 
 #include <ctime>
+#include <cmath>
 
 #include <vector>
 #include <string>
@@ -216,4 +217,12 @@ void replaceAll (string & str, const string & from, const string & to)
     str.replace(start_pos, from.length(), to);
     start_pos += to.length();  // in case 'to' contains 'from', eg. replacing 'x' with 'yx'
   }
+}
+
+/** \brief Round the given value.
+ *  \note http://stackoverflow.com/a/485549/597069
+ */
+double round (double x)
+{
+  return (x > 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
 }
