@@ -2,9 +2,10 @@
 
 # Author: Tim Flutre
 # License: GPL-3
-# Aim: launch IMPUTE v2 on a whole-chromosome (split into chunks, 
+# Aim: launch IMPUTE v2.1.2 on a whole-chromosome (split into chunks, 
 # and concatenate the results)
-# help2man -o LaunchImpute2.man ./LaunchImpute2.py
+# help2man -o LaunchImpute.man ./LaunchImpute.py
+# groff -mandoc LaunchImpute.man > LaunchImpute.ps
 
 
 import sys
@@ -54,7 +55,7 @@ class LaunchImpute(object):
         
         
     def help(self):
-        msg = "`%s' launches IMPUTE v2 on a whole-chromosome\n" % os.path.basename(sys.argv[0])
+        msg = "`%s' launches IMPUTE v2.1.2 on a whole-chromosome\n" % os.path.basename(sys.argv[0])
         msg += "by splitting the data into chunks, and concatenating the results.\n"
         msg += "\n"
         msg += "Usage: %s [OPTIONS] ...\n" % os.path.basename(sys.argv[0])
@@ -79,7 +80,7 @@ class LaunchImpute(object):
         msg += " -s\t\tpath to the directory with the study data\n"
         msg += "\t\tdefault is current directory\n"
         msg += "\t\tshould contain files named 'chr1.study.gens', ...\n"
-        msg += " --fix-strand\tstrand argument for IMPUTE v2\n"
+        msg += " --fix-strand\tstrand argument for IMPUTE v2.1.2\n"
         msg += "\t\t'-fix_strand_g', otherwise assume files exist\n"
         msg += "\t\te.g. '-strand_g chr1.study.strand' and so on\n"
         msg += " --Ne\t\teffective population size (default=%i)\n" % self.Ne
@@ -242,7 +243,7 @@ class LaunchImpute(object):
     
     def launchChunkImputation(self, chrName, chunkId, startCoord, endCoord):
         """
-        Launch IMPUTE v2 on a given chunk.
+        Launch IMPUTE v2.1.2 on a given chunk.
         """
         outF = "%s.chunk%i" % (chrName, chunkId)
         outF += ("_%i_%i.impute2" % (startCoord, endCoord)).replace("+","")
@@ -286,7 +287,7 @@ class LaunchImpute(object):
             
         exitStatus = os.system( cmd )
         if exitStatus != 0:
-            msg = "ERROR: IMPUTE v2 returned %i" % exitStatus
+            msg = "ERROR: IMPUTE v2.1.2 returned %i" % exitStatus
             sys.stderr.write("%s\n" % msg)
             sys.exit(1)
         if os.path.exists( tmpF ):
@@ -308,7 +309,7 @@ class LaunchImpute(object):
     def launchChrImputation(self, chrName):
         """
         For a given chromosome, define chunk ranges and 
-        launch IMPUTE v2 on each of them.
+        launch IMPUTE v2.1.2 on each of them.
         """
         lOutChunkFiles = []
         lCoordRanges = self.getListCoordRangesForEachChunk(chrName, self.chunkLength)
