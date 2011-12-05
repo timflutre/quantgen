@@ -2,7 +2,8 @@
 
 # Author: Tim Flutre
 # License: GPL-3
-# Aim: launch IMPUTE2 on a whole-chromosome (split into chunks, and concatenate the results)
+# Aim: launch IMPUTE v2 on a whole-chromosome (split into chunks, 
+# and concatenate the results)
 # help2man -o LaunchImpute2.man ./LaunchImpute2.py
 
 
@@ -15,7 +16,25 @@ import math
 import glob
 
 
-class LaunchImpute2(object):
+# http://stackoverflow.com/a/377028/597069
+def which(program):
+    import os
+    def is_exe(fpath):
+        return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+    
+    fpath, fname = os.path.split(program)
+    if fpath:
+        if is_exe(program):
+            return program
+    else:
+        for path in os.environ["PATH"].split(os.pathsep):
+            exe_file = os.path.join(path, program)
+            if is_exe(exe_file):
+                return exe_file
+    return None
+
+
+class LaunchImpute(object):
     
     def __init__(self):
         self.refDir = ""
@@ -60,7 +79,7 @@ class LaunchImpute2(object):
         msg += " -s\t\tpath to the directory with the study data\n"
         msg += "\t\tdefault is current directory\n"
         msg += "\t\tshould contain files named 'chr1.study.gens', ...\n"
-        msg += " --fix-strand\tstrand argument for IMPUTE2\n"
+        msg += " --fix-strand\tstrand argument for IMPUTE v2\n"
         msg += "\t\t'-fix_strand_g', otherwise assume files exist\n"
         msg += "\t\te.g. '-strand_g chr1.study.strand' and so on\n"
         msg += " --Ne\t\teffective population size (default=%i)\n" % self.Ne
@@ -72,7 +91,7 @@ class LaunchImpute2(object):
         msg += " --debug\tfor debugging purposes\n"
         msg += "\t\trun only the two first chunks of each chr\n"
         msg += "Examples:\n"
-        msg += "for chrNb in {1..22}; do echo \"LaunchImpute2.py -r 1000Genomes.Dec2010.haplotypes_b37/ --rfsp EUR.CHR.impute.hap -g genetic_maps_b37/ -s CEU_b37_impute2/ --force -c ${chrNb} -v 1\" | qsub -cwd -j y -V -l h_vmem=10g -N \"job_chr\"$chrNb; done\n"
+        msg += "for chrNb in {1..22}; do echo \"LaunchImpute.py -r 1000Genomes.Dec2010.haplotypes_b37/ --rfsp EUR.CHR.impute.hap -g genetic_maps_b37/ -s CEU_b37_impute2/ --force -c ${chrNb} -v 1\" | qsub -cwd -j y -V -l h_vmem=10g -N \"job_chr\"$chrNb; done\n"
         print msg; sys.stdout.flush()
         
         
@@ -133,6 +152,11 @@ class LaunchImpute2(object):
                 
                 
     def checkAttributes(self):
+        if not which("impute2"):
+            msg = "ERROR: 'impute2' is not in your PATH"
+            sys.stderr.write("%s\n" % msg)
+            self.help()
+            sys.exit(1)
         if self.refDir == "":
             msg = "ERROR: missing reference directory"
             sys.stderr.write("%s\n" % msg)
@@ -218,7 +242,7 @@ class LaunchImpute2(object):
     
     def launchChunkImputation(self, chrName, chunkId, startCoord, endCoord):
         """
-        Launch IMPUTE2 on a given chunk.
+        Launch IMPUTE v2 on a given chunk.
         """
         outF = "%s.chunk%i" % (chrName, chunkId)
         outF += ("_%i_%i.impute2" % (startCoord, endCoord)).replace("+","")
@@ -262,7 +286,7 @@ class LaunchImpute2(object):
             
         exitStatus = os.system( cmd )
         if exitStatus != 0:
-            msg = "ERROR: IMPUTE2 returned %i" % exitStatus
+            msg = "ERROR: IMPUTE v2 returned %i" % exitStatus
             sys.stderr.write("%s\n" % msg)
             sys.exit(1)
         if os.path.exists( tmpF ):
@@ -284,7 +308,7 @@ class LaunchImpute2(object):
     def launchChrImputation(self, chrName):
         """
         For a given chromosome, define chunk ranges and 
-        launch IMPUTE2 on each of them.
+        launch IMPUTE v2 on each of them.
         """
         lOutChunkFiles = []
         lCoordRanges = self.getListCoordRangesForEachChunk(chrName, self.chunkLength)
@@ -369,6 +393,6 @@ class LaunchImpute2(object):
             
             
 if __name__ == "__main__":
-    i = LaunchImpute2()
+    i = LaunchImpute()
     i.setAttributesFromCmdLine()
     i.run()
