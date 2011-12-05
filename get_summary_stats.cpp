@@ -42,7 +42,6 @@ using namespace std;
 #include "utils.cpp"
 
 //-----------------------------------------------------------------------------
-// OOP-like definitions of two structures and their associated functions
 
 struct SnpStats
 {
@@ -87,67 +86,6 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
 }
 
 //-----------------------------------------------------------------------------
-// list of all functions
-
-void help (char ** argv);
-void version (char ** argv);
-void parse_args (int argc, char ** argv,
-		 string * pt_linksFile,
-		 string * pt_genoFile,
-		 string * pt_phenoFile,
-		 string * pt_outFile,
-		 bool * pt_shouldOutputFileBeGzipped,
-		 string * pt_ftrsFile,
-		 string * pt_snpsFile,
-		 int * pt_verbose);
-map<string, vector<string> >
-loadLinksFtr2Snps (const string linksFile,
-		   vector<string> vFtrsToKeep,
-		   vector<string> vSnpsToKeep,
-		   int verbose);
-map<string, long int>
-indexFtrs (const string phenoFile,
-	   const map<string, vector<string> > ftrName2CisSnpNameCoords,
-	   int verbose);
-map<string, long int>
-indexSnps (const string genoFile,
-	   vector<string> vSnpsToKeep,
-	   int verbose);
-void getPhenoValues (istream & phenoStream,
-		     long int ftrPos,
-		     double ** y,
-		     size_t * n_y,
-		     int ** idx);
-void getGenoValues (istream & genoStream,
-		    long int snpPos,
-		    double ** g,
-		    size_t * n_g,
-		    const int * idx);
-void ols (const size_t n, const double * g, const double * y,
-	  double * betahat, double * sebetahat, double * sigmahat,
-	  double * log10_pval, int verbose);
-void
-computeSummaryStatsForOneFeature (
-  const map<string, vector<string> >::iterator ftrName2CisSnpNameCoords_it,
-  map<string, long int> snpNameCoord2Pos,
-  ifstream & genoStream,
-  const double * y,
-  const size_t n_y,
-  const int * idx,
-  FtrStats * pt_iFtrStats,
-  const int verbose);
-void computeAndWriteSummaryStatsFtrPerFtr (
-  map<string, vector<string> > ftrName2CisSnpNameCoords,
-  map<string, long int> ftrName2Pos,
-  map<string, long int> snpNameCoord2Pos,
-  string phenoFile,
-  string genoFile,
-  string outFile,
-  int verbose);
-int main (int argc, char ** argv);
-
-//-----------------------------------------------------------------------------
-// functions
 
 /** \brief Display the usage on stdout.
 */
@@ -159,6 +97,7 @@ void help (char ** argv)
        << " statistics betahat," << endl
        << "se(betahat) and sigmahat, as well as the P-value"
        << " for H0:\"beta=0\"." << endl
+       << "Samples with missing phenotypes (NA) are skipped." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -271,25 +210,43 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_linksFile).empty())
   {
-    fprintf (stderr, "ERROR: missing file with links feature-SNPs.\n");
+    fprintf (stderr, "ERROR: missing file with links feature-SNPs.\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (*pt_linksFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", pt_linksFile->c_str());
     help (argv);
     exit (1);
   }
   if ((*pt_genoFile).empty())
   {
-    fprintf (stderr, "ERROR: missing file with genotypes.\n");
+    fprintf (stderr, "ERROR: missing file with genotypes.\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (*pt_genoFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", pt_genoFile->c_str());
     help (argv);
     exit (1);
   }
   if ((*pt_phenoFile).empty())
   {
-    fprintf (stderr, "ERROR: missing file with phenotypes.\n");
+    fprintf (stderr, "ERROR: missing file with phenotypes.\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (*pt_phenoFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", pt_phenoFile->c_str());
     help (argv);
     exit (1);
   }
   if ((*pt_outFile).empty())
   {
-    fprintf (stderr, "ERROR: missing output file.\n");
+    fprintf (stderr, "ERROR: missing output file.\n\n");
     help (argv);
     exit (1);
   }
@@ -536,12 +493,14 @@ void getPhenoValues (istream & phenoStream,
 
 /** \brief Retrieve phenotype values for a given feature
  *  and skip missing values encoded as NA.
+ *  \note idx[i] == 0 if sample i has no phenotype
  */
 void getPhenoValues (istream & phenoStream,
 		     long int ftrPos,
 		     double ** y,
 		     size_t * n_y,
-		     int ** idx)
+		     int ** idx,
+		     int verbose)
 {
   size_t i = 0, j = 0;
   string line, tok;
@@ -569,6 +528,11 @@ void getPhenoValues (istream & phenoStream,
       ++j;
     }
   }
+#ifdef DEBUG
+  if (verbose > 0)
+    cout << *n_y << " phenotypes, " << j << " non-missing: "
+	 << (*y)[0] << " " << (*y)[1] << " ..." << endl;
+#endif
   if (j != *n_y)
   {
     *y = (double *) realloc (*y, j);
@@ -604,13 +568,16 @@ void getGenoValues (istream & genoStream,
 
 /** \brief Retrieve genotype values for a given SNP
  *  and skip samples having a missing phenotype.
+ *  \note idx[i] == 0 if sample i has no phenotype
  */
 void getGenoValues (istream & genoStream,
 		    long int snpPos,
 		    double ** g,
 		    size_t * n_g,
-		    const int * idx)
+		    const int * idx,
+		    int verbose)
 {
+  size_t i = 0, j = 0;
   string line;
   vector<string> tokens;
   genoStream.seekg(snpPos);
@@ -621,14 +588,25 @@ void getGenoValues (istream & genoStream,
     split (line, ' ', tokens);
   *n_g = (tokens.size() - 5) / 3;
   *g = (double *) malloc (*n_g * sizeof(double *));
-  for (size_t i = 0; i < *n_g; i++)
+  for (i = 0; i < *n_g; ++i)
   {
     if (idx[i] == 1)
     {
-      (*g)[i] = 0 * atof(tokens[5+3*i].c_str())
+      (*g)[j] = 0 * atof(tokens[5+3*i].c_str())
 	+ 1 * atof(tokens[5+3*i+1].c_str())
 	+ 2 * atof(tokens[5+3*i+2].c_str());
+      ++j;
     }
+  }
+#ifdef DEBUG
+  if (verbose > 0)
+    cout << *n_g << " genotypes, " << j << " with non-missing phenotypes: "
+	 << (*g)[0] << " " << (*g)[1] << " ..." << endl;
+#endif
+  if (j != *n_g)
+  {
+    *g = (double *) realloc (*g, j);
+    *n_g = j;
   }
 }
 
@@ -721,7 +699,7 @@ computeSummaryStatsForOneFeature (
     size_t snpPos = snpNameCoord2Pos[snpNameCoord];
     double * g;
     size_t n_g;
-    getGenoValues (genoStream, snpPos, &g, &n_g, idx);
+    getGenoValues (genoStream, snpPos, &g, &n_g, idx, verbose);
     if (n_y != n_g)
     {
       cerr << "ERROR: different number of samples for feature "
@@ -729,8 +707,6 @@ computeSummaryStatsForOneFeature (
 	   << snpNameCoord << " (" << n_g << ")" << endl;
       exit (1);
     }
-    if (verbose > 0)
-      cout << n_g << " values: " << g[0] << " " << g[1] << " ..." << endl;
     
     mSnpNameCoord2Genotypes.insert( make_pair(snpNameCoord, g) );
   }
@@ -827,9 +803,7 @@ void computeAndGzWriteSummaryStatsFtrPerFtr (
     
     // retrieve its values
     ftrPos = ftrName2Pos[ftrName];
-    getPhenoValues (phenoStream, ftrPos, &y, &n_y, &idx);
-    if (verbose > 1)
-      cout << n_y << " values: " << y[0] << " " << y[1] << " ..." << endl;
+    getPhenoValues (phenoStream, ftrPos, &y, &n_y, &idx, verbose);
     
     // loop over SNPs in cis
     computeSummaryStatsForOneFeature (ftrName2CisSnpNameCoords_it,
@@ -917,9 +891,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     
     // retrieve its values
     ftrPos = ftrName2Pos[ftrName];
-    getPhenoValues (phenoStream, ftrPos, &y, &n_y, &idx);
-    if (verbose > 1)
-      cout << n_y << " values: " << y[0] << " " << y[1] << " ..." << endl;
+    getPhenoValues (phenoStream, ftrPos, &y, &n_y, &idx, verbose-1);
     
     // loop over SNPs in cis
     computeSummaryStatsForOneFeature (ftrName2CisSnpNameCoords_it,
