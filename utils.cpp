@@ -19,6 +19,7 @@
 
 #include <ctime>
 #include <cmath>
+#include <sys/stat.h>
 
 #include <vector>
 #include <string>
@@ -225,4 +226,14 @@ void replaceAll (string & str, const string & from, const string & to)
 double round (double x)
 {
   return (x > 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
+}
+
+/** Return true if file exists.
+ */
+bool doesFileExist (const string filename)
+{
+  bool fexists = false;
+  struct stat buffer;
+  fexists = ( stat(filename.c_str(), &buffer) == 0);
+  return fexists;
 }
