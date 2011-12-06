@@ -87,7 +87,7 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
 
 //-----------------------------------------------------------------------------
 
-/** \brief Display the usage on stdout.
+/** \brief Display the help on stdout.
 */
 void help (char ** argv)
 {
@@ -115,11 +115,14 @@ void help (char ** argv)
        << "\t\t(one feature name per line)" << endl
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
        << "\t\t(one SNP coordinate per line)" << endl
+       << "  -m, --maf\tthreshold for the minor allele frequency (default=0.01)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl;
 }
 
+/** \brief Display version and license information on stdout.
+ */
 void version (char ** argv)
 {
   cout << argv[0] << " 0.1" << endl
@@ -143,6 +146,7 @@ void parse_args (int argc, char ** argv,
 		 bool * pt_shouldOutputFileBeGzipped,
 		 string * pt_ftrsFile,
 		 string * pt_snpsFile,
+		 double * pt_minMaf,
 		 int * pt_verbose)
 {
   int c = 0;
@@ -158,10 +162,11 @@ void parse_args (int argc, char ** argv,
 	{"pheno", required_argument, 0, 'p'},
 	{"output", required_argument, 0, 'o'},
 	{"ftr", required_argument, 0, 'f'},
-	{"snp", required_argument, 0, 's'}
+	{"snp", required_argument, 0, 's'},
+	{"maf", required_argument, 0, 'm'}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:",
+    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:m:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -202,6 +207,9 @@ void parse_args (int argc, char ** argv,
     case 's':
       *pt_snpsFile = optarg;
       break;
+    case 'm':
+      *pt_minMaf = atof(optarg);
+      break;
     case '?':
       break;
     default:
@@ -210,7 +218,7 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_linksFile).empty())
   {
-    fprintf (stderr, "ERROR: missing file with links feature-SNPs.\n\n");
+    fprintf (stderr, "ERROR: missing file with links feature-SNPs (-l).\n\n");
     help (argv);
     exit (1);
   }
@@ -222,7 +230,7 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_genoFile).empty())
   {
-    fprintf (stderr, "ERROR: missing file with genotypes.\n\n");
+    fprintf (stderr, "ERROR: missing file with genotypes (-g).\n\n");
     help (argv);
     exit (1);
   }
@@ -234,7 +242,7 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_phenoFile).empty())
   {
-    fprintf (stderr, "ERROR: missing file with phenotypes.\n\n");
+    fprintf (stderr, "ERROR: missing file with phenotypes (-p).\n\n");
     help (argv);
     exit (1);
   }
@@ -246,7 +254,7 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_outFile).empty())
   {
-    fprintf (stderr, "ERROR: missing output file.\n\n");
+    fprintf (stderr, "ERROR: missing output file (-o).\n\n");
     help (argv);
     exit (1);
   }
@@ -257,6 +265,12 @@ void parse_args (int argc, char ** argv,
   else
   {
     *pt_shouldOutputFileBeGzipped = false;
+  }
+  if (*pt_minMaf < 0 || *pt_minMaf > 1)
+  {
+    fprintf (stderr, "ERROR: min MAF should be between 0 and 1 (-m).\n\n");
+    help (argv);
+    exit (1);
   }
 }
 
@@ -410,11 +424,28 @@ indexFtrs (const string phenoFile,
   return ftrName2Pos;
 }
 
+/** \brief Return the minor allele frequency.
+ *  \note The input comes from a line in the IMPUTE format that was splitted.
+ */
+double getMaf (vector<string> tokens)
+{
+  double maf = 0;
+  size_t n = (int) (tokens.size() - 5) / 3;
+  for (size_t i = 0; i < n; ++i)
+  {
+    maf += 1 * atof(tokens[5+3*i+1].c_str())
+      + 2 * atof(tokens[5+3*i+2].c_str());
+  }
+  maf /= 2 * n;
+  return maf <= 0.5 ? maf : (1 - maf);
+}
+
 /** \brief Index the file with the genotype values (IMPUTE2 format).
  */
 map<string, long int>
 indexSnps (const string genoFile,
 	   vector<string> vSnpsToKeep,
+	   const double minMaf,
 	   int verbose)
 {
   map<string, long int> snpNameCoord2Pos;
@@ -422,6 +453,7 @@ indexSnps (const string genoFile,
   string line;
   vector<string> tokens;
   long int snpPos;
+  double maf;
   
   genoStream.open(genoFile.c_str());
   if (! genoStream.is_open())
@@ -452,6 +484,19 @@ indexSnps (const string genoFile,
     {
       continue;
     }
+    maf = getMaf (tokens);
+#ifdef DEBUG
+    if (verbose > 1)
+      cout << "SNP " << tokens[1] << "|" << tokens[2] << ": MAF=" << maf << endl;
+#endif
+    if (maf < minMaf)
+    {
+#ifdef DEBUG
+      if (verbose > 1)
+	cout << "SNP " << tokens[1] << "|" << tokens[2] << ": skip because MAF < " << minMaf << endl;
+#endif
+      continue;
+    }
     stringstream ss;
     ss << tokens[1] << "|" << tokens[2];  // SNP_name|SNP_coord
     snpNameCoord2Pos.insert( make_pair(ss.str(), snpPos) );
@@ -465,30 +510,6 @@ indexSnps (const string genoFile,
   }
   
   return snpNameCoord2Pos;
-}
-
-/** \brief Retrieve phenotype values for a given feature
- *  but assume no missing values.
- */
-void getPhenoValues (istream & phenoStream,
-		     long int ftrPos,
-		     double ** y,
-		     size_t * n_y)
-{
-  string line;
-  vector<string> tokens;
-  phenoStream.seekg(ftrPos);
-  getline (phenoStream, line);
-  if (line.find('\t') != string::npos)
-    split (line, '\t', tokens);
-  else
-    split (line, ' ', tokens);
-  *n_y = tokens.size() - 1;
-  *y = (double *) malloc (*n_y * sizeof(double *));
-  for (size_t i = 0; i < *n_y; i++)
-  {
-    (*y)[i] = atof(tokens[i+1].c_str());
-  }
 }
 
 /** \brief Retrieve phenotype values for a given feature
@@ -537,32 +558,6 @@ void getPhenoValues (istream & phenoStream,
   {
     *y = (double *) realloc (*y, j);
     *n_y = j;
-  }
-}
-
-/** \brief Retrieve genotype values for a given SNP
- *  and assume no sample has missing phenotype.
- */
-void getGenoValues (istream & genoStream,
-		    long int snpPos,
-		    double ** g,
-		    size_t * n_g)
-{
-  string line;
-  vector<string> tokens;
-  genoStream.seekg(snpPos);
-  getline (genoStream, line);
-  if (line.find('\t') != string::npos)
-    split (line, '\t', tokens);
-  else
-    split (line, ' ', tokens);
-  *n_g = (tokens.size() - 5) / 3;
-  *g = (double *) malloc (*n_g * sizeof(double *));
-  for (size_t i = 0; i < *n_g; i++)
-  {
-    (*g)[i] = 0 * atof(tokens[5+3*i].c_str())
-      + 1 * atof(tokens[5+3*i+1].c_str())
-      + 2 * atof(tokens[5+3*i+2].c_str());
   }
 }
 
@@ -921,9 +916,11 @@ int main (int argc, char ** argv)
 {
   string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile;
   bool shouldOutputFileBeGzipped;
+  double minMaf = 0.01;
   int verbose = 1;
   parse_args (argc, argv, &linksFile, &genoFile, &phenoFile, &outFile,
-	      &shouldOutputFileBeGzipped, &ftrsFile, &snpsFile, &verbose);
+	      &shouldOutputFileBeGzipped, &ftrsFile, &snpsFile, &minMaf,
+	      &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -941,7 +938,7 @@ int main (int argc, char ** argv)
   map<string, long int> ftrName2Pos
     = indexFtrs (phenoFile, ftrName2CisSnpNameCoords, verbose);
   map<string, long int> snpNameCoord2Pos
-    = indexSnps (genoFile, vSnpsToKeep, verbose);
+    = indexSnps (genoFile, vSnpsToKeep, minMaf, verbose);
   
   if (shouldOutputFileBeGzipped)
     computeAndGzWriteSummaryStatsFtrPerFtr (ftrName2CisSnpNameCoords,
