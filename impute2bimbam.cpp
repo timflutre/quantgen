@@ -37,19 +37,6 @@ using namespace std;
 
 //-----------------------------------------------------------------------------
 
-void help (char ** argv);
-void version (char ** argv);
-void parse_args (int argc, char ** argv,
-		 string * pt_input,
-		 string * pt_output,
-		 int * pt_verbose);
-void convertImputeFileToBimbamFile (string input,
-				    string output,
-				    int verbose);
-int main (int argc, char ** argv);
-
-//-----------------------------------------------------------------------------
-
 /** \brief Display the usage on stdout.
 */
 void help (char ** argv)
@@ -65,8 +52,8 @@ void help (char ** argv)
        << "  -v, --verbose\tverbosity level (default=1)" << endl
        << "  -i, --input\tpath to input directory and generic file name in the IMPUTE format" << endl
        << "\t\teg. '~/data/chrXX_chunkAll.impute2'" << endl
-       << "  -o, --output\tgeneric name for the output files" << endl
-       << "\t\tdefault is 'chrXX.bimbam'" << endl
+       << "  -o, --output\tgeneric prefix for the output files" << endl
+       << "\t\tdefault is 'chrXX' leading to 'chrXX.bimbam' and 'chrXX_snpAnnot.txt'" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -i ~/data/chrXX_chunkAll.impute2" << endl;
@@ -141,13 +128,13 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_input).empty())
   {
-    fprintf (stderr, "ERROR: missing input (-i).\n");
+    fprintf (stderr, "ERROR: missing input (-i).\n\n");
     help (argv);
     exit (1);
   }
   if ((*pt_output).empty())
   {
-    *pt_output = "chrXX.bimbam";
+    *pt_output = "chrXX";
   }
 }
 
@@ -158,19 +145,24 @@ void convertImputeFilesToBimbamFiles (string input,
   string line;
   ifstream inStream;
   vector<string> tokens;
-  ofstream outStream;
+  ofstream outStream1, outStream2;
   size_t nbSamples = 0;
+  stringstream ss;
   
   for (int chrNb = 1; chrNb <= 22; ++chrNb)
   {
+    string inFile = copyString (input);
+    replaceAll (inFile, "XX", toString(chrNb));
+    if (! doesFileExist (inFile))
+    {
+      continue;
+    }
     if (verbose > 0)
     {
-      cout << "convert genotypes on chr" << chrNb << "..." << endl;
+      cout << "convert genotypes from file '" << inFile << "' ..." << endl;
       fflush (stdout);
     }
     
-    string inFile = copyString (input);
-    replaceAll (inFile, "XX", toString(chrNb));
     inStream.open (inFile.c_str());
     if (! inStream.is_open())
     {
@@ -178,12 +170,26 @@ void convertImputeFilesToBimbamFiles (string input,
       exit (1);
     }
     
-    string outFile = copyString (output);
-    replaceAll (outFile, "XX", toString(chrNb));
-    outStream.open (outFile.c_str());
-    if (! outStream.is_open())
+    ss.clear();
+    ss.str(string());  // http://stackoverflow.com/a/834631/597069
+    ss << output << ".bimbam";
+    string outFile1 = ss.str();
+    replaceAll (outFile1, "XX", toString(chrNb));
+    outStream1.open (outFile1.c_str());
+    if (! outStream1.is_open())
     {
-      cerr << "ERROR: can't open file " << outFile << endl;
+      cerr << "ERROR: can't open file " << outFile1 << endl;
+      exit (1);
+    }
+    ss.clear();
+    ss.str(string());
+    ss << output << "_snpAnnot.txt";
+    string outFile2 = ss.str();
+    replaceAll (outFile2, "XX", toString(chrNb));
+    outStream2.open (outFile2.c_str());
+    if (! outStream2.is_open())
+    {
+      cerr << "ERROR: can't open file " << outFile2 << endl;
       exit (1);
     }
     
@@ -198,21 +204,26 @@ void convertImputeFilesToBimbamFiles (string input,
 	split (line, '\t', tokens);
       else
 	split (line, ' ', tokens);
-      outStream << tokens[1]          // SNP id
-		<< " " << tokens[3]   // allele A (minor allele for BimBam)
-		<< " " << tokens[4];  // allele B (major allele for BimBam)
+      outStream1 << tokens[1]          // SNP id
+		<< " " << tokens[3]    // allele A (minor allele for BimBam)
+		<< " " << tokens[4];   // allele B (major allele for BimBam)
       nbSamples = (size_t) floor ((tokens.size() - 5) / 3);
       for (size_t i = 0; i < nbSamples; ++i)
       {
-	outStream << " " << 2 * atof(tokens[5+3*i].c_str())
+	outStream1 << " " << 2 * atof(tokens[5+3*i].c_str())
 	  + 1 * atof(tokens[5+3*i+1].c_str())
 	  + 0 * atof(tokens[5+3*i+2].c_str());
       }
-      outStream << endl;
+      outStream1 << endl;
+      outStream2 << tokens[1]          // SNP id
+		 << " " << tokens[2]   // SNP coordinate
+		 << " " << chrNb
+		 << endl;
     }
     
     inStream.close();
-    outStream.close();
+    outStream1.close();
+    outStream2.close();
   }
 }
 
