@@ -81,7 +81,7 @@ public:
 
 //-----------------------------------------------------------------------------
 
-/** \brief Display the usage on stdout.
+/** \brief Display the help on stdout.
  */
 void help (char ** argv)
 {
@@ -111,6 +111,8 @@ void help (char ** argv)
        << "Wen and Stephens (2011)" << endl;
 }
 
+/** \brief Display version and license information on stdout.
+ */
 void version (char ** argv)
 {
   cout << argv[0] << " 0.1" << endl
@@ -622,23 +624,10 @@ void getSummaryStatsForPair (string pairId,
 	cerr << line << endl;
 	exit (1);
       }
-      
-      if (atof(tokens[4].c_str()) == numeric_limits<double>::infinity())
+      *pt_nbSamplesUsed += atoi (tokens[3].c_str());
+      for (colIdx = 3; colIdx < 7; ++colIdx)
       {
-	--(*pt_nbSubgroupsUsed);
-	vSumStats[0] = 0;
-	if (verbose > 0)
-	  cout << "subgroup " << subgroup+1
-	       << ": skip because betahat=Inf" << endl;
-      }
-      
-      else
-      {
-	*pt_nbSamplesUsed += atoi (tokens[3].c_str());
-	for (colIdx = 3; colIdx < 7; ++colIdx)
-	{
-	  vSumStats[colIdx-3] = atof (tokens[colIdx].c_str());
-	}
+	vSumStats[colIdx-3] = atof (tokens[colIdx].c_str());
       }
     }
     
@@ -651,15 +640,15 @@ void getSummaryStatsForPair (string pairId,
  *
  *  \note If there is no variation in the phenotypes of the given subgroup,
  *  t is practically 0, and bhat and sebhat will be 0 too. If there is no 
- *  variation in the genotype (beta=Inf), t will be NaN whereas both bhat and 
- *  sebhat will be 0.
+ *  variation in the genotype (betahat=0, sebetahat=Inf), t will be 0, whereas
+ *  bhat will be 0 and sebhat will be Inf.
  */
 vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
 {
   vector<double> stdSumStatsCorr;
   double n = 0, bhat = 0, sebhat = 0, sigmahat = 0, t = 0;
   
-  if (sumStats[0] != 0)  // n=0 -> pair is not present in the given subgroup
+  if (sumStats[0] != 0)  // if=0 -> pair is not present in the given subgroup
   {
     n = sumStats[0];
     bhat = sumStats[1] / sumStats[3];      // before correction
@@ -682,9 +671,9 @@ vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
     }
     else
     {
-      sigmahat = numeric_limits<double>::infinity();
+      sigmahat = numeric_limits<double>::quiet_NaN();
       bhat = 0;
-      sebhat = 0;
+      sebhat = numeric_limits<double>::infinity();
     }
 #ifdef DEBUG
     if (verbose > 0)
@@ -701,6 +690,8 @@ vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
 
 /** \brief Return the log10 approximate Bayes Factor given standardized 
  *  summary statistics and hyperparameters.
+ *  \note If bhat=0 and sebhat=Inf for a given subgroup, its ABF will be 1.
+ *  If this is the case for all subgroups, the overall ABF will also be 1.
  */
 double getAbfFromStdSumStats (vector< vector<double> > stdSumStats,
 			      double phi2,
@@ -743,14 +734,21 @@ double getAbfFromStdSumStats (vector< vector<double> > stdSumStats,
 #endif
   }
   
-  double bbarhat = bbarhat_num / bbarhat_denom;
-  varbbarhat = 1 / varbbarhat;
+  double bbarhat = (bbarhat_denom != 0) ?
+    bbarhat_num / bbarhat_denom
+    : 0;
+  varbbarhat = (varbbarhat != 0) ?
+    1 / varbbarhat
+    : numeric_limits<double>::infinity();
   double T2 = pow(bbarhat, 2.0) / varbbarhat;
-  double lABF_bbar = 0.5 * log10(varbbarhat) - 0.5 * log10(varbbarhat + oma2)
-    + (0.5 * T2 * oma2 / (varbbarhat + oma2)) / log(10);
+  double lABF_bbar = (T2 != 0) ?
+    0.5 * log10(varbbarhat) - 0.5 * log10(varbbarhat + oma2)
+    + (0.5 * T2 * oma2 / (varbbarhat + oma2)) / log(10)
+    : 0;
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("lABF_bbar=%e\n", lABF_bbar);
+    printf ("bbarhat=%e varbbarhat=%e T2=%e lABF_bbar=%e\n",
+	    bbarhat, varbbarhat, T2, lABF_bbar);
 #endif
   
   lABF_all = lABF_bbar;
@@ -784,21 +782,21 @@ double log10_weighted_sum (double * vec, double * weights, size_t size)
  */
 void computeAbfsForPairOverGrid (vector< vector<double> > grid, 
 				 const map<size_t, vector<double> > & allSumStats,
-				 double * pt_abf_meta,
-				 double * pt_abf_fix,
-				 double * pt_abf_maxh,
+				 double * pt_l10_abf_meta,
+				 double * pt_l10_abf_fix,
+				 double * pt_l10_abf_maxh,
 				 int * pt_nbSubgroupsUsed,
 				 int * pt_nbSamplesUsed,
 				 int verbose)
 {
   size_t subgroup = 0, gridIdx = 0;
   vector< vector<double> > allSumStatsCorr;
-  double abf_metas[grid.size()], abf_fixs[grid.size()], 
-    abf_maxhs[grid.size()], weights[grid.size()];
+  double l10_abf_metas[grid.size()], l10_abf_fixs[grid.size()], 
+    l10_abf_maxhs[grid.size()], weights[grid.size()];
   
-  *pt_abf_meta = 0;
-  *pt_abf_fix = 0;
-  *pt_abf_maxh = 0;
+  *pt_l10_abf_meta = 0;
+  *pt_l10_abf_fix = 0;
+  *pt_l10_abf_maxh = 0;
   
   // apply small sample size correction for the summary stats of each study,
   // and keep the one being defined
@@ -818,16 +816,16 @@ void computeAbfsForPairOverGrid (vector< vector<double> > grid,
   // calculate the 3 ABFs over the grid
   for (gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
   {
-    abf_metas[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
+    l10_abf_metas[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
 						grid[gridIdx][0],
 						grid[gridIdx][1],
 						verbose-1);
-    abf_fixs[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
+    l10_abf_fixs[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
 					       0,
 					       grid[gridIdx][0]
 					       + grid[gridIdx][1],
 					       verbose-1);
-    abf_maxhs[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
+    l10_abf_maxhs[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
 						grid[gridIdx][0]
 						+ grid[gridIdx][1],
 						0,
@@ -836,13 +834,13 @@ void computeAbfsForPairOverGrid (vector< vector<double> > grid,
   }
   
   // calculate the 3 weighted ABFs
-  *pt_abf_meta = log10_weighted_sum (abf_metas, weights, grid.size());
-  *pt_abf_fix = log10_weighted_sum (abf_fixs, weights, grid.size());
-  *pt_abf_maxh = log10_weighted_sum (abf_maxhs, weights, grid.size());
+  *pt_l10_abf_meta = log10_weighted_sum (l10_abf_metas, weights, grid.size());
+  *pt_l10_abf_fix = log10_weighted_sum (l10_abf_fixs, weights, grid.size());
+  *pt_l10_abf_maxh = log10_weighted_sum (l10_abf_maxhs, weights, grid.size());
   if (verbose > 0)
-    printf("subgroups=%i samples=%i abf_meta=%e abf_fix=%e abf_maxh=%e\n",
-	   *pt_nbSubgroupsUsed, *pt_nbSamplesUsed, *pt_abf_meta, *pt_abf_fix,
-	   *pt_abf_maxh);
+    printf("subgroups=%i samples=%i l10_abf_meta=%e l10_abf_fix=%e l10_abf_maxh=%e\n",
+	   *pt_nbSubgroupsUsed, *pt_nbSamplesUsed, *pt_l10_abf_meta, *pt_l10_abf_fix,
+	   *pt_l10_abf_maxh);
 }
 
 /** \brief Loop over all pairs to compute ABFs and write results.
@@ -859,7 +857,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   Pair iPair;
   vector<size_t> vPositions;
   map<size_t, vector<double> > allSumStats;  // 1 vector of doubles per subgroup
-  double abf_meta = 0, abf_fix = 0, abf_maxh = 0,
+  double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0,
     nbPairs = 0, step = floor(mPairs2Positions.size() / 5);
   int nbSamplesUsed = 0, nbSubgroupsUsed = 0;
   ogzstream outStream;
@@ -896,9 +894,9 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	    << " coord"
 	    << " nb.subgroups"
 	    << " nb.samples"
-	    << " abf.avg"
-	    << " abf.fix"
-	    << " abf.maxh";
+	    << " l10abf.avg"
+	    << " l10abf.fix"
+	    << " l10abf.maxh";
   for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
   {
     outStream << " betahat.s" << subgroup+1
@@ -931,7 +929,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	   << " " << iPair.snp << " (" << iPair.coord << "):"
 	   << " " << nbSubgroupsUsed << " subgroups" << endl;
     
-    computeAbfsForPairOverGrid (grid, allSumStats, &abf_meta, &abf_fix, &abf_maxh,
+    computeAbfsForPairOverGrid (grid, allSumStats, &l10_abf_meta, &l10_abf_fix, &l10_abf_maxh,
 				&nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
     
     outStream << iPair.feature
@@ -939,9 +937,9 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	      << " " << iPair.coord
 	      << " " << nbSubgroupsUsed
 	      << " " << nbSamplesUsed
-	      << " " << abf_meta
-	      << " " << abf_fix
-	      << " " << abf_maxh;
+	      << " " << l10_abf_meta
+	      << " " << l10_abf_fix
+	      << " " << l10_abf_maxh;
     for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
     {
       outStream << " " << allSumStats[subgroup][1]  // betahat
@@ -990,7 +988,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   vector<string> tokens;
   vector<size_t> vPositions;
   map<size_t, vector<double> > allSumStats;  // 1 vector of doubles per subgroup
-  double abf_meta = 0, abf_fix = 0, abf_maxh = 0;
+  double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0;
   int nbSamplesUsed = 0, nbSubgroupsUsed = 0;
   ogzstream outStream;
   vector<size_t> vNbSubgroups2Occurrences (vInFiles.size()+1, 0);
@@ -1027,9 +1025,9 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	    << " coord"
 	    << " nb.subgroups"
 	    << " nb.samples"
-	    << " abf.avg"
-	    << " abf.fix"
-	    << " abf.maxh";
+	    << " l10abf.avg"
+	    << " l10abf.fix"
+	    << " l10abf.maxh";
   for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
   {
     outStream << " betahat.s" << subgroup+1
@@ -1060,7 +1058,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	   << " " << nbSubgroupsUsed << " subgroups" << endl;
     
     // compute the Bayes Factors for the 3 models over the grid
-    computeAbfsForPairOverGrid (grid, allSumStats, &abf_meta, &abf_fix, &abf_maxh,
+    computeAbfsForPairOverGrid (grid, allSumStats, &l10_abf_meta, &l10_abf_fix, &l10_abf_maxh,
 				&nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
     
     // write the results
@@ -1070,9 +1068,9 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	      << " " << tokens[1]
 	      << " " << nbSubgroupsUsed
 	      << " " << nbSamplesUsed
-	      << " " << abf_meta
-	      << " " << abf_fix
-	      << " " << abf_maxh;
+	      << " " << l10_abf_meta
+	      << " " << l10_abf_fix
+	      << " " << l10_abf_maxh;
     for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
     {
       outStream << " " << allSumStats[subgroup][1]  // betahat
