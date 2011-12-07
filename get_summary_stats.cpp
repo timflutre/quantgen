@@ -50,7 +50,7 @@ struct SnpStats
   double betahat;
   double sebetahat;
   double sigmahat;
-  double log10_pval;
+  double pval;
 };
 
 struct FtrStats
@@ -80,7 +80,7 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
 	      << " " << iSnpStats.betahat
 	      << " " << iSnpStats.sebetahat
 	      << " " << iSnpStats.sigmahat
-	      << " " << iSnpStats.log10_pval
+	      << " " << iSnpStats.pval
 	      << endl;
   }
 }
@@ -115,7 +115,7 @@ void help (char ** argv)
        << "\t\t(one feature name per line)" << endl
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
        << "\t\t(one SNP coordinate per line)" << endl
-       << "  -m, --maf\tthreshold for the minor allele frequency (default=0.01)" << endl
+       << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl;
@@ -484,18 +484,21 @@ indexSnps (const string genoFile,
     {
       continue;
     }
-    maf = getMaf (tokens);
-#ifdef DEBUG
-    if (verbose > 1)
-      cout << "SNP " << tokens[1] << "|" << tokens[2] << ": MAF=" << maf << endl;
-#endif
-    if (maf < minMaf)
+    if (minMaf > 0)
     {
+      maf = getMaf (tokens);
 #ifdef DEBUG
       if (verbose > 1)
-	cout << "SNP " << tokens[1] << "|" << tokens[2] << ": skip because MAF < " << minMaf << endl;
+	cout << "SNP " << tokens[1] << "|" << tokens[2] << ": MAF=" << maf << endl;
 #endif
-      continue;
+      if (maf < minMaf)
+      {
+#ifdef DEBUG
+	if (verbose > 1)
+	  cout << "SNP " << tokens[1] << "|" << tokens[2] << ": skip because MAF < " << minMaf << endl;
+#endif
+	continue;
+      }
     }
     stringstream ss;
     ss << tokens[1] << "|" << tokens[2];  // SNP_name|SNP_coord
@@ -606,10 +609,11 @@ void getGenoValues (istream & genoStream,
 }
 
 /** \brief Compute the summary statistics of the linear regression.
+ *  \note phenotype = mu + genotype * beta + error
  */
 void ols (const size_t n, const double * g, const double * y,
 	  double * betahat, double * sebetahat, double * sigmahat,
-	  double * log10_pval, int verbose)
+	  double * pval, int verbose)
 {
   size_t i = 0;
   double ym = 0, gm = 0, yty = 0, gtg = 0, gty = 0;
@@ -622,15 +626,15 @@ void ols (const size_t n, const double * g, const double * y,
   }
   ym /= n;
   gm /= n;
-  double denom = gtg - n * gm * gm;
+  double vg = gtg - n * gm * gm;  // variance of the genotypes
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("ym=%f gm=%f yty=%f gtg=%f gty=%f denom=%f\n", ym, gm, yty, gtg,
-	    gty, denom);
+    printf ("ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n", ym, gm, yty, gtg,
+	    gty, vg);
 #endif
-  if(denom > 1e-8)
+  if(vg > 1e-8)
   {
-    *betahat = (gty - n * gm * ym) / denom;
+    *betahat = (gty - n * gm * ym) / vg;
     double inv_xtx[2][2];
     inv_xtx[0][0] = gtg;
     inv_xtx[0][1] = - n * gm;
@@ -639,7 +643,7 @@ void ols (const size_t n, const double * g, const double * y,
     double xty[2];
     xty[0] = n * ym;
     xty[1] = gty;
-    double rss1 = yty - 1/denom * (n*ym*(gtg*ym - gm*gty) - gty*(n*gm*ym - gty));
+    double rss1 = yty - 1/vg * (n*ym*(gtg*ym - gm*gty) - gty*(n*gm*ym - gty));
     if (fabs(*betahat) > 1e-8)
       *sigmahat = sqrt(rss1 / (n-2));
     else  // case where phenotypes are not variable enough
@@ -649,16 +653,16 @@ void ols (const size_t n, const double * g, const double * y,
     double mss = 0;
     for(i=0; i<n; ++i)
       mss += pow(muhat + *betahat * g[i] - ym, 2);
-    *log10_pval = gsl_cdf_fdist_Q (mss/pow(*sigmahat,2), 1, n-2);
+    *pval = gsl_cdf_fdist_Q (mss/pow(*sigmahat,2), 1, n-2);
   }
   else
   {
     if (verbose > 0)
       cout << "genotypes are not variable enough" << endl;
-    *betahat = numeric_limits<double>::infinity();  // or use quiet_NaN?
+    *betahat = 0;
     *sebetahat = numeric_limits<double>::infinity();
-    *sigmahat = numeric_limits<double>::infinity();
-    *log10_pval = numeric_limits<double>::infinity();
+    *sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
+    *pval = 1;
   }
 }
 
@@ -723,11 +727,11 @@ computeSummaryStatsForOneFeature (
     
     double * g = mSnpNameCoord2Genotypes_it->second;
     ols (n_y, g, y, &iSnpStats.betahat, &iSnpStats.sebetahat,
-	 &iSnpStats.sigmahat, &iSnpStats.log10_pval, verbose-1);
+	 &iSnpStats.sigmahat, &iSnpStats.pval, verbose-1);
     if (verbose > 0)
       printf ("betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f\n",
 	      iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
-	      iSnpStats.log10_pval);
+	      iSnpStats.pval);
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
     free (g);
@@ -916,7 +920,7 @@ int main (int argc, char ** argv)
 {
   string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile;
   bool shouldOutputFileBeGzipped;
-  double minMaf = 0.01;
+  double minMaf = 0.0;
   int verbose = 1;
   parse_args (argc, argv, &linksFile, &genoFile, &phenoFile, &outFile,
 	      &shouldOutputFileBeGzipped, &ftrsFile, &snpsFile, &minMaf,
