@@ -97,7 +97,8 @@ void help (char ** argv)
        << " statistics betahat," << endl
        << "se(betahat) and sigmahat, as well as the P-value"
        << " for H0:\"beta=0\"." << endl
-       << "Samples with missing phenotypes (NA) are skipped." << endl
+       << "Samples with missing phenotypes (NA) are skipped. Non-variable genotypes" << endl
+       << "have a zero effect size with an infinite std error." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -110,7 +111,7 @@ void help (char ** argv)
        << "  -p, --pheno\tfile with phenotypes (row 1 for sample names,"
        << " column 1" << endl
        << "\t\tfor gene names, delimiter=<space/tab>)" << endl
-       << "  -o, --output\toutput file (will be gzipped if '.gz' in file name)" << endl
+       << "  -o, --output\toutput file for the summary stats" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
        << "\t\t(one feature name per line)" << endl
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
@@ -143,7 +144,6 @@ void parse_args (int argc, char ** argv,
 		 string * pt_genoFile,
 		 string * pt_phenoFile,
 		 string * pt_outFile,
-		 bool * pt_shouldOutputFileBeGzipped,
 		 string * pt_ftrsFile,
 		 string * pt_snpsFile,
 		 double * pt_minMaf,
@@ -257,14 +257,6 @@ void parse_args (int argc, char ** argv,
     fprintf (stderr, "ERROR: missing output file (-o).\n\n");
     help (argv);
     exit (1);
-  }
-  if (pt_outFile->find(".gz") != string::npos)
-  {
-    *pt_shouldOutputFileBeGzipped = true;
-  }
-  else
-  {
-    *pt_shouldOutputFileBeGzipped = false;
   }
   if (*pt_minMaf < 0 || *pt_minMaf > 1)
   {
@@ -678,11 +670,13 @@ computeSummaryStatsForOneFeature (
   const size_t n_y,
   const int * idx,
   FtrStats * pt_iFtrStats,
+  size_t * pt_nbFtrsLowPval,
   const int verbose)
 {
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
   size_t snp_id;
   map<string, double *> mSnpNameCoord2Genotypes;
+  bool isPvalLow = false;
   
   // for each SNP in cis of the given feature,
   // retrieve its genotypes and keep them in a map
@@ -732,95 +726,14 @@ computeSummaryStatsForOneFeature (
       printf ("betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f\n",
 	      iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
 	      iSnpStats.pval);
+    if (iSnpStats.pval <= 1e-7)
+      isPvalLow = true;
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
     free (g);
   }
-}
-
-/** \brief Compute OLS summary statistics for each pair feature-SNP
- *  and write the results feature by feature in a gzipped file.
- */
-void computeAndGzWriteSummaryStatsFtrPerFtr (
-  map<string, vector<string> > ftrName2CisSnpNameCoords,
-  map<string, long int> ftrName2Pos,
-  map<string, long int> snpNameCoord2Pos,
-  string phenoFile,
-  string genoFile,
-  string outFile,
-  int verbose)
-{
-  FtrStats iFtrStats;
-  map<string, vector<string> >::iterator ftrName2CisSnpNameCoords_it;
-  vector<string> cisSnpNameCoords, tokens;
-  string ftrName, snpNameCoord, snpName;
-  size_t ftrPos, n_y = 0;
-  double nbFtrs = 0, step = floor(ftrName2CisSnpNameCoords.size() / 5);
-  double * y = NULL;
-  int * idx = NULL;
-  ifstream phenoStream, genoStream;
-  ogzstream outStream;
-  
-  // open all files
-  phenoStream.open(phenoFile.c_str(), ifstream::in);
-  if (! phenoStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << phenoFile << endl;
-    exit (1);
-  }
-  genoStream.open(genoFile.c_str(), ifstream::in);
-  if (! genoStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << genoFile << endl;
-    exit (1);
-  }
-  outStream.open(outFile.c_str());
-  if (! outStream.good())
-  {
-    cerr << "ERROR: can't open file " << outFile << endl;
-    exit (1);
-  }
-  if (verbose > 0)
-  {
-    cout << "compute summary statistics for each pair feature-SNP..." << endl;
-  }
-  
-  // for each feature
-  for (ftrName2CisSnpNameCoords_it = ftrName2CisSnpNameCoords.begin();
-       ftrName2CisSnpNameCoords_it != ftrName2CisSnpNameCoords.end();
-       ftrName2CisSnpNameCoords_it++)
-  {
-    nbFtrs++;
-    if (verbose > 0 && fmod(nbFtrs, step) == 0.0)
-      cout << nbFtrs << "/" << ftrName2CisSnpNameCoords.size() << endl;
-    ftrName = (*ftrName2CisSnpNameCoords_it).first;
-    if (verbose > 1)
-      cout << "#" << nbFtrs << "/" << ftrName2CisSnpNameCoords.size()
-	   << " " << ftrName << endl;
-    FtrStats_reset (&iFtrStats);
-    iFtrStats.name = ftrName;
-    
-    // retrieve its values
-    ftrPos = ftrName2Pos[ftrName];
-    getPhenoValues (phenoStream, ftrPos, &y, &n_y, &idx, verbose);
-    
-    // loop over SNPs in cis
-    computeSummaryStatsForOneFeature (ftrName2CisSnpNameCoords_it,
-				      snpNameCoord2Pos,
-				      genoStream,
-				      y,
-				      n_y,
-				      idx,
-				      &iFtrStats,
-				      verbose-2);
-    
-    // write the results (one line per SNP)
-    FtrStats_write (iFtrStats, n_y, outStream);
-  }
-  
-  phenoStream.close();
-  genoStream.close();
-  outStream.close();
+  if (isPvalLow)
+    ++(*pt_nbFtrsLowPval);
 }
 
 /** \brief Compute OLS summary statistics for each pair feature-SNP
@@ -846,6 +759,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   int * idx = NULL;
   ifstream phenoStream, genoStream;
   ofstream outStream;
+  size_t nbFtrsLowPval = 0;
   
   // open all files
   phenoStream.open(phenoFile.c_str(), ifstream::in);
@@ -900,6 +814,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 				      n_y,
 				      idx,
 				      &iFtrStats,
+				      &nbFtrsLowPval,
 				      verbose-2);
     
     // write the results (one line per SNP)
@@ -913,18 +828,20 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   genoStream.close();
   outStream.close();
   if (verbose > 0)
+  {
     cout << "results written in " << outFile << endl;
+    cout << "features with at least one SNP with P-value <= 1e-7: " 
+	 << nbFtrsLowPval << " / " << ftrName2Pos.size() << endl;
+  }
 }
 
 int main (int argc, char ** argv)
 {
   string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile;
-  bool shouldOutputFileBeGzipped;
   double minMaf = 0.0;
   int verbose = 1;
   parse_args (argc, argv, &linksFile, &genoFile, &phenoFile, &outFile,
-	      &shouldOutputFileBeGzipped, &ftrsFile, &snpsFile, &minMaf,
-	      &verbose);
+	      &ftrsFile, &snpsFile, &minMaf, &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -944,22 +861,13 @@ int main (int argc, char ** argv)
   map<string, long int> snpNameCoord2Pos
     = indexSnps (genoFile, vSnpsToKeep, minMaf, verbose);
   
-  if (shouldOutputFileBeGzipped)
-    computeAndGzWriteSummaryStatsFtrPerFtr (ftrName2CisSnpNameCoords,
-					    ftrName2Pos,
-					    snpNameCoord2Pos,
-					    phenoFile,
-					    genoFile,
-					    outFile,
-					    verbose);
-  else
-    computeAndWriteSummaryStatsFtrPerFtr (ftrName2CisSnpNameCoords,
-					  ftrName2Pos,
-					  snpNameCoord2Pos,
-					  phenoFile,
-					  genoFile,
-					  outFile,
-					  verbose);
+  computeAndWriteSummaryStatsFtrPerFtr (ftrName2CisSnpNameCoords,
+					ftrName2Pos,
+					snpNameCoord2Pos,
+					phenoFile,
+					genoFile,
+					outFile,
+					verbose);
   
   if (verbose > 0)
   {
