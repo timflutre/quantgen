@@ -108,7 +108,7 @@ void help (char ** argv)
        << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl
        << endl
        << "References:" << endl
-       << "Wen and Stephens (2011)" << endl;
+       << "  Wen and Stephens (http://arxiv.org/abs/1111.1210)" << endl;
 }
 
 /** \brief Display version and license information on stdout.
@@ -197,19 +197,25 @@ void parse_args (int argc, char ** argv,
   }
   if ((*pt_inDir).empty())
   {
-    fprintf (stderr, "ERROR: missing input directory with summary statistics.\n");
+    fprintf (stderr, "ERROR: missing input directory with summary statistics (-i).\n\n");
     help (argv);
     exit (1);
   }
   if ((*pt_gridFile).empty())
   {
-    fprintf (stderr, "ERROR: missing grid file.\n");
+    fprintf (stderr, "ERROR: missing grid file (-g).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (*pt_gridFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", pt_gridFile->c_str());
     help (argv);
     exit (1);
   }
   if ((*pt_outFile).empty())
   {
-    fprintf (stderr, "ERROR: missing output file.\n");
+    fprintf (stderr, "ERROR: missing output file (-o).\n\n");
     help (argv);
     exit (1);
   }
