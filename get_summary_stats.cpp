@@ -97,8 +97,6 @@ void help (char ** argv)
        << " statistics betahat," << endl
        << "se(betahat) and sigmahat, as well as the P-value"
        << " for H0:\"beta=0\"." << endl
-       << "Samples with missing phenotypes (NA) are skipped. Non-variable genotypes" << endl
-       << "have a zero effect size with an infinite std error." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -119,7 +117,12 @@ void help (char ** argv)
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
        << endl
        << "Examples:" << endl
-       << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl;
+       << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl
+       << endl
+       << "Remarks:" << endl
+       << "  Samples with missing phenotypes (NA) are skipped, but missing genotypes are" << endl
+       << "forbidden: consider imputing them first. For non-variable genotypes, a zero effect" << endl
+       << "size is returned, along with an infinite std error and a P-value of 1." << endl;
 }
 
 /** \brief Display version and license information on stdout.
@@ -509,16 +512,15 @@ indexSnps (const string genoFile,
 
 /** \brief Retrieve phenotype values for a given feature
  *  and skip missing values encoded as NA.
- *  \note idx[i] == 0 if sample i has no phenotype
+ *  \note isNa[i] == true if sample i has no phenotype
  */
-void getPhenoValues (istream & phenoStream,
+void getPhenoValues (const string ftrName,
+		     istream & phenoStream,
 		     long int ftrPos,
-		     double ** y,
-		     size_t * n_y,
-		     int ** idx,
+		     vector<double> & y,
+		     vector<bool> & isNa,
 		     int verbose)
 {
-  size_t i = 0, j = 0;
   string line, tok;
   vector<string> tokens;
   phenoStream.seekg(ftrPos);
@@ -527,47 +529,39 @@ void getPhenoValues (istream & phenoStream,
     split (line, '\t', tokens);
   else
     split (line, ' ', tokens);
-  *n_y = tokens.size() - 1;
-  *y = (double *) malloc (*n_y * sizeof(double *));
-  *idx = (int *) malloc (*n_y * sizeof(int *));
-  for (i = 0; i < *n_y; ++i)
+  for (size_t i = 0; i < tokens.size()-1; ++i)
   {
     tok = tokens[i+1];
     if (tok.compare("NA") == 0)
     {
-      (*idx)[i] = 0;
+      isNa.push_back (true);
     }
     else
     {
-      (*idx)[i] = 1;
-      (*y)[j] = atof(tok.c_str());
-      ++j;
+      isNa.push_back (false);
+      y.push_back (atof(tok.c_str()));
     }
   }
 #ifdef DEBUG
   if (verbose > 0)
-    cout << *n_y << " phenotypes, " << j << " non-missing: "
-	 << (*y)[0] << " " << (*y)[1] << " ..." << endl;
+    printf ("%s phenotypes=%ld non-missing=%ld %.4f %.4f ...\n",
+	    ftrName.c_str(), tokens.size()-1, y.size(), y[0], y[1]);
 #endif
-  if (j != *n_y)
-  {
-    *y = (double *) realloc (*y, j);
-    *n_y = j;
-  }
 }
 
 /** \brief Retrieve genotype values for a given SNP
  *  and skip samples having a missing phenotype.
- *  \note idx[i] == 0 if sample i has no phenotype
+ *  \note isNa[i] == true if sample i has no phenotype
  */
-void getGenoValues (istream & genoStream,
+void getGenoValues (const string ftrName,
+		    const string snpNameCoord,
+		    istream & genoStream,
 		    long int snpPos,
-		    double ** g,
-		    size_t * n_g,
-		    const int * idx,
+		    vector<double> & g,
+		    const vector<bool> & isNa,
 		    int verbose)
 {
-  size_t i = 0, j = 0;
+  size_t i = 0;
   string line;
   vector<string> tokens;
   genoStream.seekg(snpPos);
@@ -576,38 +570,32 @@ void getGenoValues (istream & genoStream,
     split (line, '\t', tokens);
   else
     split (line, ' ', tokens);
-  *n_g = (tokens.size() - 5) / 3;
-  *g = (double *) malloc (*n_g * sizeof(double *));
-  for (i = 0; i < *n_g; ++i)
+  for (i = 0; i < (tokens.size() - 5) / 3; ++i)
   {
-    if (idx[i] == 1)
+    if (! isNa[i])
     {
-      (*g)[j] = 0 * atof(tokens[5+3*i].c_str())
-	+ 1 * atof(tokens[5+3*i+1].c_str())
-	+ 2 * atof(tokens[5+3*i+2].c_str());
-      ++j;
+      g.push_back (0 * atof(tokens[5+3*i].c_str())
+		   + 1 * atof(tokens[5+3*i+1].c_str())
+		   + 2 * atof(tokens[5+3*i+2].c_str()));
     }
   }
 #ifdef DEBUG
   if (verbose > 0)
-    cout << *n_g << " genotypes, " << j << " with non-missing phenotypes: "
-	 << (*g)[0] << " " << (*g)[1] << " ..." << endl;
+    printf ("%s %s genotypes=%ld %.4f %.4f ...\n",
+	    ftrName.c_str(), snpNameCoord.c_str(), g.size(), g[0], g[1]);
 #endif
-  if (j != *n_g)
-  {
-    *g = (double *) realloc (*g, j);
-    *n_g = j;
-  }
 }
 
 /** \brief Compute the summary statistics of the linear regression.
  *  \note phenotype = mu + genotype * beta + error
+ *  \note missing values should have been already filtered out
  */
-void ols (const size_t n, const double * g, const double * y,
+void ols (const string yName, const string xName,
+	  const vector<double> & g, const vector<double> & y,
 	  double * betahat, double * sebetahat, double * sigmahat,
 	  double * pval, int verbose)
 {
-  size_t i = 0;
+  size_t i = 0, n = g.size();
   double ym = 0, gm = 0, yty = 0, gtg = 0, gty = 0;
   for(i=0; i<n; ++i){
     ym += y[i];
@@ -621,7 +609,8 @@ void ols (const size_t n, const double * g, const double * y,
   double vg = gtg - n * gm * gm;  // variance of the genotypes
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n", ym, gm, yty, gtg,
+    printf ("%s %s n=%ld ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n",
+	    yName.c_str(), xName.c_str(), n, ym, gm, yty, gtg,
 	    gty, vg);
 #endif
   if(vg > 1e-8)
@@ -660,22 +649,22 @@ void ols (const size_t n, const double * g, const double * y,
 
 /** \brief First, read all genotypes of all cis SNPs of the given feature.
  *   Second, compute the summary stats for each pair gene-SNP.
+ *  \note isNa[i] == true if sample i has no phenotype
  */
 void
 computeSummaryStatsForOneFeature (
   const map<string, vector<string> >::iterator ftrName2CisSnpNameCoords_it,
   map<string, long int> snpNameCoord2Pos,
   ifstream & genoStream,
-  const double * y,
-  const size_t n_y,
-  const int * idx,
+  const vector<double> & y,
+  const vector<bool> isNa,
   FtrStats * pt_iFtrStats,
   size_t * pt_nbFtrsLowPval,
   const int verbose)
 {
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
   size_t snp_id;
-  map<string, double *> mSnpNameCoord2Genotypes;
+  map<string, vector<double> > mSnpNameCoord2Genotypes;
   bool isPvalLow = false;
   
   // for each SNP in cis of the given feature,
@@ -684,20 +673,18 @@ computeSummaryStatsForOneFeature (
   {
     string snpNameCoord = cisSnpNameCoords[snp_id];
     if (verbose > 0)
-      cout << "#" << snp_id+1 << "/" << cisSnpNameCoords.size()
-	   << " " << snpNameCoord << endl;
+      printf ("%s %ld/%ld\n", snpNameCoord.c_str(), snp_id+1, cisSnpNameCoords.size());
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
     
     size_t snpPos = snpNameCoord2Pos[snpNameCoord];
-    double * g;
-    size_t n_g;
-    getGenoValues (genoStream, snpPos, &g, &n_g, idx, verbose);
-    if (n_y != n_g)
+    vector<double> g;
+    getGenoValues (pt_iFtrStats->name, snpNameCoord, genoStream, snpPos, g, isNa, verbose);
+    if (y.size() != g.size())
     {
       cerr << "ERROR: different number of samples for feature "
-	   << pt_iFtrStats->name << " (" << n_y << ")  and SNP "
-	   << snpNameCoord << " (" << n_g << ")" << endl;
+	   << pt_iFtrStats->name << " (" << y.size() << ")  and SNP "
+	   << snpNameCoord << " (" << g.size() << ")" << endl;
       exit (1);
     }
     
@@ -706,7 +693,7 @@ computeSummaryStatsForOneFeature (
   
   // for each SNP in cis of the given feature
   // compute the OLS summary stats and keep them
-  map<string, double *>::iterator mSnpNameCoord2Genotypes_it;
+  map<string, vector<double> >::iterator mSnpNameCoord2Genotypes_it;
   for (mSnpNameCoord2Genotypes_it = mSnpNameCoord2Genotypes.begin();
        mSnpNameCoord2Genotypes_it != mSnpNameCoord2Genotypes.end();
        mSnpNameCoord2Genotypes_it++)
@@ -719,18 +706,19 @@ computeSummaryStatsForOneFeature (
     iSnpStats.name = tokens[0];
     iSnpStats.coord = atol(tokens[1].c_str());
     
-    double * g = mSnpNameCoord2Genotypes_it->second;
-    ols (n_y, g, y, &iSnpStats.betahat, &iSnpStats.sebetahat,
+    vector<double> g = mSnpNameCoord2Genotypes_it->second;
+    ols (pt_iFtrStats->name, snpNameCoord,
+	 g, y, &iSnpStats.betahat, &iSnpStats.sebetahat,
 	 &iSnpStats.sigmahat, &iSnpStats.pval, verbose-1);
     if (verbose > 0)
-      printf ("betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f\n",
+      printf ("%s %s betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f\n",
+	      pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
 	      iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
 	      iSnpStats.pval);
     if (iSnpStats.pval <= 1e-7)
       isPvalLow = true;
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
-    free (g);
   }
   if (isPvalLow)
     ++(*pt_nbFtrsLowPval);
@@ -752,11 +740,11 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   map<string, vector<string> >::iterator ftrName2CisSnpNameCoords_it;
   vector<string> cisSnpNameCoords, tokens;
   string ftrName, snpNameCoord, snpName;
-  size_t ftrPos, n_y = 0;
+  size_t ftrPos;
   size_t nbFtrs = 0;
   vector<size_t> vCounters = getCounters (ftrName2CisSnpNameCoords.size());
-  double * y = NULL;
-  int * idx = NULL;
+  vector<double> y;
+  vector<bool> isNa;
   ifstream phenoStream, genoStream;
   ofstream outStream;
   size_t nbFtrsLowPval = 0;
@@ -797,31 +785,30 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     if (ftrName2Pos.find(ftrName) == ftrName2Pos.end())
       continue;
     if (verbose > 1)
-      cout << "#" << nbFtrs << "/" << ftrName2CisSnpNameCoords.size()
-	   << " " << ftrName << endl;
+      printf ("%s %ld/%ld\n", ftrName.c_str(), nbFtrs,
+	      ftrName2CisSnpNameCoords.size());
     FtrStats_reset (&iFtrStats);
     iFtrStats.name = ftrName;
     
     // retrieve its values
     ftrPos = ftrName2Pos[ftrName];
-    getPhenoValues (phenoStream, ftrPos, &y, &n_y, &idx, verbose-1);
+    getPhenoValues (ftrName, phenoStream, ftrPos, y, isNa, verbose-1);
     
     // loop over SNPs in cis
     computeSummaryStatsForOneFeature (ftrName2CisSnpNameCoords_it,
 				      snpNameCoord2Pos,
 				      genoStream,
 				      y,
-				      n_y,
-				      idx,
+				      isNa,
 				      &iFtrStats,
 				      &nbFtrsLowPval,
 				      verbose-2);
     
     // write the results (one line per SNP)
-    FtrStats_write (iFtrStats, n_y, outStream);
+    FtrStats_write (iFtrStats, y.size(), outStream);
     
-    free (y);
-    free (idx);
+    y.clear();
+    isNa.clear();
   }
   
   phenoStream.close();
