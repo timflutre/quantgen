@@ -544,7 +544,7 @@ void getPhenoValues (const string ftrName,
   }
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s phenotypes=%ld non-missing=%ld %.4f %.4f ...\n",
+    printf ("%s phenotypes=%zu non-missing=%zu %.4f %.4f ...\n",
 	    ftrName.c_str(), tokens.size()-1, y.size(), y[0], y[1]);
 #endif
 }
@@ -581,7 +581,7 @@ void getGenoValues (const string ftrName,
   }
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s genotypes=%ld %.4f %.4f ...\n",
+    printf ("%s %s genotypes=%zu %.4f %.4f ...\n",
 	    ftrName.c_str(), snpNameCoord.c_str(), g.size(), g[0], g[1]);
 #endif
 }
@@ -609,7 +609,7 @@ void ols (const string yName, const string xName,
   double vg = gtg - n * gm * gm;  // variance of the genotypes
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s n=%ld ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n",
+    printf ("%s %s n=%zu ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n",
 	    yName.c_str(), xName.c_str(), n, ym, gm, yty, gtg,
 	    gty, vg);
 #endif
@@ -673,7 +673,7 @@ computeSummaryStatsForOneFeature (
   {
     string snpNameCoord = cisSnpNameCoords[snp_id];
     if (verbose > 0)
-      printf ("%s %ld/%ld\n", snpNameCoord.c_str(), snp_id+1, cisSnpNameCoords.size());
+      printf ("%s %zu/%zu\n", snpNameCoord.c_str(), snp_id+1, cisSnpNameCoords.size());
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
     
@@ -785,7 +785,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     if (ftrName2Pos.find(ftrName) == ftrName2Pos.end())
       continue;
     if (verbose > 1)
-      printf ("%s %ld/%ld\n", ftrName.c_str(), nbFtrs,
+      printf ("%s %zu/%zu\n", ftrName.c_str(), nbFtrs,
 	      ftrName2CisSnpNameCoords.size());
     FtrStats_reset (&iFtrStats);
     iFtrStats.name = ftrName;
