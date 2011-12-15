@@ -19,6 +19,7 @@
 
 #include <ctime>
 #include <cmath>
+#include <cstring>
 #include <sys/stat.h>
 
 #include <vector>
