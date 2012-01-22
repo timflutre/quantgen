@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 # Author: Tim Flutre
+# License: GPL-3
 # Aim: convert a genotype file in the IMPUTE format into the three files
 # 'genotype', 'snp' and 'indiv', required by EIGENSOFT
 # Note: the first allele in the IMPUTE file is considered as being the reference allele for EIGENSOFT
