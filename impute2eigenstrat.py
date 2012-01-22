@@ -7,16 +7,76 @@
 
 import sys
 import gzip
+import getopt
+import os
 
-if len(sys.argv) < 4:
-    msg = "ERROR: missing arguments"
+
+def help():
+    msg = "`%s' converts a genotype file in the IMPUTE format\n" % os.path.basename(sys.argv[0])
+    msg += "into the three files required by EIGENSOFT.\n"
+    msg += "\n"
+    msg += "Usage: %s [OPTIONS] ...\n" % os.path.basename(sys.argv[0])
+    msg += "\n"
+    msg += "Options:\n"
+    msg += "  -h, --help\tdisplay the help and exit\n"
+    msg += "  -v, --verbose\tverbosity level (default=1)\n"
+    msg += "  -i, --input\tinput file in the IMPUTE format (gzipped, with a header line)\n"
+    msg += "  -o, --output\tprefix of the output files\n"
+    msg += "\t\twill be followed by '_eigenstrat_genotypes/snp/indiv.txt'\n"
+    msg += "  -l, --label\tlabel used in the thrid column of the 'indiv' file\n"
+    msg += "\n"
+    msg += "Remarks:\n"
+    msg += "  The first allele in the IMPUTE file is considered as being the reference\n"
+    msg += "allele for EIGENSOF.\n"
+    print msg; sys.stdout.flush()
+    
+    
+def setParamsFromCmdLine():
+    verbose = 1
+    imputeFile = ""
+    eigensoftPrefix = ""
+    label = ""
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], "hv:i:o:l:",
+                                   ["help", "verbose=", "input=",
+                                    "output=", "label="])
+    except getopt.GetoptError, err:
+        sys.stderr.write("%s\n" % str(err))
+        help()
+        sys.exit(2)
+    for o, a in opts:
+        if o in ("-h", "--help"):
+            help()
+            sys.exit(0)
+        elif o in ("-v", "--verbose"):
+            verbose = int(a)
+        elif o in ("-i", "--input"):
+            imputeFile = a
+        elif o in ("-o", "--output"):
+            eigensoftPrefix = a
+        elif o in ("-l", "--label"):
+            label = a
+    return verbose, imputeFile, eigensoftPrefix, label
+
+
+# get command-line arguments
+verbose, imputeFile, eigensoftPrefix, label = setParamsFromCmdLine()
+if imputeFile == "":
+    msg = "ERROR: missing input file (-i)"
+    help()
     sys.stderr.write("%s\n" % msg)
     sys.exit(1)
-
-imputeFile = sys.argv[1]       # gzipped, header line
-eigensoftPrefix = sys.argv[2]  # prefix for the 3 output files
-label = sys.argv[3]            # used in the 'sample' output file (eg. Case, Controls, Pop1)
-
+if eigensoftPrefix == "":
+    msg = "ERROR: missing output prefix (-o)"
+    help()
+    sys.stderr.write("%s\n" % msg)
+    sys.exit(1)
+if label == "":
+    msg = "ERROR: missing label (-l)"
+    help()
+    sys.stderr.write("%s\n" % msg)
+    sys.exit(1)
+    
 # make file names for EIGENSOFT
 genoFile = "%s_eigenstrat_genotypes.txt" % eigensoftPrefix
 snpFile = "%s_eigenstrat_snp.txt" % eigensoftPrefix
@@ -28,11 +88,12 @@ genoH = open(genoFile, "w")
 snpH = open(snpFile, "w")
 indivH = open(indivFile, "w")
 
-# make the sample file thanks to the header
+# make the indiv file thanks to the header
 line = imputeH.readline()
 lSamples = line.split()[5:]
 nbSamples = len(lSamples)
-print "nb of samples: %i" % nbSamples
+if verbose > 0:
+    print "nb of samples: %i" % nbSamples
 for sample in lSamples:
     if len(sample) > 39:
         msg = "ERROR: sample name should be less than 39 characters"
@@ -47,7 +108,9 @@ while True:
     line = imputeH.readline()
     if line == "": break
     countLines += 1
-    if countLines % 50000 == 0: print countLines; sys.stdout.flush()
+    if verbose > 0:
+        if countLines % 50000 == 0:
+            print countLines; sys.stdout.flush()
     tok = line.split(" ")
     
     # write the SNP file
@@ -77,9 +140,10 @@ while True:
         elif tok[5+3*i] == "0" and tok[5+3*i+1] == "0" and tok[5+3*i+2] == "1":
             txt += "0"
         else:
-            txt += "9"  # missing data
+            txt += "9"  # missing data -> EIGENSOFT doesn't handle imputed data for the moment
     genoH.write("%s\n" % txt)
-print "nb of SNPs: %i" % countLines
+if verbose > 0:
+    print "nb of SNPs: %i" % countLines
     
 # close file handlers
 imputeH.close()
