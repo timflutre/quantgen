@@ -38,6 +38,10 @@ using namespace std;
 
 #include <gzstream.h>
 #include <gsl/gsl_cdf.h>
+#include <gsl/gsl_vector.h>
+#include <gsl/gsl_sort.h>
+#include <gsl/gsl_sort_vector.h>
+#include <gsl/gsl_statistics.h>
 
 #include "utils.cpp"
 
@@ -51,6 +55,7 @@ struct SnpStats
   double sebetahat;
   double sigmahat;
   double pval;
+  double R2;
 };
 
 struct FtrStats
@@ -81,6 +86,7 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
 	      << " " << iSnpStats.sebetahat
 	      << " " << iSnpStats.sigmahat
 	      << " " << iSnpStats.pval
+	      << " " << iSnpStats.R2
 	      << endl;
   }
 }
@@ -96,7 +102,7 @@ void help (char ** argv)
        << "(one genetic variant per phenotype) and returns the summary"
        << " statistics betahat," << endl
        << "se(betahat) and sigmahat, as well as the P-value"
-       << " for H0:\"beta=0\"." << endl
+       << " for H0:\"beta=0\" and the R2." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -105,16 +111,21 @@ void help (char ** argv)
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (default=1)" << endl
        << "  -l, --links\tgziped file with links <gene><space/tab><SNP|coord>" << endl
+       << "\t\t(especially useful to focus on genetic variants in cis)" << endl
        << "  -g, --geno\tfile with genotypes in IMPUTE format" << endl
        << "  -p, --pheno\tfile with phenotypes (row 1 for sample names,"
        << " column 1" << endl
-       << "\t\tfor gene names, delimiter=<space/tab>)" << endl
+       << "\t\tfor feature names, delimiter=<space/tab>)" << endl
        << "  -o, --output\toutput file for the summary stats" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
        << "\t\t(one feature name per line)" << endl
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
        << "\t\t(one SNP coordinate per line)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
+       << "  -c, --cor\tuse Spearman rank correlation coefficient" << endl
+       << "\t\t(in the output file, betahat, sebetahat and sigmahat are nan, " << endl
+       << "\t\twhile the P-value is based on a t test and the column of the R2" << endl
+       << "\t\tcontains the Spearman coef)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl
@@ -150,6 +161,7 @@ void parse_args (int argc, char ** argv,
 		 string * pt_ftrsFile,
 		 string * pt_snpsFile,
 		 double * pt_minMaf,
+		 bool * pt_useSpearman,
 		 int * pt_verbose)
 {
   int c = 0;
@@ -166,10 +178,11 @@ void parse_args (int argc, char ** argv,
 	{"output", required_argument, 0, 'o'},
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
-	{"maf", required_argument, 0, 'm'}
+	{"maf", required_argument, 0, 'm'},
+	{"cor", no_argument, 0, 'c'}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:m:",
+    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:m:c",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -212,6 +225,9 @@ void parse_args (int argc, char ** argv,
       break;
     case 'm':
       *pt_minMaf = atof(optarg);
+      break;
+    case 'c':
+      *pt_useSpearman = true;
       break;
     case '?':
       break;
@@ -593,7 +609,7 @@ void getGenoValues (const string ftrName,
 void ols (const string yName, const string xName,
 	  const vector<double> & g, const vector<double> & y,
 	  double * betahat, double * sebetahat, double * sigmahat,
-	  double * pval, int verbose)
+	  double * pval, double * R2, int verbose)
 {
   size_t i = 0, n = g.size();
   double ym = 0, gm = 0, yty = 0, gtg = 0, gty = 0;
@@ -635,6 +651,7 @@ void ols (const string yName, const string xName,
     for(i=0; i<n; ++i)
       mss += pow(muhat + *betahat * g[i] - ym, 2);
     *pval = gsl_cdf_fdist_Q (mss/pow(*sigmahat,2), 1, n-2);
+    *R2 = mss / (mss + rss1);
   }
   else
   {
@@ -644,7 +661,105 @@ void ols (const string yName, const string xName,
     *sebetahat = numeric_limits<double>::infinity();
     *sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
     *pval = 1;
+    *R2 = 0;
   }
+}
+
+/** \brief Resolve a sequence of ties.
+ *  The input ranks array is expected to take the same value for all indices in
+ *  tiesTrace. The common value is recoded with the average of the indices. For
+ *  example, if ranks = <5,8,2,6,2,7,1,2> and tiesTrace = <2,4,7>, the result
+ *  will be <5,8,3,6,3,7,1,3>.
+ *
+ *  http://commons.apache.org/math/apidocs/src-html/org/apache/commons/math/stat/ranking/NaturalRanking.html#line.312
+ * 
+ *  @param ranks array of ranks
+ *  @param tiesTrace vector of indices where ranks is constant, that is,
+ *  for any i and j in tiesTrace, ranks[i] == ranks[j].
+ */
+void
+resolveTie (double * ranks, vector<size_t> tiesTrace)
+{
+  // constant value of ranks over tiesTrace
+  double c = ranks[tiesTrace[0]];
+  
+  // length of sequence of tied ranks
+  size_t length = tiesTrace.size();
+  
+  // new rank (ie. the average of the current indices)
+  double mean = (2*c + length - 1) / 2;
+  
+  for(size_t i=0; i<tiesTrace.size(); ++i)
+    ranks[tiesTrace[i]] = mean;
+}
+
+/** \brief Rank an array using the natural ordering on doubles, ties being 
+ *  resolved by taking their average.
+ *  \note See http://commons.apache.org/math/apidocs/src-html/org/apache/commons/math/stat/ranking/NaturalRanking.html#line.190
+*/
+void
+rank (double * ranks, const double data[], const size_t stride, const size_t n)
+{
+  // copy the input data and sort them
+  double * ds = (double *) calloc (n, sizeof(double));
+  for(size_t i=0; i<n; ++i)
+    ds[i] = data[i];
+  gsl_sort (ds, 1, n);
+  
+  // get the index of the input data as if they were sorted
+  size_t * p = (size_t*) calloc (n, sizeof(size_t));
+  gsl_sort_index (p, data, stride, n);
+  
+  // walk the sorted array, filling output array using sorted positions,
+  // resolving ties as we go
+  size_t pos = 1;
+  ranks[p[0]] = pos;
+  vector<size_t> tiesTrace;
+  tiesTrace.push_back(p[0]);
+  for(size_t i=1; i<n; ++i)
+  {
+    if(ds[i] - ds[i-1] > 0)
+    {
+      pos = i + 1;
+      if(tiesTrace.size() > 1)
+	resolveTie(ranks, tiesTrace);
+      tiesTrace.clear();
+      tiesTrace.push_back(p[i]);
+    }
+    else
+      tiesTrace.push_back(p[i]);
+    ranks[p[i]] = pos;
+  }
+  if(tiesTrace.size() > 1)
+    resolveTie(ranks, tiesTrace);
+  
+  free (p);
+  free (ds);
+}
+
+/** \brief Compute the Spearman rank correlation coefficient between two arrays
+ *  by computing the Pearson correlation coefficient of their ranks.
+ *  \note Ties are resolved by taking the mean of their ranks.
+*/
+double
+my_stats_correlation_spearman (const double data1[], const size_t stride1,
+			       const double data2[], const size_t stride2,
+			       const size_t n)
+{
+  double rs = 0.0;
+  
+  double * ranks1 = (double*) calloc (n, sizeof(size_t));
+  rank (ranks1, data1, stride1, n);
+  
+  double * ranks2 = (double*) calloc (n, sizeof(size_t));
+  rank (ranks2, data2, stride2, n);
+  
+  rs = gsl_stats_correlation((double*) ranks1, 1, (double*) ranks2, 1, n );
+  
+  free (ranks1);
+  free (ranks2);
+  
+  return rs;
 }
 
 /** \brief First, read all genotypes of all cis SNPs of the given feature.
@@ -658,6 +773,7 @@ computeSummaryStatsForOneFeature (
   ifstream & genoStream,
   const vector<double> & y,
   const vector<bool> isNa,
+  bool useSpearman,
   FtrStats * pt_iFtrStats,
   size_t * pt_nbFtrsLowPval,
   const int verbose)
@@ -707,14 +823,37 @@ computeSummaryStatsForOneFeature (
     iSnpStats.coord = atol(tokens[1].c_str());
     
     vector<double> g = mSnpNameCoord2Genotypes_it->second;
-    ols (pt_iFtrStats->name, snpNameCoord,
-	 g, y, &iSnpStats.betahat, &iSnpStats.sebetahat,
-	 &iSnpStats.sigmahat, &iSnpStats.pval, verbose-1);
-    if (verbose > 0)
-      printf ("%s %s betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f\n",
-	      pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
-	      iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
-	      iSnpStats.pval);
+    if (! useSpearman)
+    {
+      ols (pt_iFtrStats->name, snpNameCoord,
+	   g, y, &iSnpStats.betahat, &iSnpStats.sebetahat,
+	   &iSnpStats.sigmahat, &iSnpStats.pval, &iSnpStats.R2,
+	   verbose-1);
+      if (verbose > 0)
+	printf ("%s %s betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f R2=%.8f\n",
+		pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
+		iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
+		iSnpStats.pval, iSnpStats.R2);
+    }
+    else
+    {
+      gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
+								 g.size());
+      gsl_vector_const_view gsl_y = gsl_vector_const_view_array (&y[0],
+								 y.size());
+      double rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
+						 gsl_y.vector.data, 1,
+						 g.size());
+      if (verbose > 0)
+	printf ("%s %s spearman=%.8f\n", pt_iFtrStats->name.c_str(),
+		snpNameCoord.c_str(), rs);
+      iSnpStats.betahat = numeric_limits<double>::quiet_NaN();
+      iSnpStats.sebetahat = numeric_limits<double>::quiet_NaN();
+      iSnpStats.sigmahat = numeric_limits<double>::quiet_NaN();
+      double t = rs * sqrt((g.size()-2) / (1-rs*rs));
+      iSnpStats.pval = gsl_cdf_tdist_Q (t, g.size()-2);
+      iSnpStats.R2 = rs;
+    }
     if (iSnpStats.pval <= 1e-7)
       isPvalLow = true;
     
@@ -724,7 +863,7 @@ computeSummaryStatsForOneFeature (
     ++(*pt_nbFtrsLowPval);
 }
 
-/** \brief Compute OLS summary statistics for each pair feature-SNP
+/** \brief Compute summary statistics for each pair feature-SNP
  *  and write the results feature by feature in an uncompressed file.
  */
 void computeAndWriteSummaryStatsFtrPerFtr (
@@ -734,6 +873,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   string phenoFile,
   string genoFile,
   string outFile,
+  bool useSpearman,
   int verbose)
 {
   FtrStats iFtrStats;
@@ -800,6 +940,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 				      genoStream,
 				      y,
 				      isNa,
+				      useSpearman,
 				      &iFtrStats,
 				      &nbFtrsLowPval,
 				      verbose-2);
@@ -826,9 +967,10 @@ int main (int argc, char ** argv)
 {
   string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile;
   double minMaf = 0.0;
+  bool useSpearman = false;
   int verbose = 1;
   parse_args (argc, argv, &linksFile, &genoFile, &phenoFile, &outFile,
-	      &ftrsFile, &snpsFile, &minMaf, &verbose);
+	      &ftrsFile, &snpsFile, &minMaf, &useSpearman, &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -854,6 +996,7 @@ int main (int argc, char ** argv)
 					phenoFile,
 					genoFile,
 					outFile,
+					useSpearman,
 					verbose);
   
   if (verbose > 0)
