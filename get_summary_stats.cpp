@@ -61,6 +61,9 @@ struct SnpStats
   double sigmahat;
   double pval;
   double R2;
+  double rs;
+  double rsPvalTtest;
+  double rsPvalPerms;
 };
 
 struct FtrStats
@@ -91,8 +94,14 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
 	      << " " << iSnpStats.sebetahat
 	      << " " << iSnpStats.sigmahat
 	      << " " << iSnpStats.pval
-	      << " " << iSnpStats.R2
-	      << endl;
+	      << " " << iSnpStats.R2;
+    if (iSnpStats.rs != numeric_limits<double>::quiet_NaN())
+    {
+      outStream << " " << iSnpStats.rs
+		<< " " << iSnpStats.rsPvalTtest
+		<< " " << iSnpStats.rsPvalPerms;
+    }
+    outStream << endl;
   }
 }
 
@@ -127,10 +136,10 @@ void help (char ** argv)
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
        << "\t\t(one SNP coordinate per line)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
-       << "  -c, --cor\tuse Spearman rank correlation coefficient" << endl
-       << "\t\t(in the output file, betahat, sebetahat and sigmahat are nan, " << endl
-       << "\t\twhile the P-value is based on a t test and the column of the R2" << endl
-       << "\t\tcontains the Spearman coef)" << endl
+       << "  -c, --cor\tnumber of permutations to assess significance of the Spearman"
+       << " rank correlation coefficient" << endl
+       << "\t\t(if c<0, rs is not computed; if c=0, only the P-value from the T test"
+       << " is returned)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl
@@ -166,7 +175,7 @@ void parse_args (int argc, char ** argv,
 		 string * pt_ftrsFile,
 		 string * pt_snpsFile,
 		 double * pt_minMaf,
-		 bool * pt_useSpearman,
+		 int * pt_nbPermutations,
 		 int * pt_verbose)
 {
   int c = 0;
@@ -187,7 +196,7 @@ void parse_args (int argc, char ** argv,
 	{"cor", no_argument, 0, 'c'}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:m:c",
+    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:m:c:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -232,11 +241,13 @@ void parse_args (int argc, char ** argv,
       *pt_minMaf = atof(optarg);
       break;
     case 'c':
-      *pt_useSpearman = true;
+      *pt_nbPermutations = atoi(optarg);
       break;
     case '?':
-      break;
+      printf ("\n"); help (argv);
+      abort ();
     default:
+      printf ("\n"); help (argv);
       abort ();
     }
   }
@@ -774,9 +785,8 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
  */
 void spearman (const string yName, const string xName,
 	       const vector<double> & g, const vector<double> & y,
-	       double * rs, size_t nbPermutations, double * pval,
-	       double * betahat, double * sebetahat, double * sigmahat,
-	       int verbose)
+	       double * rs, double * pvalTtest, int nbPermutations,
+	       double * pvalPerms, int verbose)
 {
   gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
 							     g.size());
@@ -785,36 +795,37 @@ void spearman (const string yName, const string xName,
   *rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
 				       gsl_y.vector.data, 1,
 				       g.size());
-  if (nbPermutations == 0)
-  {
-    double t = (*rs) * sqrt((g.size() - 2) / (1 - pow(*rs,2)));
-    *pval = gsl_cdf_tdist_Q (t, g.size()-2);
-  }
-  else
+  
+  double t = (*rs) * sqrt((g.size() - 2) / (1 - pow(*rs,2)));
+  *pvalTtest = gsl_cdf_tdist_Q (t, g.size()-2);
+  
+  if (nbPermutations > 0)
   {
     size_t i;
     double yPerm[y.size()];
     double rsPerm;
-    *pval = 0;
+    *pvalPerms = 0;
     for(i=0; i<y.size(); ++i)
       yPerm[i] = y[i];
-    for(size_t p=0; p<nbPermutations; ++p)
+    for(int p=0; p<nbPermutations; ++p)
     {
       gsl_ran_shuffle (r, yPerm, y.size(), sizeof(double));
       rsPerm = my_stats_correlation_spearman (gsl_g.vector.data, 1,
 					      yPerm, 1, g.size());
       if (abs(rsPerm) >= abs(*rs))
-	++(*pval);
+	++(*pvalPerms);
     }
-    *pval /= nbPermutations;
+    *pvalPerms /= nbPermutations;
   }
+  else
+    *pvalPerms = numeric_limits<double>::quiet_NaN();
+  
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s n=%zu rs=%f Pval=%f\n", yName.c_str(), xName.c_str(), g.size(), *rs, *pval);
+    printf ("%s %s n=%zu rs=%f pvalTtest=%f pvalPerms=%f\n",
+	    yName.c_str(), xName.c_str(), g.size(),
+	    *rs, *pvalTtest, *pvalPerms);
 #endif
-  *betahat = numeric_limits<double>::quiet_NaN();
-  *sebetahat = numeric_limits<double>::quiet_NaN();
-  *sigmahat = numeric_limits<double>::quiet_NaN();
 }
 
 /** \brief First, read all genotypes of all cis SNPs of the given feature.
@@ -828,7 +839,7 @@ computeSummaryStatsForOneFeature (
   ifstream & genoStream,
   const vector<double> & y,
   const vector<bool> isNa,
-  bool useSpearman,
+  int nbPermutations,
   FtrStats * pt_iFtrStats,
   size_t * pt_nbFtrsLowPval,
   const int verbose)
@@ -838,7 +849,6 @@ computeSummaryStatsForOneFeature (
   map<string, vector<double> > mSnpNameCoord2Genotypes;
   double thresholdLowPval = 1e-7;
   bool isPvalLow = false;
-  size_t nbPermutations = 10000;  // for Spearman coef
   
   // for each SNP in cis of the given feature,
   // retrieve its genotypes and keep them in a map
@@ -846,13 +856,15 @@ computeSummaryStatsForOneFeature (
   {
     string snpNameCoord = cisSnpNameCoords[snp_id];
     if (verbose > 0)
-      printf ("%s %zu/%zu\n", snpNameCoord.c_str(), snp_id+1, cisSnpNameCoords.size());
+      printf ("%s %zu/%zu\n", snpNameCoord.c_str(), snp_id+1,
+	      cisSnpNameCoords.size());
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
     
     size_t snpPos = snpNameCoord2Pos[snpNameCoord];
     vector<double> g;
-    getGenoValues (pt_iFtrStats->name, snpNameCoord, genoStream, snpPos, g, isNa, verbose);
+    getGenoValues (pt_iFtrStats->name, snpNameCoord, genoStream, snpPos, g,
+		   isNa, verbose);
     if (y.size() != g.size())
     {
       cerr << "ERROR: different number of samples for feature "
@@ -880,27 +892,30 @@ computeSummaryStatsForOneFeature (
     iSnpStats.coord = atol(tokens[1].c_str());
     
     vector<double> g = mSnpNameCoord2Genotypes_it->second;
-    if (! useSpearman)
+    ols (pt_iFtrStats->name, snpNameCoord, g, y,
+	 &iSnpStats.betahat, &iSnpStats.sebetahat, &iSnpStats.sigmahat,
+	 &iSnpStats.pval, &iSnpStats.R2, verbose-1);
+    if (verbose > 0)
+      printf ("%s %s betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f R2=%.8f\n",
+	      pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
+	      iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
+	      iSnpStats.pval, iSnpStats.R2);
+    if (nbPermutations >= 0)
     {
-      ols (pt_iFtrStats->name, snpNameCoord, g, y,
-	   &iSnpStats.betahat, &iSnpStats.sebetahat, &iSnpStats.sigmahat,
-	   &iSnpStats.pval, &iSnpStats.R2, verbose-1);
+      spearman (pt_iFtrStats->name, snpNameCoord, g, y,
+		&iSnpStats.rs, &iSnpStats.rsPvalTtest,
+		nbPermutations, &iSnpStats.rsPvalPerms,
+		verbose-1);
       if (verbose > 0)
-	printf ("%s %s betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f R2=%.8f\n",
-		pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
-		iSnpStats.betahat, iSnpStats.sebetahat, iSnpStats.sigmahat,
-		iSnpStats.pval, iSnpStats.R2);
+	printf ("spearman=%.8f PvalTtest=%.8f permutations=%i PvalPerms=%.8f\n",
+		iSnpStats.rs, iSnpStats.rsPvalTtest,
+		nbPermutations, iSnpStats.rsPvalPerms);
     }
     else
     {
-      spearman (pt_iFtrStats->name, snpNameCoord, g, y,
-		&iSnpStats.R2, nbPermutations, &iSnpStats.pval,
-		&iSnpStats.betahat, &iSnpStats.sebetahat, &iSnpStats.sigmahat,
-		verbose-1);
-      if (verbose > 0)
-	printf ("%s %s spearman=%.8f permutations=%ld P-value=%.8f\n",
-		pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
-		iSnpStats.R2, nbPermutations, iSnpStats.pval);
+      iSnpStats.rs = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rsPvalTtest = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rsPvalPerms = numeric_limits<double>::quiet_NaN();
     }
     if (iSnpStats.pval <= thresholdLowPval)
       isPvalLow = true;
@@ -921,7 +936,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   string phenoFile,
   string genoFile,
   string outFile,
-  bool useSpearman,
+  int nbPermutations,
   int verbose)
 {
   FtrStats iFtrStats;
@@ -988,7 +1003,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 				      genoStream,
 				      y,
 				      isNa,
-				      useSpearman,
+				      nbPermutations,
 				      &iFtrStats,
 				      &nbFtrsLowPval,
 				      verbose-2);
@@ -1015,10 +1030,10 @@ int main (int argc, char ** argv)
 {
   string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile;
   double minMaf = 0.0;
-  bool useSpearman = false;
+  int nbPermutations = -1;
   int verbose = 1;
   parse_args (argc, argv, &linksFile, &genoFile, &phenoFile, &outFile,
-	      &ftrsFile, &snpsFile, &minMaf, &useSpearman, &verbose);
+	      &ftrsFile, &snpsFile, &minMaf, &nbPermutations, &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1048,7 +1063,7 @@ int main (int argc, char ** argv)
 					phenoFile,
 					genoFile,
 					outFile,
-					useSpearman,
+					nbPermutations,
 					verbose);
   
   gsl_rng_free (r);
