@@ -42,8 +42,13 @@ using namespace std;
 #include <gsl/gsl_sort.h>
 #include <gsl/gsl_sort_vector.h>
 #include <gsl/gsl_statistics.h>
+#include <gsl/gsl_rng.h>
+#include <gsl/gsl_randist.h>
 
 #include "utils.cpp"
+
+const gsl_rng_type * T;
+gsl_rng * r;
 
 //-----------------------------------------------------------------------------
 
@@ -762,6 +767,56 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
   return rs;
 }
 
+/** \brief Compute the Spearman rank correlation coefficient between g and y,
+ *  and assess its significance with a t test or permutations of y (all other
+ *  summary stats are nan).
+ *  \note missing values should have been already filtered out
+ */
+void spearman (const string yName, const string xName,
+	       const vector<double> & g, const vector<double> & y,
+	       double * rs, size_t nbPermutations, double * pval,
+	       double * betahat, double * sebetahat, double * sigmahat,
+	       int verbose)
+{
+  gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
+							     g.size());
+  gsl_vector_const_view gsl_y = gsl_vector_const_view_array (&y[0],
+							     y.size());
+  *rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
+				       gsl_y.vector.data, 1,
+				       g.size());
+  if (nbPermutations == 0)
+  {
+    double t = (*rs) * sqrt((g.size() - 2) / (1 - pow(*rs,2)));
+    *pval = gsl_cdf_tdist_Q (t, g.size()-2);
+  }
+  else
+  {
+    size_t i;
+    double yPerm[y.size()];
+    double rsPerm;
+    *pval = 0;
+    for(i=0; i<y.size(); ++i)
+      yPerm[i] = y[i];
+    for(size_t p=0; p<nbPermutations; ++p)
+    {
+      gsl_ran_shuffle (r, yPerm, y.size(), sizeof(double));
+      rsPerm = my_stats_correlation_spearman (gsl_g.vector.data, 1,
+					      yPerm, 1, g.size());
+      if (abs(rsPerm) >= abs(*rs))
+	++(*pval);
+    }
+    *pval /= nbPermutations;
+  }
+#ifdef DEBUG
+  if (verbose > 0)
+    printf ("%s %s n=%zu rs=%f Pval=%f\n", yName.c_str(), xName.c_str(), g.size(), *rs, *pval);
+#endif
+  *betahat = numeric_limits<double>::quiet_NaN();
+  *sebetahat = numeric_limits<double>::quiet_NaN();
+  *sigmahat = numeric_limits<double>::quiet_NaN();
+}
+
 /** \brief First, read all genotypes of all cis SNPs of the given feature.
  *   Second, compute the summary stats for each pair gene-SNP.
  *  \note isNa[i] == true if sample i has no phenotype
@@ -781,7 +836,9 @@ computeSummaryStatsForOneFeature (
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
   size_t snp_id;
   map<string, vector<double> > mSnpNameCoord2Genotypes;
+  double thresholdLowPval = 1e-7;
   bool isPvalLow = false;
+  size_t nbPermutations = 10000;  // for Spearman coef
   
   // for each SNP in cis of the given feature,
   // retrieve its genotypes and keep them in a map
@@ -825,10 +882,9 @@ computeSummaryStatsForOneFeature (
     vector<double> g = mSnpNameCoord2Genotypes_it->second;
     if (! useSpearman)
     {
-      ols (pt_iFtrStats->name, snpNameCoord,
-	   g, y, &iSnpStats.betahat, &iSnpStats.sebetahat,
-	   &iSnpStats.sigmahat, &iSnpStats.pval, &iSnpStats.R2,
-	   verbose-1);
+      ols (pt_iFtrStats->name, snpNameCoord, g, y,
+	   &iSnpStats.betahat, &iSnpStats.sebetahat, &iSnpStats.sigmahat,
+	   &iSnpStats.pval, &iSnpStats.R2, verbose-1);
       if (verbose > 0)
 	printf ("%s %s betahat=%.8f sebetahat=%.8f sigmahat=%.8f P-value=%.8f R2=%.8f\n",
 		pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
@@ -837,24 +893,16 @@ computeSummaryStatsForOneFeature (
     }
     else
     {
-      gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
-								 g.size());
-      gsl_vector_const_view gsl_y = gsl_vector_const_view_array (&y[0],
-								 y.size());
-      double rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
-						 gsl_y.vector.data, 1,
-						 g.size());
+      spearman (pt_iFtrStats->name, snpNameCoord, g, y,
+		&iSnpStats.R2, nbPermutations, &iSnpStats.pval,
+		&iSnpStats.betahat, &iSnpStats.sebetahat, &iSnpStats.sigmahat,
+		verbose-1);
       if (verbose > 0)
-	printf ("%s %s spearman=%.8f\n", pt_iFtrStats->name.c_str(),
-		snpNameCoord.c_str(), rs);
-      iSnpStats.betahat = numeric_limits<double>::quiet_NaN();
-      iSnpStats.sebetahat = numeric_limits<double>::quiet_NaN();
-      iSnpStats.sigmahat = numeric_limits<double>::quiet_NaN();
-      double t = rs * sqrt((g.size()-2) / (1-rs*rs));
-      iSnpStats.pval = gsl_cdf_tdist_Q (t, g.size()-2);
-      iSnpStats.R2 = rs;
+	printf ("%s %s spearman=%.8f permutations=%ld P-value=%.8f\n",
+		pt_iFtrStats->name.c_str(), snpNameCoord.c_str(),
+		iSnpStats.R2, nbPermutations, iSnpStats.pval);
     }
-    if (iSnpStats.pval <= 1e-7)
+    if (iSnpStats.pval <= thresholdLowPval)
       isPvalLow = true;
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
@@ -979,6 +1027,10 @@ int main (int argc, char ** argv)
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")" << endl;
   }
   
+  gsl_rng_env_setup();   // used for permutations (Pval Spearman coef)
+  T = gsl_rng_default;
+  r = gsl_rng_alloc (T);
+  
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
   
@@ -998,6 +1050,8 @@ int main (int argc, char ** argv)
 					outFile,
 					useSpearman,
 					verbose);
+  
+  gsl_rng_free (r);
   
   if (verbose > 0)
   {
