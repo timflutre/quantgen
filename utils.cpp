@@ -63,7 +63,9 @@ vector<string> split (const string & s, char delim)
   return split (s, delim, tokens);
 }
 
-/** \brief Return a string with the elapsed time in hours, minutes and seconds.
+/** \brief Return a string with the elapsed time.
+ *  \note Output contains only s, or only m and s, or only h, m and s,
+ *  or d, h, m and s.
  */
 string elapsedTime (time_t startRawTime, time_t endRawTime)
 {
@@ -71,10 +73,15 @@ string elapsedTime (time_t startRawTime, time_t endRawTime)
   time_t elapsedSec = static_cast<time_t>(difftime (endRawTime, startRawTime));
   struct tm * ptm;
   ptm = gmtime (&elapsedSec);
-  sprintf (str, "%02ih %02im %02is",
-	   ptm->tm_hour,
-	   ptm->tm_min,
-	   ptm->tm_sec);
+  if (ptm->tm_mday == 1 & ptm->tm_hour == 0 & ptm->tm_min == 0)
+    sprintf (str, "%is", ptm->tm_sec);
+  else if (ptm->tm_mday == 1 & ptm->tm_hour == 0)
+    sprintf (str, "%im %is", ptm->tm_min, ptm->tm_sec);
+  else if (ptm->tm_mday == 1)
+    sprintf (str, "%ih %im %is", ptm->tm_hour, ptm->tm_min, ptm->tm_sec);
+  else
+    sprintf (str, "%id %ih %im %is", 1 - ptm->tm_mday, ptm->tm_hour,
+	     ptm->tm_min, ptm->tm_sec);
   return string(str);
 }
 
