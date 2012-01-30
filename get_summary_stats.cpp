@@ -60,9 +60,11 @@ struct SnpStats
   double sebetahat;
   double sigmahat;
   double pval;
-  double R2;
+  double R2;  // coef of determination, proportion of variance explained
   double rs;
   double rsPvalTtest;
+  double rsZscore;  // using Fisher transformation
+  double rsPvalZtest;
   double rsPvalPerms;
 };
 
@@ -99,6 +101,8 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
     {
       outStream << " " << iSnpStats.rs
 		<< " " << iSnpStats.rsPvalTtest
+		<< " " << iSnpStats.rsZscore
+		<< " " << iSnpStats.rsPvalZtest
 		<< " " << iSnpStats.rsPvalPerms;
     }
     outStream << endl;
@@ -116,7 +120,7 @@ void help (char ** argv)
        << "(one genetic variant per phenotype) and returns the summary"
        << " statistics betahat," << endl
        << "se(betahat) and sigmahat, as well as the P-value"
-       << " for H0:\"beta=0\" and the R2." << endl
+       << " for H0:\"beta=0\" and the PVE." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -136,18 +140,19 @@ void help (char ** argv)
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
        << "\t\t(one SNP coordinate per line)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
-       << "  -c, --cor\tnumber of permutations to assess significance of the Spearman"
-       << " rank correlation coefficient" << endl
-       << "\t\t(if c<0, rs is not computed; if c=0, only the P-value from the T test"
-       << " is returned)" << endl
+       << "  -c, --cor\tnumber of permutations to assess significance of the Spearman" << endl
+       << "\t\trank correlation coefficient" << endl
+       << "\t\t(default c<0, Spearman coef is not computed;" << endl
+       << "\t\tif c=0, + P-value for T-test, Z-score and P-value for Z-test;" << endl
+       << "\t\tif c>0, + P-value for c permutations of phenotype labels)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl
        << endl
        << "Remarks:" << endl
        << "  Samples with missing phenotypes (NA) are skipped, but missing genotypes are" << endl
-       << "forbidden: consider imputing them first. For non-variable genotypes, a zero effect" << endl
-       << "size is returned, along with an infinite std error and a P-value of 1." << endl;
+       << "forbidden: consider imputing them first. For non-variable genotypes, a zero" << endl
+       << "effect size is returned, along with an infinite std error and a P-value of 1." << endl;
 }
 
 /** \brief Display version and license information on stdout.
@@ -785,8 +790,8 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
  */
 void spearman (const string yName, const string xName,
 	       const vector<double> & g, const vector<double> & y,
-	       double * rs, double * pvalTtest, int nbPermutations,
-	       double * pvalPerms, int verbose)
+	       double * rs, double * pvalTtest, double * z, double * pvalZtest,
+	       int nbPermutations, double * pvalPerms, int verbose)
 {
   gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
 							     g.size());
@@ -798,6 +803,9 @@ void spearman (const string yName, const string xName,
   
   double t = (*rs) * sqrt((g.size() - 2) / (1 - pow(*rs,2)));
   *pvalTtest = gsl_cdf_tdist_Q (t, g.size()-2);
+  
+  *z = sqrt((g.size() - 3) / 1.06) * 1/2 * (log(1 + *rs) - log(1 - *rs));
+  *pvalZtest = gsl_cdf_ugaussian_Q (*z);
   
   if (nbPermutations > 0)
   {
@@ -822,9 +830,9 @@ void spearman (const string yName, const string xName,
   
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s n=%zu rs=%f pvalTtest=%f pvalPerms=%f\n",
+    printf ("%s %s n=%zu rs=%f pvalTtest=%f z=%f pvalZtest=%f pvalPerms=%f\n",
 	    yName.c_str(), xName.c_str(), g.size(),
-	    *rs, *pvalTtest, *pvalPerms);
+	    *rs, *pvalTtest, *z, *pvalZtest, *pvalPerms);
 #endif
 }
 
@@ -904,11 +912,12 @@ computeSummaryStatsForOneFeature (
     {
       spearman (pt_iFtrStats->name, snpNameCoord, g, y,
 		&iSnpStats.rs, &iSnpStats.rsPvalTtest,
+		&iSnpStats.rsZscore, &iSnpStats.rsPvalZtest,
 		nbPermutations, &iSnpStats.rsPvalPerms,
 		verbose-1);
       if (verbose > 0)
-	printf ("spearman=%.8f PvalTtest=%.8f permutations=%i PvalPerms=%.8f\n",
-		iSnpStats.rs, iSnpStats.rsPvalTtest,
+	printf ("spearman=%.8f PvalTtest=%.8f PvalZtest=%.8f permutations=%i PvalPerms=%.8f\n",
+		iSnpStats.rs, iSnpStats.rsPvalTtest, iSnpStats.rsPvalZtest,
 		nbPermutations, iSnpStats.rsPvalPerms);
     }
     else
