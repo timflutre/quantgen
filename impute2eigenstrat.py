@@ -22,13 +22,18 @@ def help():
     msg += "  -h, --help\tdisplay the help and exit\n"
     msg += "  -v, --verbose\tverbosity level (default=1)\n"
     msg += "  -i, --input\tinput file in the IMPUTE format (gzipped, with a header line)\n"
+    msg += "\t\tsee below the description of the header line\n"
     msg += "  -o, --output\tprefix of the output files\n"
     msg += "\t\twill be followed by '_eigenstrat_genotypes/snp/indiv.txt'\n"
-    msg += "  -l, --label\tlabel used in the thrid column of the 'indiv' file\n"
+    msg += "  -l, --label\tlabel used in the third column of the 'indiv' file\n"
     msg += "\n"
     msg += "Remarks:\n"
     msg += "  The first allele in the IMPUTE file is considered as being the reference\n"
     msg += "allele for EIGENSOF.\n"
+    msg += "  The header of the IMPUTE file should contain, in this order, the chromosome\n"
+    msg += "identifier, the SNP identifier, its genomic coordinate, the allele coded A,\n"
+    msg += "the allele coded B, then followed by the samples identifier. Note that the header\n"
+    msg += "of columns in the header is smaller than the number of columns in the rest of the file."
     print msg; sys.stdout.flush()
     
     
