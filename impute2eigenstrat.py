@@ -64,18 +64,18 @@ def setParamsFromCmdLine():
 verbose, imputeFile, eigensoftPrefix, label = setParamsFromCmdLine()
 if imputeFile == "":
     msg = "ERROR: missing input file (-i)"
+    sys.stderr.write("%s\n\n" % msg)
     help()
-    sys.stderr.write("%s\n" % msg)
     sys.exit(1)
 if eigensoftPrefix == "":
     msg = "ERROR: missing output prefix (-o)"
+    sys.stderr.write("%s\n\n" % msg)
     help()
-    sys.stderr.write("%s\n" % msg)
     sys.exit(1)
 if label == "":
     msg = "ERROR: missing label (-l)"
+    sys.stderr.write("%s\n\n" % msg)
     help()
-    sys.stderr.write("%s\n" % msg)
     sys.exit(1)
     
 # make file names for EIGENSOFT
