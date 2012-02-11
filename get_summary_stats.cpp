@@ -476,24 +476,28 @@ indexFtrs (const string phenoFile,
 /** \brief Return the minor allele frequency.
  *  \note The input comes from a line in the IMPUTE format that was splitted.
  */
-double getMaf (vector<string> tokens)
+double getMaf (const vector<string> & tokens,
+	       const vector<size_t> & vIdxIndsToSkip)
 {
   double maf = 0;
-  size_t n = (int) (tokens.size() - 5) / 3;
-  for (size_t i = 0; i < n; ++i)
+  for (size_t i = 0; i < (tokens.size() - 5) / 3; ++i)
   {
-    maf += 1 * atof(tokens[5+3*i+1].c_str())
-      + 2 * atof(tokens[5+3*i+2].c_str());
+    if(vIdxIndsToSkip.size() == 0 | find(vIdxIndsToSkip.begin(),
+					 vIdxIndsToSkip.end(),
+					 i) == vIdxIndsToSkip.end())
+      maf += 1 * atof(tokens[5+3*i+1].c_str())
+	+ 2 * atof(tokens[5+3*i+2].c_str());
   }
-  maf /= 2 * n;
+  maf /= 2 * ((tokens.size() - 5) / 3 - vIdxIndsToSkip.size());
   return maf <= 0.5 ? maf : (1 - maf);
 }
 
-/** \brief Index the file with the genotype values (IMPUTE2 format).
+/** \brief Index the file with the genotype values (IMPUTE format).
  */
 map<string, long int>
 indexSnps (const string genoFile,
 	   vector<string> vSnpsToKeep,
+	   const vector<size_t> vIdxIndsToSkip,
 	   const double minMaf,
 	   int verbose)
 {
@@ -535,7 +539,7 @@ indexSnps (const string genoFile,
     }
     if (minMaf > 0)
     {
-      maf = getMaf (tokens);
+      maf = getMaf (tokens, vIdxIndsToSkip);
 #ifdef DEBUG
       if (verbose > 1)
 	cout << "SNP " << tokens[1] << "|" << tokens[2] << ": MAF="
@@ -1111,7 +1115,7 @@ int main (int argc, char ** argv)
     = indexFtrs (phenoFile, ftrName2CisSnpNameCoords, vIndsToSkip,
 		 vIdxIndsToSkip, verbose);
   map<string, long int> snpNameCoord2Pos
-    = indexSnps (genoFile, vSnpsToKeep, minMaf, verbose);
+    = indexSnps (genoFile, vSnpsToKeep, vIdxIndsToSkip, minMaf, verbose);
   
   computeAndWriteSummaryStatsFtrPerFtr (ftrName2CisSnpNameCoords,
 					ftrName2Pos,
