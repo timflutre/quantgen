@@ -62,7 +62,6 @@ struct SnpStats
   double pval;
   double R2;  // coef of determination, proportion of variance explained
   double rs;
-  double rsPvalTtest;
   double rsZscore;  // using Fisher transformation
   double rsPvalZtest;
   double rsPvalPerms;
@@ -100,7 +99,6 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
     if (iSnpStats.rs != numeric_limits<double>::quiet_NaN())
     {
       outStream << " " << iSnpStats.rs
-		<< " " << iSnpStats.rsPvalTtest
 		<< " " << iSnpStats.rsZscore
 		<< " " << iSnpStats.rsPvalZtest
 		<< " " << iSnpStats.rsPvalPerms;
@@ -146,8 +144,8 @@ void help (char ** argv)
        << "  -c, --cor\tnumber of permutations to assess significance of the Spearman" << endl
        << "\t\trank correlation coefficient" << endl
        << "\t\t(default c<0, Spearman coef is not computed;" << endl
-       << "\t\tif c=0, + P-value for T-test, Z-score and P-value for Z-test;" << endl
-       << "\t\tif c>0, + P-value for c permutations of phenotype labels)" << endl
+       << "\t\tif c=0, add Z-score and P-value for Z-test;" << endl
+       << "\t\tif c>0, add P-value for c permutations of phenotype labels)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl
@@ -829,7 +827,7 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
  */
 void spearman (const string yName, const string xName,
 	       const vector<double> & g, const vector<double> & y,
-	       double * rs, double * pvalTtest, double * z, double * pvalZtest,
+	       double * rs, double * z, double * pvalZtest,
 	       int nbPermutations, double * pvalPerms, int verbose)
 {
   gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
@@ -839,9 +837,6 @@ void spearman (const string yName, const string xName,
   *rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
 				       gsl_y.vector.data, 1,
 				       g.size());
-  
-  double t = (*rs) * sqrt((g.size() - 2) / (1 - pow(*rs,2)));
-  *pvalTtest = gsl_cdf_tdist_Q (t, g.size()-2);
   
   *z = sqrt((g.size() - 3) / 1.06) * 1/2 * (log(1 + *rs) - log(1 - *rs));
   *pvalZtest = gsl_cdf_ugaussian_Q (*z);
@@ -869,9 +864,9 @@ void spearman (const string yName, const string xName,
   
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s n=%zu rs=%f pvalTtest=%f z=%f pvalZtest=%f pvalPerms=%f\n",
+    printf ("%s %s n=%zu rs=%f z=%f pvalZtest=%f pvalPerms=%f\n",
 	    yName.c_str(), xName.c_str(), g.size(),
-	    *rs, *pvalTtest, *z, *pvalZtest, *pvalPerms);
+	    *rs, *z, *pvalZtest, *pvalPerms);
 #endif
 }
 
@@ -951,19 +946,17 @@ computeSummaryStatsForOneFeature (
     if (nbPermutations >= 0)
     {
       spearman (pt_iFtrStats->name, snpNameCoord, g, y,
-		&iSnpStats.rs, &iSnpStats.rsPvalTtest,
-		&iSnpStats.rsZscore, &iSnpStats.rsPvalZtest,
-		nbPermutations, &iSnpStats.rsPvalPerms,
-		verbose-1);
+		&iSnpStats.rs, &iSnpStats.rsZscore,
+		&iSnpStats.rsPvalZtest, nbPermutations,
+		&iSnpStats.rsPvalPerms, verbose-1);
       if (verbose > 0)
-	printf ("spearman=%.8f PvalTtest=%.8f PvalZtest=%.8f permutations=%i PvalPerms=%.8f\n",
-		iSnpStats.rs, iSnpStats.rsPvalTtest, iSnpStats.rsPvalZtest,
+	printf ("spearman=%.8f PvalZtest=%.8f permutations=%i PvalPerms=%.8f\n",
+		iSnpStats.rs, iSnpStats.rsPvalZtest,
 		nbPermutations, iSnpStats.rsPvalPerms);
     }
     else
     {
       iSnpStats.rs = numeric_limits<double>::quiet_NaN();
-      iSnpStats.rsPvalTtest = numeric_limits<double>::quiet_NaN();
       iSnpStats.rsZscore = numeric_limits<double>::quiet_NaN();
       iSnpStats.rsPvalZtest = numeric_limits<double>::quiet_NaN();
       iSnpStats.rsPvalPerms = numeric_limits<double>::quiet_NaN();
@@ -1025,7 +1018,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   }
   outStream << "ftr snp coord n betahat sebetahat sigmahat pval R2";
   if (nbPermutations >= 0)
-    outStream << " rs rsPvalTtest rsZscore rsPvalZtest rsPvalPerms";
+    outStream << " rs rsZscore rsPvalZtest rsPvalPerms";
   outStream << endl;
   if (verbose > 0)
   {
