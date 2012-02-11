@@ -1,7 +1,7 @@
 /** \file get_summary_stats.cpp
  *
  *  `get_summary_stats' computes summary statistics of association between genotypes and phenotypes.
- *  Copyright (C) 2011  T. Flutre
+ *  Copyright (C) 2011,2012 Timothee Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -128,9 +128,10 @@ void help (char ** argv)
        << "  -h, --help\tdisplay the help and exit" << endl
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (default=1)" << endl
-       << "  -l, --links\tgziped file with links <gene><space/tab><SNP|coord>" << endl
+       << "  -l, --links\tgzipped file with links <gene><space/tab><SNP|coord>" << endl
        << "\t\t(especially useful to focus on genetic variants in cis)" << endl
-       << "  -g, --geno\tfile with genotypes in IMPUTE format" << endl
+       << "  -g, --geno\tfile with genotypes in IMPUTE format (delimiter=<space/tab>)" << endl
+       << "\t\tsamples in columns should be in same order as the phenotype file" << endl
        << "  -p, --pheno\tfile with phenotypes (row 1 for sample names,"
        << " column 1" << endl
        << "\t\tfor feature names, delimiter=<space/tab>)" << endl
@@ -139,6 +140,8 @@ void help (char ** argv)
        << "\t\t(one feature name per line)" << endl
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
        << "\t\t(one SNP coordinate per line)" << endl
+       << "  -d, --discard\tgzipped file with a list of individuals to discard" << endl
+       << "\t\t(one individual per line, should match header of phenotype file)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
        << "  -c, --cor\tnumber of permutations to assess significance of the Spearman" << endl
        << "\t\trank correlation coefficient" << endl
@@ -179,6 +182,7 @@ void parse_args (int argc, char ** argv,
 		 string * pt_outFile,
 		 string * pt_ftrsFile,
 		 string * pt_snpsFile,
+		 string * pt_indsFile,
 		 double * pt_minMaf,
 		 int * pt_nbPermutations,
 		 int * pt_verbose)
@@ -197,11 +201,12 @@ void parse_args (int argc, char ** argv,
 	{"output", required_argument, 0, 'o'},
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
+	{"discard", required_argument, 0, 'd'},
 	{"maf", required_argument, 0, 'm'},
 	{"cor", no_argument, 0, 'c'}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:m:c:",
+    c = getopt_long (argc, argv, "hVv:l:g:p:o:f:s:d:m:c:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -241,6 +246,9 @@ void parse_args (int argc, char ** argv,
       break;
     case 's':
       *pt_snpsFile = optarg;
+      break;
+    case 'd':
+      *pt_indsFile = optarg;
       break;
     case 'm':
       *pt_minMaf = atof(optarg);
@@ -311,8 +319,8 @@ void parse_args (int argc, char ** argv,
  */
 map<string, vector<string> >
 loadLinksFtr2Snps (const string linksFile,
-		   vector<string> vFtrsToKeep,
-		   vector<string> vSnpsToKeep,
+		   const vector<string> vFtrsToKeep,
+		   const vector<string> vSnpsToKeep,
 		   int verbose)
 {
   map<string, vector<string> > ftrName2CisSnpNameCoords;
@@ -351,15 +359,16 @@ loadLinksFtr2Snps (const string linksFile,
       exit (1);
     }
     if (! vFtrsToKeep.empty() &&
-	find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0]) == vFtrsToKeep.end())
+	find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0]) ==
+	vFtrsToKeep.end())
     {
       continue;
     }
     if (! vSnpsToKeep.empty())
     {
       vector<string> tokens2 = split (tokens[1], '|');
-      if (find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens2[1])
-	  == vSnpsToKeep.end())
+      if (find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens2[1]) ==
+	  vSnpsToKeep.end())
 	continue;
     }
     line_id++;
@@ -384,10 +393,13 @@ loadLinksFtr2Snps (const string linksFile,
 /** \brief Index the file with the phenotype values, ie. a big matrix with
  *  samples in columns and features in row.
  *  Only for the features having SNPs in cis.
+ *  Only for the individuals not discarded.
  */
 map<string, long int>
 indexFtrs (const string phenoFile,
 	   const map<string, vector<string> > ftrName2CisSnpNameCoords,
+	   const vector<string> vIndsToSkip,
+	   vector<size_t> & vIdxIndsToSkip,
 	   int verbose)
 {
   map<string, long int> ftrName2Pos;
@@ -415,6 +427,10 @@ indexFtrs (const string phenoFile,
   else
     split (line, ' ', tokens);
   nbSamples = tokens.size();
+  for(size_t i = 0; i < tokens.size(); ++i)
+    if(vIndsToSkip.size() > 0 & find(vIndsToSkip.begin(), vIndsToSkip.end(),
+				     tokens[i]) != vIndsToSkip.end())
+      vIdxIndsToSkip.push_back(i);
   
   while (phenoStream.good())
   {
@@ -431,7 +447,8 @@ indexFtrs (const string phenoFile,
     if (tokens.size() != nbSamples+1)
     {
       cerr << "ERROR: different number of samples for feature "
-	   << tokens[0] << " (" << tokens.size() << " vs " << nbSamples+1 << ")" << endl;
+	   << tokens[0] << " (" << tokens.size() << " vs " << nbSamples+1
+	   << ")" << endl;
       exit (1);
     }
     if (ftrName2CisSnpNameCoords.find(tokens[0]) == ftrName2CisSnpNameCoords.end())
@@ -451,6 +468,8 @@ indexFtrs (const string phenoFile,
   if (verbose > 0)
   {
     cout << "features with values: " << ftrName2Pos.size() << endl;
+    if(vIdxIndsToSkip.size() > 0)
+      cout << "individuals to discard: " << vIdxIndsToSkip.size() << endl;
   }
   
   return ftrName2Pos;
@@ -521,13 +540,15 @@ indexSnps (const string genoFile,
       maf = getMaf (tokens);
 #ifdef DEBUG
       if (verbose > 1)
-	cout << "SNP " << tokens[1] << "|" << tokens[2] << ": MAF=" << maf << endl;
+	cout << "SNP " << tokens[1] << "|" << tokens[2] << ": MAF="
+	     << maf << endl;
 #endif
       if (maf < minMaf)
       {
 #ifdef DEBUG
 	if (verbose > 1)
-	  cout << "SNP " << tokens[1] << "|" << tokens[2] << ": skip because MAF < " << minMaf << endl;
+	  cout << "SNP " << tokens[1] << "|" << tokens[2] <<
+	    ": skip because MAF < " << minMaf << endl;
 #endif
 	continue;
       }
@@ -555,20 +576,29 @@ void getPhenoValues (const string ftrName,
 		     istream & phenoStream,
 		     long int ftrPos,
 		     vector<double> & y,
+		     const vector<size_t> vIdxIndsToSkip,
 		     vector<bool> & isNa,
 		     int verbose)
 {
   string line, tok;
   vector<string> tokens;
+  isNa.clear();
   phenoStream.seekg(ftrPos);
   getline (phenoStream, line);
   if (line.find('\t') != string::npos)
     split (line, '\t', tokens);
   else
     split (line, ' ', tokens);
-  for (size_t i = 0; i < tokens.size()-1; ++i)
+  for (size_t i = 1; i < tokens.size(); ++i)
   {
-    tok = tokens[i+1];
+    if(vIdxIndsToSkip.size() > 0 &
+       find(vIdxIndsToSkip.begin(), vIdxIndsToSkip.end(), i-1) !=
+       vIdxIndsToSkip.end())
+    {
+      isNa.push_back (false);
+      continue;
+    }
+    tok = tokens[i];
     if (tok.compare("NA") == 0)
     {
       isNa.push_back (true);
@@ -581,8 +611,9 @@ void getPhenoValues (const string ftrName,
   }
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s phenotypes=%zu non-missing=%zu %.4f %.4f ...\n",
-	    ftrName.c_str(), tokens.size()-1, y.size(), y[0], y[1]);
+    printf ("%s samples=%zu to-skip=%zu missing=%zu remaining=%zu %.4f %.4f ...\n",
+	    ftrName.c_str(), tokens.size()-1, vIdxIndsToSkip.size(),
+	    (size_t) count(isNa.begin(), isNa.end(), true), y.size(), y[0], y[1]);
 #endif
 }
 
@@ -595,6 +626,7 @@ void getGenoValues (const string ftrName,
 		    istream & genoStream,
 		    long int snpPos,
 		    vector<double> & g,
+		    const vector<size_t> vIdxIndsToSkip,
 		    const vector<bool> & isNa,
 		    int verbose)
 {
@@ -609,17 +641,24 @@ void getGenoValues (const string ftrName,
     split (line, ' ', tokens);
   for (i = 0; i < (tokens.size() - 5) / 3; ++i)
   {
+    if (vIdxIndsToSkip.size() > 0 &
+	find(vIdxIndsToSkip.begin(), vIdxIndsToSkip.end(), i) !=
+	vIdxIndsToSkip.end())
+      continue;
     if (! isNa[i])
     {
       g.push_back (0 * atof(tokens[5+3*i].c_str())
 		   + 1 * atof(tokens[5+3*i+1].c_str())
 		   + 2 * atof(tokens[5+3*i+2].c_str()));
     }
+    else
+      cout << "isNa[" << i << "]=true" << endl;
   }
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s genotypes=%zu %.4f %.4f ...\n",
-	    ftrName.c_str(), snpNameCoord.c_str(), g.size(), g[0], g[1]);
+    printf ("%s %s samples=%zu to-skip=%zu remaining=%zu %.4f %.4f ...\n",
+	    ftrName.c_str(), snpNameCoord.c_str(), (tokens.size()-5)/3,
+	    vIdxIndsToSkip.size(), g.size(), g[0], g[1]);
 #endif
 }
 
@@ -699,7 +738,7 @@ void ols (const string yName, const string xName,
  *  for any i and j in tiesTrace, ranks[i] == ranks[j].
  */
 void
-resolveTie (double * ranks, vector<size_t> tiesTrace)
+resolveTies (double * ranks, vector<size_t> tiesTrace)
 {
   // constant value of ranks over tiesTrace
   double c = ranks[tiesTrace[0]];
@@ -743,7 +782,7 @@ rank (double * ranks, const double data[], const size_t stride, const size_t n)
     {
       pos = i + 1;
       if(tiesTrace.size() > 1)
-	resolveTie(ranks, tiesTrace);
+	resolveTies (ranks, tiesTrace);
       tiesTrace.clear();
       tiesTrace.push_back(p[i]);
     }
@@ -752,7 +791,7 @@ rank (double * ranks, const double data[], const size_t stride, const size_t n)
     ranks[p[i]] = pos;
   }
   if(tiesTrace.size() > 1)
-    resolveTie(ranks, tiesTrace);
+    resolveTies (ranks, tiesTrace);
   
   free (p);
   free (ds);
@@ -846,6 +885,7 @@ computeSummaryStatsForOneFeature (
   map<string, long int> snpNameCoord2Pos,
   ifstream & genoStream,
   const vector<double> & y,
+  const vector<size_t> vIdxIndsToSkip,
   const vector<bool> isNa,
   int nbPermutations,
   FtrStats * pt_iFtrStats,
@@ -872,11 +912,11 @@ computeSummaryStatsForOneFeature (
     size_t snpPos = snpNameCoord2Pos[snpNameCoord];
     vector<double> g;
     getGenoValues (pt_iFtrStats->name, snpNameCoord, genoStream, snpPos, g,
-		   isNa, verbose);
+		   vIdxIndsToSkip, isNa, verbose);
     if (y.size() != g.size())
     {
       cerr << "ERROR: different number of samples for feature "
-	   << pt_iFtrStats->name << " (" << y.size() << ")  and SNP "
+	   << pt_iFtrStats->name << " (" << y.size() << ") and SNP "
 	   << snpNameCoord << " (" << g.size() << ")" << endl;
       exit (1);
     }
@@ -924,6 +964,8 @@ computeSummaryStatsForOneFeature (
     {
       iSnpStats.rs = numeric_limits<double>::quiet_NaN();
       iSnpStats.rsPvalTtest = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rsZscore = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rsPvalZtest = numeric_limits<double>::quiet_NaN();
       iSnpStats.rsPvalPerms = numeric_limits<double>::quiet_NaN();
     }
     if (iSnpStats.pval <= thresholdLowPval)
@@ -942,6 +984,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   map<string, vector<string> > ftrName2CisSnpNameCoords,
   map<string, long int> ftrName2Pos,
   map<string, long int> snpNameCoord2Pos,
+  vector<size_t> vIdxIndsToSkip,
   string phenoFile,
   string genoFile,
   string outFile,
@@ -980,6 +1023,10 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     cerr << "ERROR: can't open file " << outFile << endl;
     exit (1);
   }
+  outStream << "ftr snp coord n betahat sebetahat sigmahat pval R2";
+  if (nbPermutations >= 0)
+    outStream << " rs rsPvalTtest rsZscore rsPvalZtest rsPvalPerms";
+  outStream << endl;
   if (verbose > 0)
   {
     cout << "compute summary statistics for each pair feature-SNP..." << endl;
@@ -1004,13 +1051,15 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     
     // retrieve its values
     ftrPos = ftrName2Pos[ftrName];
-    getPhenoValues (ftrName, phenoStream, ftrPos, y, isNa, verbose-1);
+    getPhenoValues (ftrName, phenoStream, ftrPos, y, vIdxIndsToSkip, isNa,
+		    verbose-1);
     
     // loop over SNPs in cis
     computeSummaryStatsForOneFeature (ftrName2CisSnpNameCoords_it,
 				      snpNameCoord2Pos,
 				      genoStream,
 				      y,
+				      vIdxIndsToSkip,
 				      isNa,
 				      nbPermutations,
 				      &iFtrStats,
@@ -1037,18 +1086,21 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 
 int main (int argc, char ** argv)
 {
-  string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile;
+  string linksFile, genoFile, phenoFile, outFile, ftrsFile, snpsFile, indsFile;
+  vector<size_t> vIdxIndsToSkip;
   double minMaf = 0.0;
   int nbPermutations = -1;
   int verbose = 1;
   parse_args (argc, argv, &linksFile, &genoFile, &phenoFile, &outFile,
-	      &ftrsFile, &snpsFile, &minMaf, &nbPermutations, &verbose);
+	      &ftrsFile, &snpsFile, &indsFile, &minMaf, &nbPermutations,
+	      &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
   {
     time (&startRawTime);
-    cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")" << endl;
+    cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
+	 << endl;
   }
   
   gsl_rng_env_setup();   // used for permutations (Pval Spearman coef)
@@ -1057,18 +1109,21 @@ int main (int argc, char ** argv)
   
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
+  vector<string> vIndsToSkip = loadOneColumnFile (indsFile, verbose);
   
   map<string, vector<string> > ftrName2CisSnpNameCoords
     = loadLinksFtr2Snps (linksFile, vFtrsToKeep, vSnpsToKeep, verbose);
   
   map<string, long int> ftrName2Pos
-    = indexFtrs (phenoFile, ftrName2CisSnpNameCoords, verbose);
+    = indexFtrs (phenoFile, ftrName2CisSnpNameCoords, vIndsToSkip,
+		 vIdxIndsToSkip, verbose);
   map<string, long int> snpNameCoord2Pos
     = indexSnps (genoFile, vSnpsToKeep, minMaf, verbose);
   
   computeAndWriteSummaryStatsFtrPerFtr (ftrName2CisSnpNameCoords,
 					ftrName2Pos,
 					snpNameCoord2Pos,
+					vIdxIndsToSkip,
 					phenoFile,
 					genoFile,
 					outFile,
