@@ -166,7 +166,7 @@ vector<size_t> getCounters (size_t nbIterations, size_t nbSteps = 5)
 {
   vector<size_t> vCounters;
   size_t step = (size_t) floor (nbIterations / nbSteps);
-  for (size_t i = 1; i < nbSteps-1; ++i)
+  for (size_t i = 1; i < nbSteps; ++i)
     vCounters.push_back (i * step);
   vCounters.push_back (nbIterations);
   return vCounters;
