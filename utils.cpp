@@ -152,6 +152,63 @@ vector<string> loadOneColumnFile (string inFile, int verbose)
   return vItems;
 }
 
+/** \brief Load a one-column file compressed with gzip into a vector of size_t.
+ */
+vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose)
+{
+  vector<size_t> vItems;
+  
+  if (inFile.empty())
+    return vItems;
+  
+  string line;
+  igzstream stream;
+  vector<string> tokens;
+  size_t line_id = 0;
+  
+  stream.open(inFile.c_str());
+  if (! stream.good())
+  {
+    cerr << "ERROR: can't open file " << inFile << endl;
+    exit (1);
+  }
+  if (verbose > 0)
+  {
+    cout <<"load file " << inFile << "..." << endl;
+  }
+  
+  while (stream.good())
+  {
+    getline (stream, line);
+    if (line.empty())
+    {
+      break;
+    }
+    line_id++;
+    split (line, '\t', tokens);
+    if (tokens.size() != 1)
+    {
+      cerr << "ERROR: file " << inFile << " should have only one column"
+	   << " at line " << line_id << endl;
+      exit (1);
+    }
+    size_t idx = strtoul (tokens[0].c_str(), NULL, 0);
+    if (find(vItems.begin(), vItems.end(), idx) == vItems.end())
+    {
+      vItems.push_back (idx);
+    }
+  }
+  
+  stream.close();
+  
+  if (verbose > 0)
+  {
+    cout << "items loaded: " << vItems.size() << endl;
+  }
+  
+  return vItems;
+}
+
 /** \brief Used by scandir.
  */
 static int dummy_selector (const struct dirent * dir_entry)
