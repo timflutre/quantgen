@@ -97,7 +97,7 @@ void help (char ** argv)
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (default=1)" << endl
        << "  -i, --input\tdirectory with the summary stats for each subgroup" << endl
-       << "\t\t(8-column files: gene snp coord n betahat sebetahat sigmahat Pval)" << endl
+       << "\t\t(one file per subgroup, with at least 7 columns:\n\t\tftr snp coord n betahat sebetahat sigmahat)" << endl
        << "  -g, --grid\tfile with the grid of values for psi2 and omega2 (ES model)" << endl
        << "  -o, --out\tgzipped output file" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
@@ -426,17 +426,23 @@ void indexInputFiles (vector<string> vInFiles,
 	cerr << endl << "ERROR: file " << vInFiles[subgroup] 
 	     << " at line " << line_id 
 	     << " should have at least 7 fields:" << endl
-	     << "feature<space>SNP<space>coord<space>n<space>betahat<space>sebetahat<space>sigmahat"
+	     << "ftr<space>snp<space>coord<space>n<space>betahat<space>sebetahat<space>sigmahat"
 	     << endl;
 	exit (1);
       }
+      if (tokens[0].compare("ftr") == 0)
+      {
+	continue;  // skip header line
+      }
       if (! vFtrsToKeep.empty() &&
-	  find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0]) == vFtrsToKeep.end())
+	  find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0]) ==
+	  vFtrsToKeep.end())
       {
 	continue;  // skip line, based on feature name
       }
       if (! vSnpsToKeep.empty() &&
-	  find(vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2]) == vSnpsToKeep.end())
+	  find(vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2]) ==
+	  vSnpsToKeep.end())
       {
 	continue;  // skip line, based on SNP coordinate
       }
@@ -895,8 +901,8 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     cerr << "ERROR: can't open file '" << outFile << "' for writing." << endl;
     exit (1);
   }
-  outStream << "feature"
-	    << " variant"
+  outStream << "ftr"
+	    << " snp"
 	    << " coord"
 	    << " nb.subgroups"
 	    << " nb.samples"
@@ -1026,8 +1032,8 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     cerr << "ERROR: can't open file '" << outFile << "' for writing." << endl;
     exit (1);
   }
-  outStream << "feature"
-	    << " variant"
+  outStream << "ftr"
+	    << " snp"
 	    << " coord"
 	    << " nb.subgroups"
 	    << " nb.samples"
