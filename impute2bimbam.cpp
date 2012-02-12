@@ -54,6 +54,8 @@ void help (char ** argv)
        << "\t\teg. '~/data/chrXX_chunkAll.impute2'" << endl
        << "  -o, --output\tgeneric prefix for the output files" << endl
        << "\t\tdefault is 'chrXX' leading to 'chrXX.bimbam' and 'chrXX_snpAnnot.txt'" << endl
+       << "  -d, --discard\tgzipped file with a list of individuals to discard" << endl
+       << "\t\t(one number per line, for the index of the column to skip)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -i ~/data/chrXX_chunkAll.impute2" << endl;
@@ -77,6 +79,7 @@ void version (char ** argv)
 void parse_args (int argc, char ** argv,
 		 string * pt_input,
 		 string * pt_output,
+		 string * pt_indsFile,
 		 int * pt_verbose)
 {
   int c = 0;
@@ -89,9 +92,10 @@ void parse_args (int argc, char ** argv,
 	{"verbose", required_argument, 0, 'v'},
 	{"input", required_argument, 0, 'i'},
 	{"output", required_argument, 0, 'o'},
+	{"discard", required_argument, 0, 'd'}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:i:o:",
+    c = getopt_long (argc, argv, "hVv:i:o:d:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -120,6 +124,9 @@ void parse_args (int argc, char ** argv,
     case 'o':
       *pt_output = optarg;
       break;
+    case 'd':
+      *pt_indsFile = optarg;
+      break;
     case '?':
       break;
     default:
@@ -140,6 +147,7 @@ void parse_args (int argc, char ** argv,
 
 void convertImputeFilesToBimbamFiles (string input,
 				      string output,
+				      const vector<size_t> vIdxIndsToSkip,
 				      int verbose)
 {
   string line;
@@ -210,6 +218,10 @@ void convertImputeFilesToBimbamFiles (string input,
       nbSamples = (size_t) floor ((tokens.size() - 5) / 3);
       for (size_t i = 0; i < nbSamples; ++i)
       {
+	if (vIdxIndsToSkip.size() > 0 &
+	    find(vIdxIndsToSkip.begin(), vIdxIndsToSkip.end(), i) !=
+	    vIdxIndsToSkip.end())
+	  continue;
 	outStream1 << " " << 2 * atof(tokens[5+3*i].c_str())
 	  + 1 * atof(tokens[5+3*i+1].c_str())
 	  + 0 * atof(tokens[5+3*i+2].c_str());
@@ -229,9 +241,9 @@ void convertImputeFilesToBimbamFiles (string input,
 
 int main (int argc, char ** argv)
 {
-  string input, output;
+  string input, output, indsFile;
   int verbose = 1;
-  parse_args (argc, argv, &input, &output, &verbose);
+  parse_args (argc, argv, &input, &output, &indsFile, &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -240,7 +252,9 @@ int main (int argc, char ** argv)
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")" << endl;
   }
   
-  convertImputeFilesToBimbamFiles (input, output, verbose);
+  vector<size_t> vIdxIndsToSkip = loadOneColumnFileAsNumbers (indsFile, verbose);
+  
+  convertImputeFilesToBimbamFiles (input, output, vIdxIndsToSkip, verbose);
   
   if (verbose > 0)
   {
