@@ -56,6 +56,7 @@ struct SnpStats
 {
   string name;  // eg. rs2205177
   size_t coord;
+  double maf;
   double betahat;
   double sebetahat;
   double sigmahat;
@@ -90,6 +91,7 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
     outStream << iFtrStats.name
 	      << " " << iSnpStats.name
 	      << " " << iSnpStats.coord
+	      << " " << iSnpStats.maf
 	      << " " << n
 	      << " " << iSnpStats.betahat
 	      << " " << iSnpStats.sebetahat
@@ -141,6 +143,7 @@ void help (char ** argv)
        << "  -d, --discard\tgzipped file with a list of individuals to discard" << endl
        << "\t\t(one individual per line, should match header of phenotype file)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
+       << "\t\t(whatever the option, the MAF will still be computed and saved)" << endl
        << "  -c, --cor\tnumber of permutations to assess significance of the Spearman" << endl
        << "\t\trank correlation coefficient" << endl
        << "\t\t(default c<0, Spearman coef is not computed;" << endl
@@ -630,6 +633,7 @@ void getGenoValues (const string ftrName,
 		    vector<double> & g,
 		    const vector<size_t> vIdxIndsToSkip,
 		    const vector<bool> & isNa,
+		    double * pt_maf,
 		    int verbose)
 {
   size_t i = 0;
@@ -641,6 +645,7 @@ void getGenoValues (const string ftrName,
     split (line, '\t', tokens);
   else
     split (line, ' ', tokens);
+  *pt_maf = getMaf (tokens, vIdxIndsToSkip);
   for (i = 0; i < (tokens.size() - 5) / 3; ++i)
   {
     if (vIdxIndsToSkip.size() > 0 &
@@ -893,12 +898,11 @@ computeSummaryStatsForOneFeature (
 {
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
   size_t snp_id;
-  map<string, vector<double> > mSnpNameCoord2Genotypes;
   double thresholdLowPval = 1e-7;
   bool isPvalLow = false;
   
   // for each SNP in cis of the given feature,
-  // retrieve its genotypes and keep them in a map
+  // retrieve its genotypes, compute the OLS summary stats and keep them
   for (snp_id = 0; snp_id < cisSnpNameCoords.size(); snp_id++)
   {
     string snpNameCoord = cisSnpNameCoords[snp_id];
@@ -908,10 +912,16 @@ computeSummaryStatsForOneFeature (
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
     
+    SnpStats iSnpStats;
+    vector<string> tokens;
+    split (snpNameCoord, '|', tokens);
+    iSnpStats.name = tokens[0];
+    iSnpStats.coord = atol(tokens[1].c_str());
+    
     size_t snpPos = snpNameCoord2Pos[snpNameCoord];
     vector<double> g;
     getGenoValues (pt_iFtrStats->name, snpNameCoord, genoStream, snpPos, g,
-		   vIdxIndsToSkip, isNa, verbose);
+		   vIdxIndsToSkip, isNa, &iSnpStats.maf, verbose);
     if (y.size() != g.size())
     {
       cerr << "ERROR: different number of samples for feature "
@@ -920,25 +930,6 @@ computeSummaryStatsForOneFeature (
       exit (1);
     }
     
-    mSnpNameCoord2Genotypes.insert( make_pair(snpNameCoord, g) );
-  }
-  
-  // for each SNP in cis of the given feature
-  // compute the OLS summary stats and keep them
-  map<string, vector<double> >::iterator mSnpNameCoord2Genotypes_it;
-  for (mSnpNameCoord2Genotypes_it = mSnpNameCoord2Genotypes.begin();
-       mSnpNameCoord2Genotypes_it != mSnpNameCoord2Genotypes.end();
-       mSnpNameCoord2Genotypes_it++)
-  {
-    SnpStats iSnpStats;
-    
-    string snpNameCoord = mSnpNameCoord2Genotypes_it->first;
-    vector<string> tokens;
-    split (snpNameCoord, '|', tokens);
-    iSnpStats.name = tokens[0];
-    iSnpStats.coord = atol(tokens[1].c_str());
-    
-    vector<double> g = mSnpNameCoord2Genotypes_it->second;
     ols (pt_iFtrStats->name, snpNameCoord, g, y,
 	 &iSnpStats.betahat, &iSnpStats.sebetahat, &iSnpStats.sigmahat,
 	 &iSnpStats.pval, &iSnpStats.R2, verbose-1);
@@ -1020,9 +1011,8 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     cerr << "ERROR: can't open file " << outFile << endl;
     exit (1);
   }
-  outStream << "ftr snp coord n betahat sebetahat sigmahat pval R2";
-  if (nbPermutations >= 0)
-    outStream << " rs rsZscore rsPvalZtest rsPvalPerms";
+  outStream << "ftr snp coord maf n betahat sebetahat sigmahat pval R2";
+  outStream << " rs rsZscore rsPvalZtest rsPvalPerms";
   outStream << endl;
   if (verbose > 0)
   {
