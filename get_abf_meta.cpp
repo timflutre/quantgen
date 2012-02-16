@@ -526,6 +526,7 @@ void getSummaryStatsForPair (Pair iPair,
 			     vector<size_t> vPositions,
 			     vector<ifstream *> vPtInStreams,
 			     map<size_t, vector<double> > & allSumStats,
+			     double * pt_maf,
 			     int * pt_nbSubgroupsUsed,
 			     int * pt_nbSamplesUsed,
 			     int verbose)
@@ -535,6 +536,7 @@ void getSummaryStatsForPair (Pair iPair,
   vector<string> tokens;
   
   allSumStats.clear();
+  *pt_maf = 0;
   *pt_nbSubgroupsUsed = 0;
   *pt_nbSamplesUsed = 0;
   
@@ -570,10 +572,11 @@ void getSummaryStatsForPair (Pair iPair,
 	cerr << line << endl;
 	exit (1);
       }
-      *pt_nbSamplesUsed += atoi (tokens[3].c_str());
-      for (colIdx = 3; colIdx < 7; ++colIdx)
+      *pt_maf = atof (tokens[3].c_str());
+      *pt_nbSamplesUsed += atoi (tokens[4].c_str());
+      for (colIdx = 4; colIdx < 8; ++colIdx)
       {
-	vSumStats[colIdx-3] = atof (tokens[colIdx].c_str());
+	vSumStats[colIdx-4] = atof (tokens[colIdx].c_str());
       }
     }
     
@@ -593,6 +596,7 @@ void getSummaryStatsForPair (string pairId,
 			     vector<size_t> vPositions,
 			     vector<ifstream *> vPtInStreams,
 			     map<size_t, vector<double> > & allSumStats,
+			     double * pt_maf,
 			     int * pt_nbSubgroupsUsed,
 			     int * pt_nbSamplesUsed,
 			     int verbose)
@@ -602,6 +606,7 @@ void getSummaryStatsForPair (string pairId,
   vector<string> tokens;
   
   allSumStats.clear();
+  *pt_maf = 0;
   *pt_nbSubgroupsUsed = 0;
   *pt_nbSamplesUsed = 0;
   
@@ -636,10 +641,11 @@ void getSummaryStatsForPair (string pairId,
 	cerr << line << endl;
 	exit (1);
       }
-      *pt_nbSamplesUsed += atoi (tokens[3].c_str());
-      for (colIdx = 3; colIdx < 7; ++colIdx)
+      *pt_maf = atof (tokens[3].c_str());
+      *pt_nbSamplesUsed += atoi (tokens[4].c_str());
+      for (colIdx = 4; colIdx < 8; ++colIdx)
       {
-	vSumStats[colIdx-3] = atof (tokens[colIdx].c_str());
+	vSumStats[colIdx-4] = atof (tokens[colIdx].c_str());
       }
     }
     
@@ -869,7 +875,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   Pair iPair;
   vector<size_t> vPositions;
   map<size_t, vector<double> > allSumStats;  // 1 vector of doubles per subgroup
-  double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0,
+  double maf = 0, l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0,
     nbPairs = 0, step = floor(mPairs2Positions.size() / 5);
   int nbSamplesUsed = 0, nbSubgroupsUsed = 0;
   ogzstream outStream;
@@ -904,6 +910,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   outStream << "ftr"
 	    << " snp"
 	    << " coord"
+	    << " maf"
 	    << " nb.subgroups"
 	    << " nb.samples"
 	    << " l10abf.avg"
@@ -934,7 +941,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     vPositions = it->second;
     
     getSummaryStatsForPair (iPair, vPositions, vPtInStreams, allSumStats,
-			    &nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
+			    &maf, &nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
     ++vNbSubgroups2Occurrences[nbSubgroupsUsed];
     if (verbose > 1)
       cout << "#" << nbPairs << " " << iPair.feature
@@ -1000,7 +1007,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   vector<string> tokens;
   vector<size_t> vPositions;
   map<size_t, vector<double> > allSumStats;  // 1 vector of doubles per subgroup
-  double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0;
+  double maf, l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0;
   int nbSamplesUsed = 0, nbSubgroupsUsed = 0;
   ogzstream outStream;
   vector<size_t> vNbSubgroups2Occurrences (vInFiles.size()+1, 0);
@@ -1035,6 +1042,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
   outStream << "ftr"
 	    << " snp"
 	    << " coord"
+	    << " maf"
 	    << " nb.subgroups"
 	    << " nb.samples"
 	    << " l10abf.avg"
@@ -1063,7 +1071,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     
     // retrieve its summary statistics
     getSummaryStatsForPair (pairId, vPositions, vPtInStreams, allSumStats,
-			    &nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
+			    &maf, &nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
     ++vNbSubgroups2Occurrences[nbSubgroupsUsed];
     if (verbose > 1)
       cout << "#" << nbPairs << " " << pairId
@@ -1078,6 +1086,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     outStream << tokens[0]
 	      << " " << "--"
 	      << " " << tokens[1]
+	      << " " << maf
 	      << " " << nbSubgroupsUsed
 	      << " " << nbSamplesUsed
 	      << " " << l10_abf_meta
