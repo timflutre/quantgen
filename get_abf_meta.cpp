@@ -102,6 +102,8 @@ void help (char ** argv)
        << "  -o, --out\tgzipped output file" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
        << "  -s, --snp\tgzipped file with a list of SNP coordinates to analyze" << endl
+       << "  -x, --index\twhich SNP info to use to index pairs feature-SNP" << endl
+       << "\t\t(default=id+coord/id/coord)" << endl
        << "  "
        << endl
        << "Examples:" << endl
@@ -134,6 +136,7 @@ void parse_args (int argc, char ** argv,
 		 string * pt_outFile,
 		 string * pt_ftrsFile,
 		 string * pt_snpsFile,
+		 string * pt_snpIdx,
 		 int * pt_verbose)
 {
   int c = 0;
@@ -148,10 +151,11 @@ void parse_args (int argc, char ** argv,
 	{"grid", required_argument, 0, 'g'},
 	{"output", required_argument, 0, 'o'},
 	{"ftr", required_argument, 0, 'f'},
-	{"snp", required_argument, 0, 's'}
+	{"snp", required_argument, 0, 's'},
+	{"index", required_argument, 0, 'x'}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:",
+    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -189,6 +193,9 @@ void parse_args (int argc, char ** argv,
     case 's':
       *pt_snpsFile = optarg;
       break;
+    case 'x':
+      *pt_snpIdx = optarg;
+      break;
     case '?':
       break;
     default:
@@ -219,6 +226,8 @@ void parse_args (int argc, char ** argv,
     help (argv);
     exit (1);
   }
+  if ((*pt_snpIdx).empty())
+    *pt_snpIdx = "id+coord";
 }
 
 /** \brief List the input directory with the OLS summary stats.
@@ -382,6 +391,7 @@ void indexInputFiles (vector<string> vInFiles,
 void indexInputFiles (vector<string> vInFiles,
 		      vector<string> vFtrsToKeep,
 		      vector<string> vSnpsToKeep,
+		      const string snpIdx,
 		      map<string, vector<size_t> > & mPairs2Positions,
 		      int verbose)
 {
@@ -447,7 +457,13 @@ void indexInputFiles (vector<string> vInFiles,
 	continue;  // skip line, based on SNP coordinate
       }
       stringstream ss;
-      ss << tokens[0] << "|" << tokens[2];  // feature|coord
+      ss << tokens[0];
+      if (snpIdx.compare("id") == 0)
+	ss << "|" << tokens[1];
+      else if (snpIdx.compare("coord") == 0)
+	ss << "|" << tokens[2];
+      else if (snpIdx.compare("id+coord") == 0)
+	ss << "|" << tokens[1] << "|" << tokens[2];
       if (mPairs2Positions.find(ss.str()) == mPairs2Positions.end())
       {
 	vector<size_t> vPositions (vInFiles.size(), string::npos);
@@ -593,6 +609,7 @@ void getSummaryStatsForPair (Pair iPair,
  *  n will be an integer, the other summary stats remaining Inf.
  */
 void getSummaryStatsForPair (string pairId,
+			     const string snpIdx,
 			     vector<size_t> vPositions,
 			     vector<ifstream *> vPtInStreams,
 			     map<size_t, vector<double> > & allSumStats,
@@ -633,7 +650,13 @@ void getSummaryStatsForPair (string pairId,
       else
 	split (line, ' ', tokens);
       stringstream ss;
-      ss << tokens[0] << "|" << tokens[2];  // feature|coord
+      ss << tokens[0];
+      if (snpIdx.compare("id") == 0)
+	ss << "|" << tokens[1];
+      else if (snpIdx.compare("coord") == 0)
+	ss << "|" << tokens[2];
+      else if (snpIdx.compare("id+coord") == 0)
+	ss << "|" << tokens[1] << "|" << tokens[2];
       if (ss.str() != pairId)
       {
 	cerr << "ERROR: stream position is wrong for pair " << pairId
@@ -998,6 +1021,7 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 				     const map<string, vector<size_t> > & mPairs2Positions,
 				     string gridFile,
 				     string outFile,
+				     string snpIdx,
 				     int verbose)
 {
   size_t subgroup = 0, i = 0, nbPairs = 0;
@@ -1070,8 +1094,9 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     vPositions = it_mP2P->second;
     
     // retrieve its summary statistics
-    getSummaryStatsForPair (pairId, vPositions, vPtInStreams, allSumStats,
-			    &maf, &nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
+    getSummaryStatsForPair (pairId, snpIdx, vPositions, vPtInStreams,
+			    allSumStats, &maf, &nbSubgroupsUsed,
+			    &nbSamplesUsed, verbose-1);
     ++vNbSubgroups2Occurrences[nbSubgroupsUsed];
     if (verbose > 1)
       cout << "#" << nbPairs << " " << pairId
@@ -1083,10 +1108,14 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
     
     // write the results
     split (pairId, '|', tokens);
-    outStream << tokens[0]
-	      << " " << "--"
-	      << " " << tokens[1]
-	      << " " << maf
+    outStream << tokens[0];
+    if (snpIdx.compare("id") == 0)
+      outStream << " " << tokens[1] << " --";
+    else if (snpIdx.compare("coord") == 0)
+      outStream << " -- " << tokens[1];
+    else if (snpIdx.compare("id+coord") == 0)
+      outStream << " " << tokens[1] << " " << tokens[2];
+    outStream << " " << maf
 	      << " " << nbSubgroupsUsed
 	      << " " << nbSamplesUsed
 	      << " " << l10_abf_meta
@@ -1133,10 +1162,10 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 
 int main (int argc, char ** argv)
 {
-  string inDir, gridFile, outFile, ftrsFile, snpsFile;
+  string inDir, gridFile, outFile, ftrsFile, snpsFile, snpIdx;
   int verbose = 1;
   parse_args (argc, argv, &inDir, &gridFile, &outFile,
-	      &ftrsFile, &snpsFile, &verbose);
+	      &ftrsFile, &snpsFile, &snpIdx, &verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1155,6 +1184,7 @@ int main (int argc, char ** argv)
   indexInputFiles (vInFiles,
 		   vFtrsToKeep,
 		   vSnpsToKeep,
+		   snpIdx,
 		   mPairs2Positions,
 		   verbose);
   
@@ -1162,6 +1192,7 @@ int main (int argc, char ** argv)
 				  mPairs2Positions,
 				  gridFile,
 				  outFile,
+				  snpIdx,
 				  verbose);
   
   if (verbose > 0)
