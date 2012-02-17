@@ -88,7 +88,7 @@ void help (char ** argv)
   cout << "`" << argv[0] << "'"
        <<" performs the meta-analysis by computing three Bayes Factors," << endl
        << "one per model (average, fixed-effects, max heterogeneity)," << endl
-       << "for each pair feature-SNP (use SNP coord rather than name)." << endl
+       << "for each pair feature-SNP." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -97,8 +97,10 @@ void help (char ** argv)
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (default=1)" << endl
        << "  -i, --input\tdirectory with the summary stats for each subgroup" << endl
-       << "\t\t(one file per subgroup, with at least 7 columns:\n\t\tftr snp coord n betahat sebetahat sigmahat)" << endl
-       << "  -g, --grid\tfile with the grid of values for psi2 and omega2 (ES model)" << endl
+       << "\t\t(one file per subgroup, with at least 8 columns:\n\t\tftr snp coord maf n betahat sebetahat sigmahat)" << endl
+       << "\t\t(see other program 'get_summary_stats')" << endl
+       << "  -g, --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
+       << "\t\t(see GetGridPhiOmega() in package Rquantgen)" << endl
        << "  -o, --out\tgzipped output file" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
        << "  -s, --snp\tgzipped file with a list of SNP coordinates to analyze" << endl
