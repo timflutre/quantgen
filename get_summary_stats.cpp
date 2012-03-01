@@ -855,7 +855,7 @@ void spearman (const string yName, const string xName,
     size_t i;
     double yPerm[y.size()];
     double rsPerm;
-    *pvalPerms = 0;
+    *pvalPerms = 1;
     for(i=0; i<y.size(); ++i)
       yPerm[i] = y[i];
     for(int p=0; p<nbPermutations; ++p)
@@ -866,7 +866,7 @@ void spearman (const string yName, const string xName,
       if (abs(rsPerm) >= abs(*rs))
 	++(*pvalPerms);
     }
-    *pvalPerms /= nbPermutations;
+    *pvalPerms /= (nbPermutations + 1);
   }
   else
     *pvalPerms = numeric_limits<double>::quiet_NaN();
