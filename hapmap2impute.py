@@ -9,6 +9,9 @@ import sys
 import os
 import getopt
 import gzip
+import time
+import datetime
+import math
 
 
 def help():
@@ -24,7 +27,7 @@ def help():
     msg += "  -c, --chr\tchromosome numbers to convert (eg. '1-17-3', all autosomes by default)\n"
     msg += "  -b, --bed\tcoordinate of SNPs in a BED file (eg. output of liftOver, gzipped)\n"
     msg += "  -s, --snp\tfile with a list of SNP identifiers to ignore (eg. if they have conflicting coordinates)\n"
-    msg += "  -n, --na\tfile with list of individuals to keep (one NA identifier per line)"
+    msg += "  -n, --na\tfile with list of individuals to keep (one NA identifier per line)\n"
     msg += "\n"
     msg += "Example:\n"
     msg += "  %s -i ~/HMr28/genotypes_CHR_CEU_r28_nr.b36_fwd.txt.gz -o genotypes_allchrs_CEU.impute.gz" % os.path.basename(sys.argv[0])
@@ -90,7 +93,7 @@ def setParamsFromCmdLine():
         sys.stderr.write("%s\n\n" % msg)
         help()
         sys.exit(1)
-    return inPattern, outFile, lChrs, snpCoordFile, snpIgnoreFile, verbose
+    return inPattern, outFile, lChrs, snpCoordFile, snpIgnoreFile, indsToKeepFile, verbose
 
 
 def loadFileWithListOfSnpsToIgnore(snpIgnoreFile, verbose):
@@ -179,12 +182,18 @@ def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord,
     hmH = gzip.open(hmFile)
     
     # handle the header (write one only for the first file)
+    lColIdxToKeep = []
     line = hmH.readline()
+    lToks = line.rstrip().split()
+    for i in range(11, len(lToks)):
+        indName = lToks[i]
+        if indName in lIndsToKeep:
+            lColIdxToKeep.append(i)
     if isFirstFile:
-        lToks = line[:-1].split()
         txt = "chr id coord a1 a2"
         for i in range(11,len(lToks)):
-            txt += " %s" % lToks[i]
+            if i in lColIdxToKeep:
+                txt += " %s" % lToks[i]
         outH.write("%s\n" % txt)
         
     # handle the other lines
@@ -204,6 +213,8 @@ def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord,
             txt += " %s" % a1
             txt += " %s" % a2
             for i in range(11,len(lToks)):
+                if i not in lColIdxToKeep:
+                    continue
                 if lToks[i] == a1+a1:
                     txt += " 1 0 0"
                 elif a1 in lToks[i] and a2 in lToks[i]:
@@ -218,9 +229,13 @@ def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord,
     
     
 def main():
-    
     inPattern, outFile, lChrs, snpCoordFile, snpIgnoreFile, indsToKeepFile, verbose = setParamsFromCmdLine()
     
+    if verbose > 0:
+        msg = "START %s" % time.strftime("%Y-%m-%d %H:%M:%S")
+        startTime = time.time()
+        print msg; sys.stdout.flush()
+        
     lSnpsToIgnore = loadFileWithListOfSnpsToIgnore(snpIgnoreFile, verbose)
     
     dSnpId2NewCoord = getNewSnpCoordinates(snpCoordFile, lSnpsToIgnore, verbose)
@@ -235,6 +250,14 @@ def main():
         isFirstFile = False
     outH.close()
     
-    
+    if verbose > 0:
+        msg = "END %s" % time.strftime("%Y-%m-%d %H:%M:%S")
+        endTime = time.time()
+        runLength = datetime.timedelta(seconds=
+                                       math.floor(endTime - startTime))
+        msg += " (%s)" % str(runLength)
+        print msg; sys.stdout.flush()    
+        
+        
 if __name__ == "__main__":
     main()
