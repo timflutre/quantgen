@@ -24,6 +24,7 @@ def help():
     msg += "  -c, --chr\tchromosome numbers to convert (eg. '1-17-3', all autosomes by default)\n"
     msg += "  -b, --bed\tcoordinate of SNPs in a BED file (eg. output of liftOver, gzipped)\n"
     msg += "  -s, --snp\tfile with a list of SNP identifiers to ignore (eg. if they have conflicting coordinates)\n"
+    msg += "  -n, --na\tfile with list of individuals to keep (one NA identifier per line)"
     msg += "\n"
     msg += "Example:\n"
     msg += "  %s -i ~/HMr28/genotypes_CHR_CEU_r28_nr.b36_fwd.txt.gz -o genotypes_allchrs_CEU.impute.gz" % os.path.basename(sys.argv[0])
@@ -36,11 +37,12 @@ def setParamsFromCmdLine():
     lChrs = range(1,23)
     snpCoordFile = ""
     snpIgnoreFile = ""
+    indsToKeepFile = ""
     verbose = 1
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hv:i:o:c:b:s:",
+        opts, args = getopt.getopt(sys.argv[1:], "hv:i:o:c:b:s:n:",
                                    ["help", "verbose=", "input=",
-                                    "output=", "chr=", "bed=", "snp="])
+                                    "output=", "chr=", "bed=", "snp=", "na="])
     except getopt.GetoptError, err:
         sys.stderr.write("%s\n" % str(err))
         help()
@@ -61,6 +63,8 @@ def setParamsFromCmdLine():
             snpCoordFile = a
         elif o in ("-s", "--snp"):
             snpIgnoreFile = a
+        elif o in ("-n", "--na"):
+            indsToKeepFile = a
     if inPattern == "":
         msg = "ERROR: missing input pattern (-i)"
         sys.stderr.write("%s\n\n" % msg)
@@ -68,6 +72,21 @@ def setParamsFromCmdLine():
         sys.exit(1)
     if outFile == "":
         msg = "ERROR: missing output file (-o)"
+        sys.stderr.write("%s\n\n" % msg)
+        help()
+        sys.exit(1)
+    if snpIgnoreFile != "" and not os.path.exists(snpIgnoreFile):
+        msg = "ERROR: file '%s' doesn't exist" % snpIgnoreFile
+        sys.stderr.write("%s\n\n" % msg)
+        help()
+        sys.exit(1)
+    if snpCoordFile != "" and not os.path.exists(snpCoordFile):
+        msg = "ERROR: file '%s' doesn't exist" % snpCoordFile
+        sys.stderr.write("%s\n\n" % msg)
+        help()
+        sys.exit(1)
+    if indsToKeepFile != "" and not os.path.exists(indsToKeepFile):
+        msg = "ERROR: file '%s' doesn't exist" % indsToKeepFile
         sys.stderr.write("%s\n\n" % msg)
         help()
         sys.exit(1)
@@ -127,7 +146,31 @@ def getNewSnpCoordinates(snpCoordFile, lSnpsToIgnore, verbose):
     return dSnpId2NewCoord
 
 
-def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord, outH, isFirstFile, verbose):
+def loadFileWithListOfIndsToKeep(indsToKeepFile, verbose):
+    lIndsToKeep = []
+    
+    if indsToKeepFile != "":
+        if verbose > 0:
+            print "load individuals to keep..."
+            sys.stdout.flush()
+        
+        indsToKeepH = open(indsToKeepFile)
+        while True:
+            line = indsToKeepH.readline()
+            if line == "": break
+            if line[:-1] not in lIndsToKeep:
+                lIndsToKeep.append(line[:-1])
+        indsToKeepH.close()
+        
+        if verbose > 0:
+            print "nb of individuals to keep: %i" % len(lIndsToKeep)
+            sys.stdout.flush()
+            
+    return lIndsToKeep
+
+
+def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord,
+                          lIndsToKeep, outH, isFirstFile, verbose):
     hmFile = inPattern.replace("CHR", "chr%i" % chrNb)
     if verbose > 0:
         print "convert file %s..." % hmFile
@@ -176,16 +219,19 @@ def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord, outH
     
 def main():
     
-    inPattern, outFile, lChrs, snpCoordFile, snpIgnoreFile, verbose = setParamsFromCmdLine()
+    inPattern, outFile, lChrs, snpCoordFile, snpIgnoreFile, indsToKeepFile, verbose = setParamsFromCmdLine()
     
     lSnpsToIgnore = loadFileWithListOfSnpsToIgnore(snpIgnoreFile, verbose)
     
     dSnpId2NewCoord = getNewSnpCoordinates(snpCoordFile, lSnpsToIgnore, verbose)
     
+    lIndsToKeep = loadFileWithListOfIndsToKeep(indsToKeepFile, verbose)
+    
     outH = gzip.open(outFile, "w")
     isFirstFile = True
     for chrNb in lChrs:
-        convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord, outH, isFirstFile, verbose)
+        convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord,
+                              lIndsToKeep, outH, isFirstFile, verbose)
         isFirstFile = False
     outH.close()
     
