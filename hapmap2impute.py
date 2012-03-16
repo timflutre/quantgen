@@ -202,29 +202,30 @@ def convertHapMapToImpute(inPattern, chrNb, lSnpsToIgnore, dSnpId2NewCoord,
         if line == "": break
         lToks = line[:-1].split()
         snpId = lToks[0]
-        if snpId not in lSnpsToIgnore:
-            txt = "chr%i" % chrNb
-            txt += " %s" % snpId
-            if dSnpId2NewCoord.has_key(snpId):
-                txt += " %s" % dSnpId2NewCoord[snpId]
+        if snpId in lSnpsToIgnore:
+            continue
+        txt = "chr%i" % chrNb
+        txt += " %s" % snpId
+        if dSnpId2NewCoord.has_key(snpId):
+            txt += " %s" % dSnpId2NewCoord[snpId]
+        else:
+            txt += " %s" % lToks[3]
+        a1, a2 = lToks[1].split("/")
+        txt += " %s" % a1
+        txt += " %s" % a2
+        for i in range(11,len(lToks)):
+            if i not in lColIdxToKeep:
+                continue
+            if lToks[i] == a1+a1:
+                txt += " 1 0 0"
+            elif a1 in lToks[i] and a2 in lToks[i]:
+                txt += " 0 1 0"
+            elif lToks[i] == a2+a2:
+                txt += " 0 0 1"
             else:
-                txt += " %s" % lToks[2]
-            a1, a2 = lToks[1].split("/")
-            txt += " %s" % a1
-            txt += " %s" % a2
-            for i in range(11,len(lToks)):
-                if i not in lColIdxToKeep:
-                    continue
-                if lToks[i] == a1+a1:
-                    txt += " 1 0 0"
-                elif a1 in lToks[i] and a2 in lToks[i]:
-                    txt += " 0 1 0"
-                elif lToks[i] == a2+a2:
-                    txt += " 0 0 1"
-                else:
-                    txt += " 0 0 0"
-            outH.write("%s\n" % txt)
-            
+                txt += " 0 0 0"
+        outH.write("%s\n" % txt)
+        
     hmH.close()
     
     
