@@ -64,8 +64,8 @@ struct SnpStats
   double R2;  // coef of determination, proportion of variance explained
   double rs;
   double rsZscore;  // using Fisher transformation
-  double rsPvalZtest;
-  double rsPvalPerms;
+  double rsPvalPermsSnp;  // permutation P-value for the SNP
+  double rsPvalPermsGene;  // permutation P-value for the gene
 };
 
 struct FtrStats
@@ -102,8 +102,8 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
     {
       outStream << " " << iSnpStats.rs
 		<< " " << iSnpStats.rsZscore
-		<< " " << iSnpStats.rsPvalZtest
-		<< " " << iSnpStats.rsPvalPerms;
+		<< " " << iSnpStats.rsPvalPermsSnp
+		<< " " << iFtrStats.vSnpStats[0].rsPvalPermsGene;
     }
     outStream << endl;
   }
@@ -117,10 +117,11 @@ void help (char ** argv)
 {
   cout << "`" << argv[0] << "'"
        << " assesses associations between genotypes and phenotypes" << endl
-       << "(one genetic variant per phenotype) and returns the summary"
-       << " statistics betahat," << endl
-       << "se(betahat) and sigmahat, as well as the P-value"
-       << " for H0:\"beta=0\" and the PVE." << endl
+       << "(one genetic variant per univariate phenotype) and returns the summary stats" << endl
+       << "betahat, se(betahat) and sigmahat, as well as the P-value"
+       << " for H0:\"beta=0\"." << endl
+       << "Spearman correlation coefficient and permutation P-values at the SNP and" << endl
+       << "gene level can also be computed." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS]..." << endl
        << endl
@@ -147,8 +148,8 @@ void help (char ** argv)
        << "  -c, --cor\tnumber of permutations to assess significance of the Spearman" << endl
        << "\t\trank correlation coefficient" << endl
        << "\t\t(default c<0, Spearman coef is not computed;" << endl
-       << "\t\tif c=0, add Z-score and P-value for Z-test;" << endl
-       << "\t\tif c>0, add P-value for c permutations of phenotype labels)" << endl
+       << "\t\tif c=0, compute Spearman coef and Z-score;" << endl
+       << "\t\tif c>0, add P-values for c permutations of phenotype labels)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -l <links> -g <genotypes> -p <phenotypes> -o <output>" << endl
@@ -338,7 +339,7 @@ loadLinksFtr2Snps (const string linksFile,
   }
   if (verbose > 0)
   {
-    cout <<"load file " << linksFile << "..." << endl;
+    cout <<"load file " << linksFile << " ..." << endl;
   }
   
   while (linksStream.good())
@@ -418,7 +419,7 @@ indexFtrs (const string phenoFile,
   }
   if (verbose > 0)
   {
-    cout << "index file " << phenoFile << "..." << endl;
+    cout << "index file " << phenoFile << " ..." << endl;
   }
   
   // header line (sample names)
@@ -519,7 +520,7 @@ indexSnps (const string genoFile,
   }
   if (verbose > 0)
   {
-    cout << "index file " << genoFile << "..." << endl;
+    cout << "index file " << genoFile << " ..." << endl;
   }
   
   while (genoStream.good())
@@ -830,14 +831,15 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
 }
 
 /** \brief Compute the Spearman rank correlation coefficient between g and y,
- *  and assess its significance with a t test or permutations of y (all other
- *  summary stats are nan).
+ *  and assess its significance with permutations of y (all other summary stats
+ *  are nan).
  *  \note missing values should have been already filtered out
  */
 void spearman (const string yName, const string xName,
 	       const vector<double> & g, const vector<double> & y,
-	       double * rs, double * z, double * pvalZtest,
-	       int nbPermutations, double * pvalPerms, int verbose)
+	       double * rs, double * z, int nbPermutations,
+	       double * pvalPermsSnp, vector<double> * rsPermsAllSnps,
+	       int verbose)
 {
   gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
 							     g.size());
@@ -848,14 +850,13 @@ void spearman (const string yName, const string xName,
 				       g.size());
   
   *z = sqrt((g.size() - 3) / 1.06) * 1/2 * (log(1 + *rs) - log(1 - *rs));
-  *pvalZtest = gsl_cdf_ugaussian_Q (*z);
   
   if (nbPermutations > 0)
   {
     size_t i;
     double yPerm[y.size()];
     double rsPerm;
-    *pvalPerms = 1;
+    *pvalPermsSnp = 1;
     for(i=0; i<y.size(); ++i)
       yPerm[i] = y[i];
     for(int p=0; p<nbPermutations; ++p)
@@ -864,23 +865,24 @@ void spearman (const string yName, const string xName,
       rsPerm = my_stats_correlation_spearman (gsl_g.vector.data, 1,
 					      yPerm, 1, g.size());
       if (abs(rsPerm) >= abs(*rs))
-	++(*pvalPerms);
+	++(*pvalPermsSnp);
+      rsPermsAllSnps->push_back (rsPerm);
     }
-    *pvalPerms /= (nbPermutations + 1);
+    *pvalPermsSnp /= (nbPermutations + 1);
   }
   else
-    *pvalPerms = numeric_limits<double>::quiet_NaN();
+    *pvalPermsSnp = numeric_limits<double>::quiet_NaN();
   
 #ifdef DEBUG
   if (verbose > 0)
-    printf ("%s %s n=%zu rs=%f z=%f pvalZtest=%f pvalPerms=%f\n",
+    printf ("%s %s n=%zu rs=%f z=%f pvalPerms=%f\n",
 	    yName.c_str(), xName.c_str(), g.size(),
-	    *rs, *z, *pvalZtest, *pvalPerms);
+	    *rs, *z, *pvalPermsSnp);
 #endif
 }
 
-/** \brief First, read all genotypes of all cis SNPs of the given feature.
- *   Second, compute the summary stats for each pair gene-SNP.
+/** \brief For each SNP in cis of the given feature, retrieve its genotypes,
+ *  compute the OLS summary stats and perform permutations if requested.
  *  \note isNa[i] == true if sample i has no phenotype
  */
 void
@@ -893,16 +895,13 @@ computeSummaryStatsForOneFeature (
   const vector<bool> isNa,
   int nbPermutations,
   FtrStats * pt_iFtrStats,
-  size_t * pt_nbFtrsLowPval,
   const int verbose)
 {
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
-  size_t snp_id;
-  double thresholdLowPval = 1e-7;
-  bool isPvalLow = false;
+  size_t snp_id, perm_id, nbSnps = 0;
+  double rsMax = 0.0;
+  vector<double> rsPermsAllSnps;
   
-  // for each SNP in cis of the given feature,
-  // retrieve its genotypes, compute the OLS summary stats and keep them
   for (snp_id = 0; snp_id < cisSnpNameCoords.size(); snp_id++)
   {
     string snpNameCoord = cisSnpNameCoords[snp_id];
@@ -911,6 +910,7 @@ computeSummaryStatsForOneFeature (
 	      cisSnpNameCoords.size());
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
+    ++ nbSnps;
     
     SnpStats iSnpStats;
     vector<string> tokens;
@@ -942,27 +942,42 @@ computeSummaryStatsForOneFeature (
     {
       spearman (pt_iFtrStats->name, snpNameCoord, g, y,
 		&iSnpStats.rs, &iSnpStats.rsZscore,
-		&iSnpStats.rsPvalZtest, nbPermutations,
-		&iSnpStats.rsPvalPerms, verbose-1);
+		nbPermutations, &iSnpStats.rsPvalPermsSnp,
+		&rsPermsAllSnps, verbose-1);
       if (verbose > 0)
-	printf ("spearman=%.8f PvalZtest=%.8f permutations=%i PvalPerms=%.8f\n",
-		iSnpStats.rs, iSnpStats.rsPvalZtest,
-		nbPermutations, iSnpStats.rsPvalPerms);
+	printf ("spearman=%.8f PvalPermsSnp=%.8f\n",
+		iSnpStats.rs, iSnpStats.rsPvalPermsSnp);
+      if (iSnpStats.rs > rsMax)
+	rsMax = iSnpStats.rs;
     }
     else
     {
       iSnpStats.rs = numeric_limits<double>::quiet_NaN();
       iSnpStats.rsZscore = numeric_limits<double>::quiet_NaN();
-      iSnpStats.rsPvalZtest = numeric_limits<double>::quiet_NaN();
-      iSnpStats.rsPvalPerms = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rsPvalPermsSnp = numeric_limits<double>::quiet_NaN();
     }
-    if (iSnpStats.pval <= thresholdLowPval)
-      isPvalLow = true;
+    iSnpStats.rsPvalPermsGene = numeric_limits<double>::quiet_NaN();
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
   }
-  if (isPvalLow)
-    ++(*pt_nbFtrsLowPval);
+  
+  // compute permutation P-value at the gene level
+  if (nbPermutations > 0)
+  {
+    if (rsPermsAllSnps.size() != nbSnps * nbPermutations)
+    {
+      cerr << "ERROR: not enough permutations ("
+	   << rsPermsAllSnps.size() << " != "
+	   << cisSnpNameCoords.size() * nbPermutations
+	   << ")" << endl;
+      exit (1);
+    }
+    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene = 1;
+    for (perm_id = 0; perm_id <= rsPermsAllSnps.size(); ++perm_id)
+      if (rsPermsAllSnps[perm_id] >= rsMax)
+	++(pt_iFtrStats->vSnpStats[0].rsPvalPermsGene);
+    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene /= (nbPermutations + 1);
+  }
 }
 
 /** \brief Compute summary statistics for each pair feature-SNP
@@ -990,7 +1005,6 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   vector<bool> isNa;
   ifstream phenoStream, genoStream;
   ofstream outStream;
-  size_t nbFtrsLowPval = 0;
   
   // open all files
   phenoStream.open(phenoFile.c_str(), ifstream::in);
@@ -1011,12 +1025,12 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     cerr << "ERROR: can't open file " << outFile << endl;
     exit (1);
   }
-  outStream << "ftr snp coord maf n betahat sebetahat sigmahat pval R2";
-  outStream << " rs rsZscore rsPvalZtest rsPvalPerms";
+  outStream << "ftr snp coord maf n betahat sebetahat sigmahat pvalBeta R2";
+  outStream << " rs rsZscore rsPvalPermsSnp rsPvalPermsGene";
   outStream << endl;
   if (verbose > 0)
   {
-    cout << "compute summary statistics for each pair feature-SNP..." << endl;
+    cout << "compute summary statistics for each pair feature-SNP ..." << endl;
   }
   
   // for each feature
@@ -1050,7 +1064,6 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 				      isNa,
 				      nbPermutations,
 				      &iFtrStats,
-				      &nbFtrsLowPval,
 				      verbose-2);
     
     // write the results (one line per SNP)
@@ -1066,8 +1079,6 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   if (verbose > 0)
   {
     cout << "results written in " << outFile << endl;
-    cout << "features with at least one SNP with P-value <= 1e-7: " 
-	 << nbFtrsLowPval << " / " << ftrName2Pos.size() << endl;
   }
 }
 
