@@ -976,7 +976,7 @@ computeSummaryStatsForOneFeature (
     for (perm_id = 0; perm_id <= rsPermsAllSnps.size(); ++perm_id)
       if (rsPermsAllSnps[perm_id] >= rsMax)
 	++(pt_iFtrStats->vSnpStats[0].rsPvalPermsGene);
-    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene /= (nbPermutations + 1);
+    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene /= (rsPermsAllSnps.size() + 1);
   }
 }
 
