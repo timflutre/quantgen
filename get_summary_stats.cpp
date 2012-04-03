@@ -388,6 +388,11 @@ loadLinksFtr2Snps (const string linksFile,
     cout << "features with cis SNPs: " << ftrName2CisSnpNameCoords.size() << endl
 	 << "pairs feature-SNP: " << line_id << endl;
   }
+  if (ftrName2CisSnpNameCoords.size() == 0)
+  {
+    cerr << "ERROR: no feature has any SNP in cis" << endl;
+    exit (1);
+  }
   
   return ftrName2CisSnpNameCoords;
 }
@@ -838,7 +843,7 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
 void spearman (const string yName, const string xName,
 	       const vector<double> & g, const vector<double> & y,
 	       double * rs, double * z, int nbPermutations,
-	       double * pvalPermsSnp, vector<double> * rsPermsAllSnps,
+	       double * pvalPermsSnp, vector<double> & rsMaxPerPerm,
 	       int verbose)
 {
   gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
@@ -859,14 +864,15 @@ void spearman (const string yName, const string xName,
     *pvalPermsSnp = 1;
     for(i=0; i<y.size(); ++i)
       yPerm[i] = y[i];
-    for(int p=0; p<nbPermutations; ++p)
+    for(int perm_id=0; perm_id<nbPermutations; ++perm_id)
     {
       gsl_ran_shuffle (r, yPerm, y.size(), sizeof(double));
       rsPerm = my_stats_correlation_spearman (gsl_g.vector.data, 1,
 					      yPerm, 1, g.size());
       if (abs(rsPerm) >= abs(*rs))
 	++(*pvalPermsSnp);
-      rsPermsAllSnps->push_back (rsPerm);
+      if (abs(rsPerm) > abs(rsMaxPerPerm[perm_id]))
+	rsMaxPerPerm[perm_id] = rsPerm;
     }
     *pvalPermsSnp /= (nbPermutations + 1);
   }
@@ -883,7 +889,16 @@ void spearman (const string yName, const string xName,
 
 /** \brief For each SNP in cis of the given feature, retrieve its genotypes,
  *  compute the OLS summary stats and perform permutations if requested.
+ * 
  *  \note isNa[i] == true if sample i has no phenotype
+ *
+ *  \note formulas to compute permutation P-values
+ *  Sp_i,j: Spearman coef for SNP i and gene j
+ *  Sp_max,j = max_i (Sp_i,j)
+ *  Sp~_i,j,k: Spearman coef for SNP i, gene j and permutation k
+ *  Sp~_max,j,k = max_i (Sp~_i,j,k)
+ *  gene-level permutation P-value: (#{k: Sp~_max,j,k >= Sp_max,j} + 1) / (#permutations + 1)
+ *  SNP-level permutation P-value: (#{k: Sp~_max,j,k >= Sp_i,j} + 1) / (#permutations + 1)
  */
 void
 computeSummaryStatsForOneFeature (
@@ -895,12 +910,15 @@ computeSummaryStatsForOneFeature (
   const vector<bool> isNa,
   int nbPermutations,
   FtrStats * pt_iFtrStats,
+  size_t & nbAnalyzedFtrs,
+  size_t & nbAnalyzedSnps,
+  size_t & nbAnalyzedPairs,
   const int verbose)
 {
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
   size_t snp_id, perm_id, nbSnps = 0;
-  double rsMax = 0.0;
-  vector<double> rsPermsAllSnps;
+  double rsMax = 0.0; // max Sp coef over all SNPs (no permutation)
+  vector<double> rsMaxPerPerm (nbPermutations, 0); // contains the Sp~_max,j,k
   
   for (snp_id = 0; snp_id < cisSnpNameCoords.size(); snp_id++)
   {
@@ -911,6 +929,8 @@ computeSummaryStatsForOneFeature (
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
     ++ nbSnps;
+    ++ nbAnalyzedSnps;
+    ++ nbAnalyzedPairs;
     
     SnpStats iSnpStats;
     vector<string> tokens;
@@ -943,11 +963,11 @@ computeSummaryStatsForOneFeature (
       spearman (pt_iFtrStats->name, snpNameCoord, g, y,
 		&iSnpStats.rs, &iSnpStats.rsZscore,
 		nbPermutations, &iSnpStats.rsPvalPermsSnp,
-		&rsPermsAllSnps, verbose-1);
+		rsMaxPerPerm, verbose-1);
       if (verbose > 0)
 	printf ("spearman=%.8f PvalPermsSnp=%.8f\n",
 		iSnpStats.rs, iSnpStats.rsPvalPermsSnp);
-      if (iSnpStats.rs > rsMax)
+      if (abs(iSnpStats.rs) > abs(rsMax))
 	rsMax = iSnpStats.rs;
     }
     else
@@ -960,23 +980,23 @@ computeSummaryStatsForOneFeature (
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
   }
+  if (nbSnps > 0)
+    ++ nbAnalyzedFtrs;
   
   // compute permutation P-value at the gene level
   if (nbPermutations > 0)
   {
-    if (rsPermsAllSnps.size() != nbSnps * nbPermutations)
+    if (rsMaxPerPerm.size() != (size_t) nbPermutations)
     {
-      cerr << "ERROR: not enough permutations ("
-	   << rsPermsAllSnps.size() << " != "
-	   << cisSnpNameCoords.size() * nbPermutations
-	   << ")" << endl;
+      cerr << "ERROR: not enough permutations (" << rsMaxPerPerm.size()
+	   << " != " << nbPermutations << ")" << endl;
       exit (1);
     }
     pt_iFtrStats->vSnpStats[0].rsPvalPermsGene = 1;
-    for (perm_id = 0; perm_id <= rsPermsAllSnps.size(); ++perm_id)
-      if (rsPermsAllSnps[perm_id] >= rsMax)
+    for(perm_id=0; perm_id<(size_t)nbPermutations; ++perm_id)
+      if(abs(rsMaxPerPerm[perm_id]) >= abs(rsMax))
 	++(pt_iFtrStats->vSnpStats[0].rsPvalPermsGene);
-    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene /= (rsPermsAllSnps.size() + 1);
+    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene /= (nbPermutations + 1);
   }
 }
 
@@ -999,7 +1019,8 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   vector<string> cisSnpNameCoords, tokens;
   string ftrName, snpNameCoord, snpName;
   size_t ftrPos;
-  size_t nbFtrs = 0;
+  size_t nbFtrs = 0, nbAnalyzedPairs = 0, nbAnalyzedSnps = 0,
+    nbAnalyzedFtrs = 0;
   vector<size_t> vCounters = getCounters (ftrName2CisSnpNameCoords.size());
   vector<double> y;
   vector<bool> isNa;
@@ -1064,6 +1085,9 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 				      isNa,
 				      nbPermutations,
 				      &iFtrStats,
+				      nbAnalyzedFtrs,
+				      nbAnalyzedSnps,
+				      nbAnalyzedPairs,
 				      verbose-2);
     
     // write the results (one line per SNP)
@@ -1078,6 +1102,9 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   outStream.close();
   if (verbose > 0)
   {
+    cout << "nb of analyzed features: " << nbAnalyzedFtrs << endl;
+    cout << "nb of analyzed SNPs: " << nbAnalyzedSnps << endl;
+    cout << "nb of analyzed pairs: " << nbAnalyzedPairs << endl;
     cout << "results written in " << outFile << endl;
   }
 }
