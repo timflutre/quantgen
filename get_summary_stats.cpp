@@ -911,7 +911,6 @@ computeSummaryStatsForOneFeature (
   int nbPermutations,
   FtrStats * pt_iFtrStats,
   size_t & nbAnalyzedFtrs,
-  size_t & nbAnalyzedSnps,
   size_t & nbAnalyzedPairs,
   const int verbose)
 {
@@ -929,7 +928,6 @@ computeSummaryStatsForOneFeature (
     if (snpNameCoord2Pos.find(snpNameCoord) == snpNameCoord2Pos.end())
       continue;
     ++ nbSnps;
-    ++ nbAnalyzedSnps;
     ++ nbAnalyzedPairs;
     
     SnpStats iSnpStats;
@@ -1019,8 +1017,7 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   vector<string> cisSnpNameCoords, tokens;
   string ftrName, snpNameCoord, snpName;
   size_t ftrPos;
-  size_t nbFtrs = 0, nbAnalyzedPairs = 0, nbAnalyzedSnps = 0,
-    nbAnalyzedFtrs = 0;
+  size_t nbFtrs = 0, nbAnalyzedPairs = 0, nbAnalyzedFtrs = 0;
   vector<size_t> vCounters = getCounters (ftrName2CisSnpNameCoords.size());
   vector<double> y;
   vector<bool> isNa;
@@ -1086,7 +1083,6 @@ void computeAndWriteSummaryStatsFtrPerFtr (
 				      nbPermutations,
 				      &iFtrStats,
 				      nbAnalyzedFtrs,
-				      nbAnalyzedSnps,
 				      nbAnalyzedPairs,
 				      verbose-2);
     
@@ -1103,7 +1099,6 @@ void computeAndWriteSummaryStatsFtrPerFtr (
   if (verbose > 0)
   {
     cout << "nb of analyzed features: " << nbAnalyzedFtrs << endl;
-    cout << "nb of analyzed SNPs: " << nbAnalyzedSnps << endl;
     cout << "nb of analyzed pairs: " << nbAnalyzedPairs << endl;
     cout << "results written in " << outFile << endl;
   }
