@@ -56,28 +56,30 @@ struct SnpStats
 {
   string name;  // eg. rs2205177
   size_t coord;
-  double maf;
-  double betahat;
-  double sebetahat;
-  double sigmahat;
-  double pval;
-  double R2;  // coef of determination, proportion of variance explained
-  double rs;
-  double rsZscore;  // using Fisher transformation
-  double rsPvalPermsSnp;  // permutation P-value for the SNP
-  double rsPvalPermsGene;  // permutation P-value for the gene
+  double maf; // minor allele frequency
+  double betahat; // MLE of beta
+  double sebetahat; // standard error
+  double sigmahat; // MLE of sigma
+  double pval; // P-value of the test where H0:"beta=0" and H1:"beta!=0"
+  double R2; // coef of determination (proportion of variance explained)
+  double rs; // Spearman rank correlation coefficient
+  double rsZscore; // using Fisher transformation
+  double rsPermPval; // permutation P-value based on Spearman coef
 };
 
 struct FtrStats
 {
   string name;  // eg. ENSG00000182816
   vector <SnpStats> vSnpStats;
+//  double betaPvalPermsGene; // permutation P-value based on beta P-values
+  double rsPermPval; // permutation P-value based on Spearman coef
 };
 
 void FtrStats_reset (FtrStats * pt_iFtrStats)
 {
   pt_iFtrStats->name.clear();
   pt_iFtrStats->vSnpStats.clear();
+  pt_iFtrStats->rsPermPval = numeric_limits<double>::quiet_NaN();
 }
 
 void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
@@ -98,12 +100,15 @@ void FtrStats_write (FtrStats iFtrStats, long int n, ostream & outStream)
 	      << " " << iSnpStats.sigmahat
 	      << " " << iSnpStats.pval
 	      << " " << iSnpStats.R2;
-    if (iSnpStats.rs != numeric_limits<double>::quiet_NaN())
+    if (iSnpStats.rs <= 1)
     {
       outStream << " " << iSnpStats.rs
-		<< " " << iSnpStats.rsZscore
-		<< " " << iSnpStats.rsPvalPermsSnp
-		<< " " << iFtrStats.vSnpStats[0].rsPvalPermsGene;
+		<< " " << iSnpStats.rsZscore;
+      if (iSnpStats.rsPermPval <= 1)
+      {
+	outStream << " " << iSnpStats.rsPermPval
+		  << " " << iFtrStats.rsPermPval;
+      }
     }
     outStream << endl;
   }
@@ -893,12 +898,13 @@ void spearman (const string yName, const string xName,
  *  \note isNa[i] == true if sample i has no phenotype
  *
  *  \note formulas to compute permutation P-values
- *  Sp_i,j: Spearman coef for SNP i and gene j
- *  Sp_max,j = max_i (Sp_i,j)
- *  Sp~_i,j,k: Spearman coef for SNP i, gene j and permutation k
- *  Sp~_max,j,k = max_i (Sp~_i,j,k)
- *  gene-level permutation P-value: (#{k: Sp~_max,j,k >= Sp_max,j} + 1) / (#permutations + 1)
- *  SNP-level permutation P-value: (#{k: Sp~_max,j,k >= Sp_i,j} + 1) / (#permutations + 1)
+ *  the test statistic can be the P-value for beta or the Spearman coefficient
+ *  T_i,j: test statistic for SNP i and gene j
+ *  T_min,j = min_i (T_i,j) (-> max for Sp. coef)
+ *  T~_i,j,k: Spearman coef for SNP i, gene j and permutation k
+ *  T~_min,j,k = min_i (T~_i,j,k) (-> max for Sp. coef)
+ *  feature-level permutation P-value: (#{k: T~_min,j,k >= T_max,j} + 1) / (#permutations + 1)
+ *  SNP-level permutation P-value: (#{k: T~_min,j,k >= T_i,j} + 1) / (#permutations + 1)
  */
 void
 computeSummaryStatsForOneFeature (
@@ -917,7 +923,9 @@ computeSummaryStatsForOneFeature (
   vector<string> cisSnpNameCoords = (*ftrName2CisSnpNameCoords_it).second;
   size_t snp_id, perm_id, nbSnps = 0;
   double rsMax = 0.0; // max Sp coef over all SNPs (no permutation)
-  vector<double> rsMaxPerPerm (nbPermutations, 0); // contains the Sp~_max,j,k
+  vector<double> rsMaxPerPerm; // contains the Sp~_max,j,k
+  if (nbPermutations > 0)
+    rsMaxPerPerm.assign (nbPermutations, 0);
   
   for (snp_id = 0; snp_id < cisSnpNameCoords.size(); snp_id++)
   {
@@ -960,28 +968,28 @@ computeSummaryStatsForOneFeature (
     {
       spearman (pt_iFtrStats->name, snpNameCoord, g, y,
 		&iSnpStats.rs, &iSnpStats.rsZscore,
-		nbPermutations, &iSnpStats.rsPvalPermsSnp,
+		nbPermutations, &iSnpStats.rsPermPval,
 		rsMaxPerPerm, verbose-1);
       if (verbose > 0)
-	printf ("spearman=%.8f PvalPermsSnp=%.8f\n",
-		iSnpStats.rs, iSnpStats.rsPvalPermsSnp);
+	printf ("spearman=%.8f PermPvalSnp=%.8f\n",
+		iSnpStats.rs, iSnpStats.rsPermPval);
       if (abs(iSnpStats.rs) > abs(rsMax))
 	rsMax = iSnpStats.rs;
     }
     else
     {
-      iSnpStats.rs = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rs = 2; // to indicate that it's not defined
       iSnpStats.rsZscore = numeric_limits<double>::quiet_NaN();
-      iSnpStats.rsPvalPermsSnp = numeric_limits<double>::quiet_NaN();
+      iSnpStats.rsPermPval = 2; // to indicate that it's not defined
     }
-    iSnpStats.rsPvalPermsGene = numeric_limits<double>::quiet_NaN();
+    pt_iFtrStats->rsPermPval = numeric_limits<double>::quiet_NaN();
     
     pt_iFtrStats->vSnpStats.push_back (iSnpStats);
   }
   if (nbSnps > 0)
     ++ nbAnalyzedFtrs;
   
-  // compute permutation P-value at the gene level
+  // compute permutation P-value at the feature level
   if (nbPermutations > 0)
   {
     if (rsMaxPerPerm.size() != (size_t) nbPermutations)
@@ -990,11 +998,11 @@ computeSummaryStatsForOneFeature (
 	   << " != " << nbPermutations << ")" << endl;
       exit (1);
     }
-    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene = 1;
+    pt_iFtrStats->rsPermPval = 1;
     for(perm_id=0; perm_id<(size_t)nbPermutations; ++perm_id)
       if(abs(rsMaxPerPerm[perm_id]) >= abs(rsMax))
-	++(pt_iFtrStats->vSnpStats[0].rsPvalPermsGene);
-    pt_iFtrStats->vSnpStats[0].rsPvalPermsGene /= (nbPermutations + 1);
+	++(pt_iFtrStats->rsPermPval);
+    pt_iFtrStats->rsPermPval /= (nbPermutations + 1);
   }
 }
 
@@ -1044,7 +1052,12 @@ void computeAndWriteSummaryStatsFtrPerFtr (
     exit (1);
   }
   outStream << "ftr snp coord maf n betahat sebetahat sigmahat pvalBeta R2";
-  outStream << " rs rsZscore rsPvalPermsSnp rsPvalPermsGene";
+  if (nbPermutations >= 0)
+  {
+    outStream << " rs rsZscore";
+    if (nbPermutations > 0)
+      outStream << " rsPermPvalSnp rsPermPvalFtr";
+  }
   outStream << endl;
   if (verbose > 0)
   {
