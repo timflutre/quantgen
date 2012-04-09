@@ -63,25 +63,16 @@ vector<string> split (const string & s, char delim)
   return split (s, delim, tokens);
 }
 
-/** \brief Return a string with the elapsed time.
- *  \note Output contains only s, or only m and s, or only h, m and s,
- *  or d, h, m and s.
+/** \brief Return a string with the elapsed time in d, h, m and s.
+ *  \note http://stackoverflow.com/a/2419597/597069
  */
 string elapsedTime (time_t startRawTime, time_t endRawTime)
 {
   char str[128];
-  time_t elapsedSec = static_cast<time_t>(difftime (endRawTime, startRawTime));
-  struct tm * ptm;
-  ptm = gmtime (&elapsedSec);
-  if (ptm->tm_mday == 1 & ptm->tm_hour == 0 & ptm->tm_min == 0)
-    sprintf (str, "%is", ptm->tm_sec);
-  else if (ptm->tm_mday == 1 & ptm->tm_hour == 0)
-    sprintf (str, "%im %is", ptm->tm_min, ptm->tm_sec);
-  else if (ptm->tm_mday == 1)
-    sprintf (str, "%ih %im %is", ptm->tm_hour, ptm->tm_min, ptm->tm_sec);
-  else
-    sprintf (str, "%id %ih %im %is", ptm->tm_mday, ptm->tm_hour,
-	     ptm->tm_min, ptm->tm_sec);
+  double elapsed = difftime (endRawTime, startRawTime); // in sec
+  sprintf (str, "%01.0fd %01.0fh %01.0fm %01.0fs", floor(elapsed/(24*60*60)),
+	   floor(elapsed/(60*60)), floor(fmod(elapsed,60*60)/60.0),
+	   fmod(elapsed,60));
   return string(str);
 }
 
