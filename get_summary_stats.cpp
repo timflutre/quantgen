@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  gcc -Wall -fopenmp -g -DDEBUG get_summary_stats.cpp -lstdc++ -lgzstream -lz -lgsl -lgslcblas -o get_summary_stats
+ *  gcc -Wall -fopenmp -g -DDEBUG -O3 get_summary_stats.cpp -lstdc++ -lgzstream -lz -lgsl -lgslcblas -o get_summary_stats
  *  help2man -o get_summary_stats.man ./get_summary_stats
  *  groff -mandoc get_summary_stats.man > get_summary_stats.ps
 */
@@ -64,7 +64,7 @@ struct SnpStats
   double rsZscore; // using Fisher transformation
   double rsPval; // using rsZscore
   double betaPermPval; // permutation P-value based on beta P-value
-  double rsPermPval; // permutation P-value based on Spearman-derived Z score
+  double rsPermPval; // permutation P-value based on Spearman-derived P-value
 };
 
 struct FtrStats
@@ -75,7 +75,7 @@ struct FtrStats
   size_t end; // idem
   vector <SnpStats> vSnpStats;
   double betaPermPval; // permutation P-value based on beta P-value
-  double rsPermPval; // permutation P-value based on Spearman-derived Z score
+  double rsPermPval; // permutation P-value based on Spearman-derived P-value
 };
 
 /** \brief Display the help on stdout.
@@ -925,7 +925,10 @@ computePermutationPvaluesAtFeatureLevel (
   const vector<bool> & vIsPhenoNa,
   const vector< vector <double> > & gAllSnps,
   const vector< vector<bool> > & vAreGenosNa,
+  const bool needQnorm,
   const double minBetaPval,
+  const bool calcSpearman,
+  const double minRsPval,
   const int verbose)
 {
   size_t i, p, perm_id, snp_id, seed = 1859;
@@ -957,11 +960,15 @@ computePermutationPvaluesAtFeatureLevel (
     exit (1);
   }
   
-  iFtrStats.betaPermPval = 1;
+  if (! calcSpearman)
+    iFtrStats.betaPermPval = 1;
+  else
+    iFtrStats.rsPermPval = 1;
   
   for(perm_id=0; perm_id<nbPermutations; ++perm_id)
   {
-    double minBetaPvalPerm = 1, betaPvalPerm;
+    double minBetaPvalPerm = 1, betaPvalPerm, minRsPvalPerm = 1, rsPvalPerm,
+      rsZscore;
     gsl_ran_shuffle (r, perm->data, perm->size, sizeof(size_t));
     
     for(snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
@@ -976,16 +983,47 @@ computePermutationPvaluesAtFeatureLevel (
 	  gPerm.push_back (gAllSnps[snp_id][i]);
 	}
       }
-      ols ("", "", gPerm, yPerm, &betahat, &sebetahat, &sigmahat,
-	   &betaPvalPerm, &R2, 0);
-      if (betaPvalPerm < minBetaPvalPerm)
-	minBetaPvalPerm = betaPvalPerm;
+      if (needQnorm)
+	qnorm (yPerm);
+      if (! calcSpearman)
+      {
+	ols ("", "", gPerm, yPerm, &betahat, &sebetahat, &sigmahat,
+	     &betaPvalPerm, &R2, 0);
+	if (betaPvalPerm < minBetaPvalPerm)
+	  minBetaPvalPerm = betaPvalPerm;
+      }
+      else
+      {
+	gsl_vector_const_view gsl_gPerm =
+	  gsl_vector_const_view_array (&gPerm[0], gPerm.size());
+	gsl_vector_const_view gsl_yPerm =
+	  gsl_vector_const_view_array (&yPerm[0], yPerm.size());
+	rsPvalPerm = my_stats_correlation_spearman (gsl_gPerm.vector.data, 1,
+						    gsl_yPerm.vector.data, 1,
+						    gsl_gPerm.vector.size);
+      rsZscore = sqrt((gPerm.size() - 3) / 1.06) * 1/2
+	* (log(1 + rsPvalPerm) - log(1 - rsPvalPerm));
+      if (rsZscore >= 0)
+	rsPvalPerm = gsl_cdf_ugaussian_Q (rsZscore);
+      else
+	rsPvalPerm = gsl_cdf_ugaussian_Q (-rsZscore);
+      if (rsPvalPerm < minRsPvalPerm)
+	minRsPvalPerm = rsPvalPerm;
+      }
     }
     
-    resPerm.push_back (minBetaPvalPerm);
-    
-    if (minBetaPvalPerm <= minBetaPval)
-      ++iFtrStats.betaPermPval;
+    if (! calcSpearman)
+    {
+      resPerm.push_back (minBetaPvalPerm);
+      if (minBetaPvalPerm <= minBetaPval)
+	++iFtrStats.betaPermPval;
+    }
+    else
+    {
+      resPerm.push_back (minRsPvalPerm);
+      if (minRsPvalPerm <= minRsPval)
+	++iFtrStats.rsPermPval;
+    }    
   }
   
   gsl_permutation_free (perm);
@@ -994,15 +1032,29 @@ computePermutationPvaluesAtFeatureLevel (
   // compute the SNP-level permutation P-values
   for (snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
   {
-    iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
-    for (perm_id=0; perm_id<resPerm.size(); ++perm_id)
-      if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
-	++iFtrStats.vSnpStats[snp_id].betaPermPval;
-    iFtrStats.vSnpStats[snp_id].betaPermPval /= (resPerm.size() + 1);
+    if (! calcSpearman)
+    {
+      iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
+      for (perm_id=0; perm_id<resPerm.size(); ++perm_id)
+	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
+	  ++iFtrStats.vSnpStats[snp_id].betaPermPval;
+      iFtrStats.vSnpStats[snp_id].betaPermPval /= (resPerm.size() + 1);
+    }
+    else
+    {
+      iFtrStats.vSnpStats[snp_id].rsPermPval = 1;
+      for (perm_id=0; perm_id<resPerm.size(); ++perm_id)
+	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].rsPval)
+	  ++iFtrStats.vSnpStats[snp_id].rsPermPval;
+      iFtrStats.vSnpStats[snp_id].rsPermPval /= (resPerm.size() + 1);
+    }
   }
   
   // compute the feature-level permutation P-value
-  iFtrStats.betaPermPval /= (resPerm.size() + 1);
+  if (!calcSpearman)
+    iFtrStats.betaPermPval /= (resPerm.size() + 1);
+  else
+    iFtrStats.rsPermPval /= (resPerm.size() + 1);
 }
 
 /** \brief Compute the permutation P-value at the feature level using, as SNP-
@@ -1023,7 +1075,10 @@ computePermutationPvaluesAtFeatureLevelParallel (
   const vector<bool> & vIsPhenoNa,
   const vector< vector <double> > & gAllSnps,
   const vector< vector<bool> > & vAreGenosNa,
+  const bool needQnorm,
   const double minBetaPval,
+  const bool calcSpearman,
+  const double minRsPval,
   const int nbThreads,
   const int verbose)
 {
@@ -1070,7 +1125,8 @@ computePermutationPvaluesAtFeatureLevelParallel (
     for(perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
     {
       int tid = omp_get_thread_num();
-      double minBetaPvalPerm = 1, betaPvalPerm, betahat, sebetahat, sigmahat, R2;
+      double minBetaPvalPerm = 1, betaPvalPerm, betahat, sebetahat, sigmahat, R2,
+	minRsPvalPerm = 1, rsPvalPerm, rsZscore;
       gsl_ran_shuffle (vRngs[tid], vPerms[tid]->data, vPerms[tid]->size, sizeof(size_t));
       
       for(size_t snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
@@ -1086,12 +1142,39 @@ computePermutationPvaluesAtFeatureLevelParallel (
 	    gPerm.push_back (gAllSnps[snp_id][i]);
 	  }
 	}
-	ols ("", "", gPerm, yPerm, &betahat, &sebetahat, &sigmahat,
-	     &betaPvalPerm, &R2, 0);
-	if (betaPvalPerm < minBetaPvalPerm)
-	  minBetaPvalPerm = betaPvalPerm;
+	if (needQnorm)
+	  qnorm (yPerm);
+	if (! calcSpearman)
+	{
+	  ols ("", "", gPerm, yPerm, &betahat, &sebetahat, &sigmahat,
+	       &betaPvalPerm, &R2, 0);
+	  if (betaPvalPerm < minBetaPvalPerm)
+	    minBetaPvalPerm = betaPvalPerm;
+	}
+	else
+	{
+	  gsl_vector_const_view gsl_gPerm =
+	    gsl_vector_const_view_array (&gPerm[0], gPerm.size());
+	  gsl_vector_const_view gsl_yPerm =
+	    gsl_vector_const_view_array (&yPerm[0], yPerm.size());
+	  rsPvalPerm = my_stats_correlation_spearman (gsl_gPerm.vector.data, 1,
+						      gsl_yPerm.vector.data, 1,
+						      gsl_gPerm.vector.size);
+	  rsZscore = sqrt((gPerm.size() - 3) / 1.06) * 1/2
+	    * (log(1 + rsPvalPerm) - log(1 - rsPvalPerm));
+	  if (rsZscore >= 0)
+	    rsPvalPerm = gsl_cdf_ugaussian_Q (rsZscore);
+	  else
+	    rsPvalPerm = gsl_cdf_ugaussian_Q (-rsZscore);
+	  if (rsPvalPerm < minRsPvalPerm)
+	    minRsPvalPerm = rsPvalPerm;
+	}
       }
-      resPerm[perm_id] = minBetaPvalPerm;
+      
+      if (! calcSpearman)
+	resPerm[perm_id] = minBetaPvalPerm;
+      else
+	resPerm[perm_id] = minRsPvalPerm;
     }
   }
   
@@ -1104,19 +1187,41 @@ computePermutationPvaluesAtFeatureLevelParallel (
   // compute the SNP-level permutation P-values
   for(size_t snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
   {
-    iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
-    for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
-      if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
-	++iFtrStats.vSnpStats[snp_id].betaPermPval;
-    iFtrStats.vSnpStats[snp_id].betaPermPval /= (nbPermutations + 1);
+    if (! calcSpearman)
+    {
+      iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
+      for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
+	  ++iFtrStats.vSnpStats[snp_id].betaPermPval;
+      iFtrStats.vSnpStats[snp_id].betaPermPval /= (nbPermutations + 1);
+    }
+    else
+    {
+      iFtrStats.vSnpStats[snp_id].rsPermPval = 1;
+      for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].rsPval)
+	  ++iFtrStats.vSnpStats[snp_id].rsPermPval;
+      iFtrStats.vSnpStats[snp_id].rsPermPval /= (nbPermutations + 1);
+    }
   }
   
   // compute the feature-level permutation P-value
-  iFtrStats.betaPermPval = 1;
-  for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
-    if (resPerm[perm_id] <= minBetaPval)
-      ++iFtrStats.betaPermPval;
-  iFtrStats.betaPermPval /= (nbPermutations + 1);
+  if (! calcSpearman)
+  {
+    iFtrStats.betaPermPval = 1;
+    for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+      if (resPerm[perm_id] <= minBetaPval)
+	++iFtrStats.betaPermPval;
+    iFtrStats.betaPermPval /= (nbPermutations + 1);
+  }
+  else
+  {
+    iFtrStats.rsPermPval = 1;
+    for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+      if (resPerm[perm_id] <= minRsPval)
+	++iFtrStats.rsPermPval;
+    iFtrStats.rsPermPval /= (nbPermutations + 1);
+  }
 }
 
 void
@@ -1195,7 +1300,10 @@ computeSummaryStatsForOneFeature (
 						    g.size());
       iSnpStats.rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
 	* (log(1 + iSnpStats.rs) - log(1 - iSnpStats.rs));
-      iSnpStats.rsPval = gsl_cdf_ugaussian_Q (iSnpStats.rsZscore);
+      if (iSnpStats.rsZscore >= 0)
+	iSnpStats.rsPval = gsl_cdf_ugaussian_Q (iSnpStats.rsZscore);
+      else
+	iSnpStats.rsPval = gsl_cdf_ugaussian_Q (-iSnpStats.rsZscore);
       if (iSnpStats.rsPval < minRsPval)
 	minRsPval = iSnpStats.rsPval;
     }
@@ -1203,7 +1311,7 @@ computeSummaryStatsForOneFeature (
     iFtrStats.vSnpStats.push_back (iSnpStats);
   }
   
-  if (nbPermutations > 0 && ! calcSpearman)
+  if (nbPermutations > 0)
     if (nbThreads <= 1)
       computePermutationPvaluesAtFeatureLevel (iFtrStats,
 					       nbPermutations,
@@ -1211,7 +1319,10 @@ computeSummaryStatsForOneFeature (
 					       vIsPhenoNa,
 					       gAllSnps,
 					       vAreGenosNa,
+					       needQnorm,
 					       minBetaPval,
+					       calcSpearman,
+					       minRsPval,
 					       verbose);
     else
       computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
@@ -1220,7 +1331,10 @@ computeSummaryStatsForOneFeature (
 						       vIsPhenoNa,
 						       gAllSnps,
 						       vAreGenosNa,
+						       needQnorm,
 						       minBetaPval,
+						       calcSpearman,
+						       minRsPval,
 						       nbThreads,
 						       verbose);
 }
@@ -1290,7 +1404,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   outStream << "ftr chr start end snp chr coord maf n";
   if (! calcSpearman)
   {
-    outStream << " betahat sebetahat sigmahat pvalBeta R2";
+    outStream << " betahat sebetahat sigmahat betaPval R2";
     if (nbPermutations > 0)
       outStream << " betaPermPvalSnp betaPermPvalFtr";
   }
