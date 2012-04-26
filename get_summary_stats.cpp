@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  gcc -Wall -g -DDEBUG get_summary_stats.cpp -lstdc++ -lgzstream -lz -lgsl -lgslcblas -o get_summary_stats
+ *  gcc -Wall -fopenmp -g -DDEBUG get_summary_stats.cpp -lstdc++ -lgzstream -lz -lgsl -lgslcblas -o get_summary_stats
  *  help2man -o get_summary_stats.man ./get_summary_stats
  *  groff -mandoc get_summary_stats.man > get_summary_stats.ps
 */
@@ -44,6 +44,7 @@ using namespace std;
 #include <gsl/gsl_statistics.h>
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_randist.h>
+#include <omp.h>
 
 #include "utils.cpp"
 
@@ -57,12 +58,13 @@ struct SnpStats
   double betahat; // MLE of beta
   double sebetahat; // standard error
   double sigmahat; // MLE of sigma
-  double pval; // P-value of the test where H0:"beta=0" and H1:"beta!=0"
+  double betaPval; // P-value of the test where H0:"beta=0" and H1:"beta!=0"
   double R2; // coef of determination (proportion of variance explained)
   double rs; // Spearman rank correlation coefficient
   double rsZscore; // using Fisher transformation
+  double rsPval; // using rsZscore
   double betaPermPval; // permutation P-value based on beta P-value
-  double rsPermPval; // permutation P-value based on Spearman coefs
+  double rsPermPval; // permutation P-value based on Spearman-derived Z score
 };
 
 struct FtrStats
@@ -73,7 +75,7 @@ struct FtrStats
   size_t end; // idem
   vector <SnpStats> vSnpStats;
   double betaPermPval; // permutation P-value based on beta P-value
-  double rsPermPval; // permutation P-value based on Spearman coef
+  double rsPermPval; // permutation P-value based on Spearman-derived Z score
 };
 
 /** \brief Display the help on stdout.
@@ -120,6 +122,7 @@ void help (char ** argv)
        << "\t\tdefault=0, recommended=10000 (but stop after 100 if P-value > 0.1)" << endl
        << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
        << "\t\tinstead of performing linear regressions" << endl
+       << "  -t, --thread\tnumber of threads (used only for permutations)" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -g <genotypes> -p <phenotypes> -o <output> \\" << endl
@@ -164,6 +167,7 @@ parse_args (
   double & minMaf,
   size_t & nbPermutations,
   bool & calcSpearman,
+  int & nbThreads,
   int & verbose)
 {
   int c = 0;
@@ -186,10 +190,11 @@ parse_args (
 	{"maf", required_argument, 0, 'm'},
 	{"perm", required_argument, 0, 'P'},
 	{"sp", no_argument, 0, 'S'},
+	{"thread", required_argument, 0, 't'},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:m:P:S",
+    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:m:P:St:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -244,6 +249,9 @@ parse_args (
       break;
     case 'S':
       calcSpearman = true;
+      break;
+    case 't':
+      nbThreads = atoi(optarg);
       break;
     case '?':
       printf ("\n"); help (argv);
@@ -354,7 +362,6 @@ FtrStats_init (
     if (linePheno.empty() && lineFtrCoords.empty())
       break;
     
-    // both files should have the same number of lines
     if ((linePheno.empty() && ! lineFtrCoords.empty())
 	|| (! linePheno.empty() && lineFtrCoords.empty()))
     {
@@ -372,7 +379,6 @@ FtrStats_init (
     else
       split (lineFtrCoords, ' ', tokensFtrCoords);
     
-    // features should be sorted similarly in both files
     if (tokensPheno[0].compare(tokensFtrCoords[3]) != 0)
     {
       cerr << "ERROR: features in phenotype and features coordinates files" << endl
@@ -387,7 +393,6 @@ FtrStats_init (
       exit (1);
     }
     
-    // skip it if requested
     if (! vFtrsToKeep.empty()
 	&& find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokensPheno[0])
 	== vFtrsToKeep.end())
@@ -405,12 +410,10 @@ FtrStats_init (
     
     iFtrStats.name = tokensPheno[0];
     
-    // retrieve its mapping information
     iFtrStats.chr = tokensFtrCoords[0];
     iFtrStats.start = atol(tokensFtrCoords[1].c_str()) + 1;
     iFtrStats.end = atol(tokensFtrCoords[2].c_str());
     
-    // retrieve its values
     vIsPhenoNa.assign (nbSamples, false);
     y_init.assign (nbSamples, 0);
     size_t j = 0;
@@ -501,7 +504,7 @@ void FtrStats_write (FtrStats iFtrStats, ostream & outStream,
       outStream << " " << iSnpStats.betahat
 		<< " " << iSnpStats.sebetahat
 		<< " " << iSnpStats.sigmahat
-		<< " " << iSnpStats.pval
+		<< " " << iSnpStats.betaPval
 		<< " " << iSnpStats.R2;
       if (nbPermutations > 0)
 	outStream << " " << iSnpStats.betaPermPval
@@ -510,7 +513,8 @@ void FtrStats_write (FtrStats iFtrStats, ostream & outStream,
     else
     {
       outStream << " " << iSnpStats.rs
-		<< " " << iSnpStats.rsZscore;
+		<< " " << iSnpStats.rsZscore
+		<< " " << iSnpStats.rsPval;
       if (nbPermutations > 0)
 	outStream << " " << iSnpStats.rsPermPval
 		  << " " << iFtrStats.rsPermPval;
@@ -545,12 +549,10 @@ SnpStats_init (
   else
     split (line, ' ', tokens);
   
-  // retrieve its mapping information
   iSnpStats.chr = tokens[0];
   iSnpStats.name = tokens[1];
   iSnpStats.coord = atol(tokens[2].c_str());
   
-  // retrieve its values
   maf = 0;
   vIsGenoNa.assign (nbSamples, false);
   g_init.assign (nbSamples, 0);
@@ -664,7 +666,6 @@ indexSnps (
   if (verbose > 0 && nbSamples != totNbSamples)
     printf ("samples to discard: %zu\n", totNbSamples - nbSamples);
   
-  // for each SNP
   while (genoStream.good())
   {
     snpPos = genoStream.tellg();
@@ -676,7 +677,6 @@ indexSnps (
     else
       split (line, ' ', tokens);
     
-    // check the format
     if (tokens.size() != 5+3*totNbSamples)
     {
       cerr << line << endl;
@@ -685,7 +685,6 @@ indexSnps (
       exit (1);
     }
     
-    // skip it if requested
     if (! vSnpsToKeep.empty()
 	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2])
 	== vSnpsToKeep.end())
@@ -877,10 +876,6 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
 /** \brief Compute the permutation P-value at the feature level using, as SNP-
  *  level test statistic, the  P-values on beta=0.
  *
- *  @param yAllSnps vector of vectors of phenotypes for all SNPs
- *  @param gAllSnps vector of vectors of genotypes for all SNPs
- *  @param minBetaPval min P-value for beta=0 over all SNPs
- *
  *  T_i,j: test statistic for SNP i and gene j
  *  T_min,j = min_i (T_i,j)
  *  T~_i,j,k: test statistic for SNP i, gene j and permutation k
@@ -892,25 +887,28 @@ void
 computePermutationPvaluesAtFeatureLevel (
   FtrStats & iFtrStats,
   const size_t nbPermutations,
-  const vector< vector <double> > yAllSnps,
-  const vector< vector <double> > gAllSnps,
+  const vector <double> & y_init,
+  const vector<bool> & vIsPhenoNa,
+  const vector< vector <double> > & gAllSnps,
+  const vector< vector<bool> > & vAreGenosNa,
   const double minBetaPval,
   const int verbose)
 {
-  size_t perm_id, snp_id, countNbPerms = 0, seed = 1859;
-  double minBetaPvalPerm, betaPvalPerm, betahat, sebetahat, sigmahat, R2;
-  vector<double> yPerm, g;
+  size_t i, p, perm_id, snp_id, seed = 1859;
+  double betahat, sebetahat, sigmahat, R2;
+  gsl_rng * r;
+  gsl_permutation * perm; // for the indices of the phenotypes vector
+  vector<double> resPerm;
   
   if (verbose > 0)
   {
-    printf ("perform %zu permutations on the phenotypes ...\n",
-	    nbPermutations);
+    printf ("perform %zu permutations on the phenotypes (minBetaPval=%f) ...\n",
+	    nbPermutations, minBetaPval);
     fflush (stdout);
   }
   
-  // initialize the rng for the permutations (TODO: try multi-threading?)
   gsl_rng_env_setup();
-  gsl_rng * r = gsl_rng_alloc (gsl_rng_default);
+  r = gsl_rng_alloc (gsl_rng_default);
   if (r == 0)
   {
     cerr << "ERROR: can't allocate memory for the RNG" << endl;
@@ -918,45 +916,173 @@ computePermutationPvaluesAtFeatureLevel (
   }
   gsl_rng_set (r, seed);
   
+  perm = gsl_permutation_calloc (y_init.size());
+  if (perm == 0)
+  {
+    cerr << "ERROR: can't allocate memory for the permutation" << endl;
+    exit (1);
+  }
+  
   iFtrStats.betaPermPval = 1;
   
   for(perm_id=0; perm_id<nbPermutations; ++perm_id)
   {
-    ++countNbPerms;
-    yPerm = yAllSnps[0];
-    gsl_ran_shuffle (r, &yPerm[0], yPerm.size(), sizeof(double));
-    minBetaPvalPerm = 1;
+    double minBetaPvalPerm = 1, betaPvalPerm;
+    gsl_ran_shuffle (r, perm->data, perm->size, sizeof(size_t));
     
     for(snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
     {
-      g = gAllSnps[snp_id];
-      ols ("", "", g, yPerm, &betahat, &sebetahat, &sigmahat,
+      vector<double> yPerm, gPerm;
+      for (i=0; i<perm->size; ++i)
+      {
+	p = gsl_permutation_get (perm, i);
+	if (! vIsPhenoNa[p] && ! vAreGenosNa[snp_id][i])
+	{
+	  yPerm.push_back (y_init[p]);
+	  gPerm.push_back (gAllSnps[snp_id][i]);
+	}
+      }
+      ols ("", "", gPerm, yPerm, &betahat, &sebetahat, &sigmahat,
 	   &betaPvalPerm, &R2, 0);
       if (betaPvalPerm < minBetaPvalPerm)
 	minBetaPvalPerm = betaPvalPerm;
-      if (perm_id == 0)
-	iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
-      if (betaPvalPerm <= iFtrStats.vSnpStats[snp_id].betaPermPval)
-	++(iFtrStats.vSnpStats[snp_id].betaPermPval);
     }
     
-    if (minBetaPvalPerm <= minBetaPval)
-      ++(iFtrStats.betaPermPval);
+    resPerm.push_back (minBetaPvalPerm);
     
-    // after 100 permutations, see if it's worth doing more of them
-    if (countNbPerms == 100)
-      if (iFtrStats.betaPermPval / (countNbPerms + 1) > 0.1)
-    	break;
+    if (minBetaPvalPerm <= minBetaPval)
+      ++iFtrStats.betaPermPval;
   }
   
-  // compute the SNP-level P-values
-  for(snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
-    iFtrStats.vSnpStats[snp_id].betaPermPval /= (countNbPerms + 1);
-  
-  // compute the feature-level P-value
-  iFtrStats.betaPermPval /= (countNbPerms + 1);
-  
+  gsl_permutation_free (perm);
   gsl_rng_free (r);
+  
+  // compute the SNP-level permutation P-values
+  for (snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
+  {
+    iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
+    for (perm_id=0; perm_id<resPerm.size(); ++perm_id)
+      if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
+	++iFtrStats.vSnpStats[snp_id].betaPermPval;
+    iFtrStats.vSnpStats[snp_id].betaPermPval /= (resPerm.size() + 1);
+  }
+  
+  // compute the feature-level permutation P-value
+  iFtrStats.betaPermPval /= (resPerm.size() + 1);
+}
+
+/** \brief Compute the permutation P-value at the feature level using, as SNP-
+ *  level test statistic, the  P-values on beta=0.
+ *
+ *  T_i,j: test statistic for SNP i and gene j
+ *  T_min,j = min_i (T_i,j)
+ *  T~_i,j,k: test statistic for SNP i, gene j and permutation k
+ *  T~_min,j,k = min_i (T~_i,j,k)
+ *  feature-level Pval = (#{k: T~_min,j,k <= T_min,j} + 1) / (#permutations + 1)
+ *  SNP-level Pval = (#{k: T~_min,j,k <= T_i,j} + 1) / (#permutations + 1)
+ */
+void
+computePermutationPvaluesAtFeatureLevelParallel (
+  FtrStats & iFtrStats,
+  const size_t nbPermutations,
+  const vector <double> & y_init,
+  const vector<bool> & vIsPhenoNa,
+  const vector< vector <double> > & gAllSnps,
+  const vector< vector<bool> > & vAreGenosNa,
+  const double minBetaPval,
+  const int nbThreads,
+  const int verbose)
+{
+  long int perm_id;
+  size_t seed = 1859;
+  int t;
+  vector<double> resPerm (nbPermutations, 1);
+  int maxNbThreads = omp_get_max_threads();
+  vector<gsl_rng *> vRngs;
+  vector<gsl_permutation *> vPerms; // for the indices of the phenotypes vector
+  
+  omp_set_num_threads (min(nbThreads, maxNbThreads));
+  if (verbose > 0)
+  {
+    printf ("perform %zu permutations on the phenotypes (%d threads) ...\n",
+	    nbPermutations, min(nbThreads, maxNbThreads));
+    fflush (stdout);
+  }
+  
+  gsl_rng_env_setup();
+  for (t=0; t<min(nbThreads, maxNbThreads); ++t)
+  {
+    gsl_rng * r = gsl_rng_alloc (gsl_rng_default);
+    if (r == 0)
+    {
+      cerr << "ERROR: can't allocate memory for the RNG #" << t+1 << endl;
+      exit (1);
+    }
+    gsl_rng_set (r, seed * (t+1));
+    vRngs.push_back (r);
+    
+    gsl_permutation * perm = gsl_permutation_calloc (y_init.size());
+    if (perm == 0)
+    {
+      cerr << "ERROR: can't allocate memory for the permutation #" << t+1 << endl;
+      exit (1);
+    }
+    vPerms.push_back (perm);
+  }
+  
+#pragma omp parallel shared(resPerm) private(perm_id)
+  {
+#pragma omp for nowait
+    for(perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+    {
+      int tid = omp_get_thread_num();
+      double minBetaPvalPerm = 1, betaPvalPerm, betahat, sebetahat, sigmahat, R2;
+      gsl_ran_shuffle (vRngs[tid], vPerms[tid]->data, vPerms[tid]->size, sizeof(size_t));
+      
+      for(size_t snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
+      {
+	size_t p;
+	vector<double> yPerm, gPerm;
+	for (size_t i=0; i<vPerms[tid]->size; ++i)
+	{
+	  p = gsl_permutation_get (vPerms[tid], i);
+	  if (! vIsPhenoNa[p] && ! vAreGenosNa[snp_id][i])
+	  {
+	    yPerm.push_back (y_init[p]);
+	    gPerm.push_back (gAllSnps[snp_id][i]);
+	  }
+	}
+	ols ("", "", gPerm, yPerm, &betahat, &sebetahat, &sigmahat,
+	     &betaPvalPerm, &R2, 0);
+	if (betaPvalPerm < minBetaPvalPerm)
+	  minBetaPvalPerm = betaPvalPerm;
+      }
+      resPerm[perm_id] = minBetaPvalPerm;
+    }
+  }
+  
+  for (t=0; t<min(nbThreads, maxNbThreads); ++t)
+  {
+    gsl_permutation_free (vPerms[t]);
+    gsl_rng_free (vRngs[t]);
+  }
+  
+  // compute the SNP-level permutation P-values
+  for(size_t snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
+  {
+    iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
+    for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+      if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
+	++iFtrStats.vSnpStats[snp_id].betaPermPval;
+    iFtrStats.vSnpStats[snp_id].betaPermPval /= (nbPermutations + 1);
+  }
+  
+  // compute the feature-level permutation P-value
+  iFtrStats.betaPermPval = 1;
+  for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
+    if (resPerm[perm_id] <= minBetaPval)
+      ++iFtrStats.betaPermPval;
+  iFtrStats.betaPermPval /= (nbPermutations + 1);
 }
 
 void
@@ -970,33 +1096,39 @@ computeSummaryStatsForOneFeature (
   const vector<double> y_init,
   const size_t nbPermutations,
   const bool calcSpearman,
+  const int nbThreads,
   const int verbose)
 {
   size_t snp_id, i;
   string snpNameCoord;
   vector<string> tokens;
-  vector<bool> vIsGenoNa;
-  vector<double> g_init, y, g;
-  vector< vector<double> > yAllSnps, gAllSnps;
+  vector<double> y, g;
   size_t nbSamples = count (vIdxSamplesToSkip.begin(),
 			    vIdxSamplesToSkip.end(),
 			    false);
-  double minBetaPval = 1; // min P-value for beta=0 over all SNPs (no permutation)
   
-  // for each SNP in cis
+  // used for permutations
+  vector< vector<double> > gAllSnps;
+  vector< vector<bool> > vAreGenosNa;
+  double minBetaPval = 1, minRsPval = 1;
+  
   for (snp_id = 0; snp_id < vCisSnps.size(); ++snp_id)
   {
     SnpStats iSnpStats;
     snpNameCoord = vCisSnps[snp_id];
+    vector<double> g_init;
+    vector<bool> vIsGenoNa;
     SnpStats_init (iSnpStats, genoStream, snpNameCoord, mSnpNameCoord2Pos,
 		   vIdxSamplesToSkip, vIsGenoNa, g_init, verbose-1);
     
     if (iSnpStats.name.empty())
       continue;
-    if (verbose > 0)
-      printf ("SNP %s\n", iSnpStats.name.c_str());
+    if (verbose > 1)
+      printf ("ftr=%s snp=%s\n", iFtrStats.name.c_str(),
+	      iSnpStats.name.c_str());
+    gAllSnps.push_back (g_init);
+    vAreGenosNa.push_back (vIsGenoNa);
     
-    // match phenotypes and genotypes missing values
     y.clear();
     g.clear();
     for (i = 0; i < nbSamples; ++i)
@@ -1005,19 +1137,16 @@ computeSummaryStatsForOneFeature (
 	y.push_back (y_init[i]);
 	g.push_back (g_init[i]);
       }
-    iSnpStats.n = y.size();
-    yAllSnps.push_back (y);
-    gAllSnps.push_back (g);
+    iSnpStats.n = g.size();
     
-    // perform the ordinary-least-square regression
     if (! calcSpearman)
+    {
       ols (iFtrStats.name, iSnpStats.name, g, y, &iSnpStats.betahat,
 	   &iSnpStats.sebetahat, &iSnpStats.sigmahat,
-	   &iSnpStats.pval, &iSnpStats.R2, verbose-1);
-    if (iSnpStats.pval < minBetaPval)
-      minBetaPval = iSnpStats.pval;
-    
-    // or calculate the Spearman coef
+	   &iSnpStats.betaPval, &iSnpStats.R2, verbose-1);
+      if (iSnpStats.betaPval < minBetaPval)
+	minBetaPval = iSnpStats.betaPval;
+    }
     else
     {
       gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
@@ -1029,19 +1158,34 @@ computeSummaryStatsForOneFeature (
 						    g.size());
       iSnpStats.rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
 	* (log(1 + iSnpStats.rs) - log(1 - iSnpStats.rs));
+      iSnpStats.rsPval = gsl_cdf_ugaussian_Q (iSnpStats.rsZscore);
+      if (iSnpStats.rsPval < minRsPval)
+	minRsPval = iSnpStats.rsPval;
     }
     
     iFtrStats.vSnpStats.push_back (iSnpStats);
   }
   
-  // compute permutation P-value at the feature level
-  if (nbPermutations > 0)
-    computePermutationPvaluesAtFeatureLevel (iFtrStats,
-					     nbPermutations,
-					     yAllSnps,
-					     gAllSnps,
-					     minBetaPval,
-					     verbose);
+  if (nbPermutations > 0 && ! calcSpearman)
+    if (nbThreads <= 1)
+      computePermutationPvaluesAtFeatureLevel (iFtrStats,
+					       nbPermutations,
+					       y_init,
+					       vIsPhenoNa,
+					       gAllSnps,
+					       vAreGenosNa,
+					       minBetaPval,
+					       verbose);
+    else
+      computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
+						       nbPermutations,
+						       y_init,
+						       vIsPhenoNa,
+						       gAllSnps,
+						       vAreGenosNa,
+						       minBetaPval,
+						       nbThreads,
+						       verbose);
 }
 
 void
@@ -1058,6 +1202,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   const double minMaf,
   const size_t nbPermutations,
   const bool calcSpearman,
+  const int nbThreads,
   const int verbose)
 {
   FtrStats iFtrStats;
@@ -1113,7 +1258,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   }
   else
   {
-    outStream << " rs rsZscore";
+    outStream << " rs rsZscore rsPval";
     if (nbPermutations > 0)
       outStream << " rsPermPvalSnp rsPermPvalFtr";
   }
@@ -1124,7 +1269,10 @@ computeAndWriteSummaryStatsFtrPerFtr (
 	     vIdxSamplesToSkip, minMaf, mSnpNameCoord2Pos, verbose);
   
   if (verbose > 0)
+  {
     printf ("look for association between each pair feature-SNP ...\n");
+    fflush (stdout);
+  }
   
   // read header line of the phenotype file
   getline (phenoStream, linePheno);
@@ -1177,7 +1325,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
     computeSummaryStatsForOneFeature (iFtrStats, genoStream, vCisSnps,
 				      mSnpNameCoord2Pos, vIdxSamplesToSkip,
 				      vIsPhenoNa, y_init, nbPermutations,
-				      calcSpearman, verbose-2);
+				      calcSpearman, nbThreads, verbose-1);
     
     // write the results (one line per SNP)
     if (iFtrStats.vSnpStats.size() > 0)
@@ -1208,10 +1356,10 @@ int main (int argc, char ** argv)
   double minMaf = 0.0;
   size_t nbPermutations = 0;
   bool calcSpearman = false;
-  int verbose = 1;
+  int nbThreads = 1, verbose = 1;
   parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
 	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
-	      minMaf, nbPermutations, calcSpearman, verbose);
+	      minMaf, nbPermutations, calcSpearman, nbThreads, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1237,6 +1385,7 @@ int main (int argc, char ** argv)
 					minMaf,
 					nbPermutations,
 					calcSpearman,
+					nbThreads,
 					verbose);
   
   if (verbose > 0)
