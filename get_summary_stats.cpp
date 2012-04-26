@@ -116,6 +116,8 @@ void help (char ** argv)
        << "\t\t(one SNP coordinate per line)" << endl
        << "  -d, --discard\tgzipped file with a list of samples to discard" << endl
        << "\t\t(one individual per line, should match header of phenotype file)" << endl
+       << "  -q, --qnorm\tquantile-normalize phenotypes to a standard normal" << endl
+       << "\t\tvery useful when using linear regression (versus Spearman coef)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
        << "\t\t(whatever the option, the MAF will still be computed and saved)" << endl
        << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
@@ -166,6 +168,7 @@ parse_args (
   string & samplesFile,
   double & minMaf,
   size_t & nbPermutations,
+  bool & needQnorm,
   bool & calcSpearman,
   int & nbThreads,
   int & verbose)
@@ -187,6 +190,7 @@ parse_args (
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
 	{"discard", required_argument, 0, 'd'},
+	{"qnorm", no_argument, 0, 'q'},
 	{"maf", required_argument, 0, 'm'},
 	{"perm", required_argument, 0, 'P'},
 	{"sp", no_argument, 0, 'S'},
@@ -194,7 +198,7 @@ parse_args (
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:m:P:St:",
+    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:qm:P:St:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -240,6 +244,9 @@ parse_args (
       break;
     case 'd':
       samplesFile = optarg;
+      break;
+    case 'q':
+      needQnorm = true;
       break;
     case 'm':
       minMaf = atof(optarg);
@@ -705,6 +712,33 @@ indexSnps (
     cout << "nb of indexed SNPs: " << mSnpNameCoord2Pos.size() << endl;
 }
 
+/** \brief Quantile-normalize an input vector to a standard normal.
+ *  \note Missing values should be removed beforehand.
+*/
+void qnorm (vector<double> & vData)
+{
+  size_t i, n = vData.size();
+  size_t * p;
+  double q;
+  
+  p = (size_t*) calloc (n, sizeof(size_t));
+  if (p == NULL)
+  {
+    cerr << "ERROR: can't allocate memory for p" << endl;
+    exit (1);
+  }
+  
+  gsl_sort_index (p, &vData[0], 1, n);
+  
+  for (i=0; i<n; ++i)
+  {
+    q = ((double)(i + 0.5)) / ((double)(n));
+    vData[p[i]] = gsl_cdf_ugaussian_Pinv (q);
+  }
+  
+  free (p);
+}
+
 /** \brief Compute the summary statistics of the linear regression.
  *  \note phenotype = mu + genotype * beta + error
  *  \note missing values should have been already filtered out
@@ -1095,6 +1129,7 @@ computeSummaryStatsForOneFeature (
   const vector<bool> vIsPhenoNa,
   const vector<double> y_init,
   const size_t nbPermutations,
+  const bool needQnorm,
   const bool calcSpearman,
   const int nbThreads,
   const int verbose)
@@ -1138,6 +1173,8 @@ computeSummaryStatsForOneFeature (
 	g.push_back (g_init[i]);
       }
     iSnpStats.n = g.size();
+    if (needQnorm)
+      qnorm (y);
     
     if (! calcSpearman)
     {
@@ -1199,6 +1236,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   const vector<string> vSnpsToKeep,
   const vector<string> vSamplesToSkip,
   const string chrToKeep,
+  const bool needQnorm,
   const double minMaf,
   const size_t nbPermutations,
   const bool calcSpearman,
@@ -1325,7 +1363,8 @@ computeAndWriteSummaryStatsFtrPerFtr (
     computeSummaryStatsForOneFeature (iFtrStats, genoStream, vCisSnps,
 				      mSnpNameCoord2Pos, vIdxSamplesToSkip,
 				      vIsPhenoNa, y_init, nbPermutations,
-				      calcSpearman, nbThreads, verbose-1);
+				      needQnorm, calcSpearman, nbThreads,
+				      verbose-1);
     
     // write the results (one line per SNP)
     if (iFtrStats.vSnpStats.size() > 0)
@@ -1355,11 +1394,12 @@ int main (int argc, char ** argv)
     ftrsFile, snpsFile, samplesFile, chrToKeep = "";
   double minMaf = 0.0;
   size_t nbPermutations = 0;
-  bool calcSpearman = false;
+  bool needQnorm = false, calcSpearman = false;
   int nbThreads = 1, verbose = 1;
   parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
 	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
-	      minMaf, nbPermutations, calcSpearman, nbThreads, verbose);
+	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
+	      verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1382,6 +1422,7 @@ int main (int argc, char ** argv)
 					vSnpsToKeep,
 					vSamplesToSkip,
 					chrToKeep,
+					needQnorm,
 					minMaf,
 					nbPermutations,
 					calcSpearman,
