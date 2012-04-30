@@ -63,8 +63,6 @@ struct SnpStats
   double rs; // Spearman rank correlation coefficient
   double rsZscore; // using Fisher transformation
   double rsPval; // using rsZscore
-  double betaPermPval; // permutation P-value based on beta P-value
-  double rsPermPval; // permutation P-value based on Spearman-derived P-value
 };
 
 struct FtrStats
@@ -514,8 +512,7 @@ void FtrStats_write (FtrStats iFtrStats, ostream & outStream,
 		<< " " << iSnpStats.betaPval
 		<< " " << iSnpStats.R2;
       if (nbPermutations > 0)
-	outStream << " " << iSnpStats.betaPermPval
-		  << " " << iFtrStats.betaPermPval;
+	outStream << " " << iFtrStats.betaPermPval;
     }
     else
     {
@@ -523,8 +520,7 @@ void FtrStats_write (FtrStats iFtrStats, ostream & outStream,
 		<< " " << iSnpStats.rsZscore
 		<< " " << iSnpStats.rsPval;
       if (nbPermutations > 0)
-	outStream << " " << iSnpStats.rsPermPval
-		  << " " << iFtrStats.rsPermPval;
+	outStream << " " << iFtrStats.rsPermPval;
     }
     outStream << endl;
   }
@@ -915,7 +911,6 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
  *  T~_i,j,k: test statistic for SNP i, gene j and permutation k
  *  T~_min,j,k = min_i (T~_i,j,k)
  *  feature-level Pval = (#{k: T~_min,j,k <= T_min,j} + 1) / (#permutations + 1)
- *  SNP-level Pval = (#{k: T~_min,j,k <= T_i,j} + 1) / (#permutations + 1)
  */
 void
 computePermutationPvaluesAtFeatureLevel (
@@ -1029,28 +1024,6 @@ computePermutationPvaluesAtFeatureLevel (
   gsl_permutation_free (perm);
   gsl_rng_free (r);
   
-  // compute the SNP-level permutation P-values
-  for (snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
-  {
-    if (! calcSpearman)
-    {
-      iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
-      for (perm_id=0; perm_id<resPerm.size(); ++perm_id)
-	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
-	  ++iFtrStats.vSnpStats[snp_id].betaPermPval;
-      iFtrStats.vSnpStats[snp_id].betaPermPval /= (resPerm.size() + 1);
-    }
-    else
-    {
-      iFtrStats.vSnpStats[snp_id].rsPermPval = 1;
-      for (perm_id=0; perm_id<resPerm.size(); ++perm_id)
-	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].rsPval)
-	  ++iFtrStats.vSnpStats[snp_id].rsPermPval;
-      iFtrStats.vSnpStats[snp_id].rsPermPval /= (resPerm.size() + 1);
-    }
-  }
-  
-  // compute the feature-level permutation P-value
   if (!calcSpearman)
     iFtrStats.betaPermPval /= (resPerm.size() + 1);
   else
@@ -1065,7 +1038,6 @@ computePermutationPvaluesAtFeatureLevel (
  *  T~_i,j,k: test statistic for SNP i, gene j and permutation k
  *  T~_min,j,k = min_i (T~_i,j,k)
  *  feature-level Pval = (#{k: T~_min,j,k <= T_min,j} + 1) / (#permutations + 1)
- *  SNP-level Pval = (#{k: T~_min,j,k <= T_i,j} + 1) / (#permutations + 1)
  */
 void
 computePermutationPvaluesAtFeatureLevelParallel (
@@ -1184,28 +1156,6 @@ computePermutationPvaluesAtFeatureLevelParallel (
     gsl_rng_free (vRngs[t]);
   }
   
-  // compute the SNP-level permutation P-values
-  for(size_t snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
-  {
-    if (! calcSpearman)
-    {
-      iFtrStats.vSnpStats[snp_id].betaPermPval = 1;
-      for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
-	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].betaPval)
-	  ++iFtrStats.vSnpStats[snp_id].betaPermPval;
-      iFtrStats.vSnpStats[snp_id].betaPermPval /= (nbPermutations + 1);
-    }
-    else
-    {
-      iFtrStats.vSnpStats[snp_id].rsPermPval = 1;
-      for (perm_id=0; perm_id<(long int)nbPermutations; ++perm_id)
-	if (resPerm[perm_id] <= iFtrStats.vSnpStats[snp_id].rsPval)
-	  ++iFtrStats.vSnpStats[snp_id].rsPermPval;
-      iFtrStats.vSnpStats[snp_id].rsPermPval /= (nbPermutations + 1);
-    }
-  }
-  
-  // compute the feature-level permutation P-value
   if (! calcSpearman)
   {
     iFtrStats.betaPermPval = 1;
@@ -1406,13 +1356,13 @@ computeAndWriteSummaryStatsFtrPerFtr (
   {
     outStream << " betahat sebetahat sigmahat betaPval R2";
     if (nbPermutations > 0)
-      outStream << " betaPermPvalSnp betaPermPvalFtr";
+      outStream << " betaPermPvalFtr";
   }
   else
   {
     outStream << " rs rsZscore rsPval";
     if (nbPermutations > 0)
-      outStream << " rsPermPvalSnp rsPermPvalFtr";
+      outStream << " rsPermPvalFtr";
   }
   outStream << endl;
   
