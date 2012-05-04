@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  gcc -Wall -fopenmp -g -DDEBUG -O3 get_summary_stats.cpp -lstdc++ -lgzstream -lz -lgsl -lgslcblas -o get_summary_stats
+ *  gcc -Wall -fopenmp -g -DDEBUG -O3 get_summary_stats.cpp -lstdc++ -lgsl -lgslcblas -o get_summary_stats
  *  help2man -o get_summary_stats.man ./get_summary_stats
  *  groff -mandoc get_summary_stats.man > get_summary_stats.ps
 */
@@ -36,7 +36,6 @@
 #include <limits>
 using namespace std;
 
-#include <gzstream.h>
 #include <gsl/gsl_cdf.h>
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_sort.h>
@@ -97,10 +96,10 @@ void help (char ** argv)
        << "  -g, --geno\tfile with genotypes in IMPUTE format (delimiter=<space/tab>)" << endl
        << "\t\ta header line with sample names is required" << endl
        << "\t\tsamples in columns should be in same order as in phenotype file" << endl
-       << "  -p, --pheno\tfile with phenotypes (row 1 for sample names,"
-       << " column 1" << endl
-       << "\t\tfor feature names, delimiter=<space/tab>)" << endl
-       << "  -o, --output\toutput file for the summary stats" << endl
+       << "  -p, --pheno\tfile with phenotypes" << endl
+       << "\t\trow 1 for sample names, column 1 for feature names" << endl
+       << "\t\tdelimiter=<space/tab>" << endl
+       << "  -o, --output\tfile that will the summary stats" << endl
        << "      --fcoord\tBED file with the features coordinates" << endl
        << "\t\tfeatures should be in same order than in phenotype file" << endl
        << "  -l, --links\tfile with links between genes and SNPs" << endl
@@ -108,11 +107,11 @@ void help (char ** argv)
        << "\t\tfeatures should be in same order than in phenotype file" << endl
        << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
        << "  -c, --chr\tname of the chromosome to analyze (eg. 'chr21')" << endl
-       << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
+       << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
-       << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
+       << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
        << "\t\tone SNP coordinate per line" << endl
-       << "  -d, --discard\tgzipped file with a list of samples to discard" << endl
+       << "  -d, --discard\tfile with a list of samples to discard" << endl
        << "\t\tone individual per line, should match header of phenotype file" << endl
        << "  -q, --qnorm\tquantile-normalize phenotypes to a standard normal" << endl
        << "\t\tvery useful when using linear regression (versus Spearman coef)" << endl
@@ -362,49 +361,13 @@ FtrStats_init (
   while (true)
   {
     getline (phenoStream, linePheno);
-    getline (ftrCoordsStream, lineFtrCoords);
-    
-    if (linePheno.empty() && lineFtrCoords.empty())
+    if (linePheno.empty())
       break;
-    
-    if ((linePheno.empty() && ! lineFtrCoords.empty())
-	|| (! linePheno.empty() && lineFtrCoords.empty()))
-    {
-      cerr << "ERROR: phenotype file and features coordinates file" << endl
-	   << "should have same number of features" << endl;
-      exit (1);
-    }
     
     if (linePheno.find('\t') != string::npos)
       split (linePheno, '\t', tokensPheno);
     else
       split (linePheno, ' ', tokensPheno);
-    if (lineFtrCoords.find('\t') != string::npos)
-      split (lineFtrCoords, '\t', tokensFtrCoords);
-    else
-      split (lineFtrCoords, ' ', tokensFtrCoords);
-    
-    if (tokensPheno[0].compare(tokensFtrCoords[3]) != 0)
-    {
-      cerr << "ERROR: features in phenotype and features coordinates files" << endl
-	   << "should be sorted (" << tokensPheno[0]
-	   << " versus " << tokensFtrCoords[3] << ")." << endl
-	   << "Use the following commands:" << endl
-	   << "cat ftr_coords.bed | sort -k4,4 > ftr_coords_sort.bed" << endl
-	   << "cat pheno.txt \\" << endl
-	   << "| (read -r; printf \"%s\\n\" \"$REPLY\"; sort -k1,1) \\"
-	   << endl
-	   << "> pheno_sort.txt" << endl;
-      exit (1);
-    }
-    
-    if (! vFtrsToKeep.empty()
-	&& find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokensPheno[0])
-	== vFtrsToKeep.end())
-      break;
-    if (! chrToKeep.empty() && chrToKeep.compare(tokensFtrCoords[0]) != 0)
-      break;
-    
     if (tokensPheno.size()-1 != vIdxSamplesToSkip.size())
     {
       cerr << "ERROR: different number of samples for feature "
@@ -412,9 +375,34 @@ FtrStats_init (
 	   << " vs " << vIdxSamplesToSkip.size() << ")" << endl;
       exit (1);
     }
+    if (! vFtrsToKeep.empty()
+	&& find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokensPheno[0])
+	== vFtrsToKeep.end())
+      break;
+    
+    while (true)
+    {
+      getline (ftrCoordsStream, lineFtrCoords);
+      if (lineFtrCoords.empty())
+	break;
+      
+      if (lineFtrCoords.find('\t') != string::npos)
+	split (lineFtrCoords, '\t', tokensFtrCoords);
+      else
+	split (lineFtrCoords, ' ', tokensFtrCoords);
+      if (tokensPheno[0].compare(tokensFtrCoords[3]) == 0)
+	break;
+    }
+    if (lineFtrCoords.empty())
+    {
+      cerr << "ERROR: can't find coordinates of feature "
+	   << tokensPheno[0] << endl;
+      exit (1);
+    }
+    if (! chrToKeep.empty() && chrToKeep.compare(tokensFtrCoords[0]) != 0)
+      break;
     
     iFtrStats.name = tokensPheno[0];
-    
     iFtrStats.chr = tokensFtrCoords[0];
     iFtrStats.start = atol(tokensFtrCoords[1].c_str()) + 1;
     iFtrStats.end = atol(tokensFtrCoords[2].c_str());
