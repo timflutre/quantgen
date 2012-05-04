@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  gcc -Wall impute2bimbam.cpp -lstdc++ -lgzstream -lz -o impute2bimbam
+ *  gcc -Wall impute2bimbam.cpp -lstdc++ -o impute2bimbam
  *  help2man -o impute2bimbam.man ./impute2bimbam
  *  groff -mandoc impute2bimbam.man > impute2bimbam.ps
 */
@@ -35,8 +35,6 @@ using namespace std;
 
 #include "utils.cpp"
 
-//-----------------------------------------------------------------------------
-
 /** \brief Display the usage on stdout.
 */
 void help (char ** argv)
@@ -50,15 +48,22 @@ void help (char ** argv)
        << "  -h, --help\tdisplay the help and exit" << endl
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (default=1)" << endl
-       << "  -i, --input\tpath to input directory and generic file name in the IMPUTE format" << endl
-       << "\t\teg. '~/data/chrXX_chunkAll.impute2'" << endl
+       << "  -i, --input\tfile with genotypes in the IMPUTE format" << endl
+       << "\t\teg. '~/data/genotypes.impute'" << endl
        << "  -o, --output\tgeneric prefix for the output files" << endl
-       << "\t\tdefault is 'chrXX' leading to 'chrXX.bimbam' and 'chrXX_snpAnnot.txt'" << endl
-       << "  -d, --discard\tgzipped file with a list of individuals to discard" << endl
-       << "\t\t(one number per line, for the index of the column to skip)" << endl
+       << "\t\tgives <prefix>.bimbam and <prefix>_snpAnnot.txt" << endl
+       << "  -d, --discard\tfile with a list of individuals to discard" << endl
+       << "\t\tone number per line, for the index of the column to skip" << endl
+       << "  -H, --head\tindicate if input file has a header line\n" << endl
        << endl
        << "Examples:" << endl
-       << "  " << argv[0] << " -i ~/data/chrXX_chunkAll.impute2" << endl;
+       << "$ " << argv[0] << " -i ~/data/genotypes.impute -o genotypes" << endl
+       << "$ ls genotypes_chr*.impute | while read f; do \\" << endl
+       << argv[0] << " -i ${f} -o $(basename ${f} .impute); done" << endl
+       << endl
+       << "Remarks:" << endl
+       << "Allele A in the IMPUTE format is considerd to be the minor allele for BIMBAM."
+       << endl;
 }
 
 void version (char ** argv)
@@ -76,11 +81,14 @@ void version (char ** argv)
 /** \brief Parse the command-line arguments and check the values of the 
  *  compulsory ones.
  */
-void parse_args (int argc, char ** argv,
-		 string * pt_input,
-		 string * pt_output,
-		 string * pt_indsFile,
-		 int * pt_verbose)
+void parse_args (
+  int argc,
+  char ** argv,
+  string & inFile,
+  string & output,
+  string & indsFile,
+  bool & hasHeader,
+  int & verbose)
 {
   int c = 0;
   while (1)
@@ -92,10 +100,12 @@ void parse_args (int argc, char ** argv,
 	{"verbose", required_argument, 0, 'v'},
 	{"input", required_argument, 0, 'i'},
 	{"output", required_argument, 0, 'o'},
-	{"discard", required_argument, 0, 'd'}
+	{"discard", required_argument, 0, 'd'},
+	{"head", no_argument, 0, 'H'},
+	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:i:o:d:",
+    c = getopt_long (argc, argv, "hVv:i:o:d:H",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -116,16 +126,19 @@ void parse_args (int argc, char ** argv,
       version (argv);
       exit (0);
     case 'v':
-      *pt_verbose = atoi(optarg);
+      verbose = atoi(optarg);
       break;
     case 'i':
-      *pt_input = optarg;
+      inFile = optarg;
       break;
     case 'o':
-      *pt_output = optarg;
+      output = optarg;
       break;
     case 'd':
-      *pt_indsFile = optarg;
+      indsFile = optarg;
+      break;
+    case 'H':
+      hasHeader = true;
       break;
     case '?':
       break;
@@ -133,22 +146,26 @@ void parse_args (int argc, char ** argv,
       abort ();
     }
   }
-  if ((*pt_input).empty())
+  if (inFile.empty())
   {
     fprintf (stderr, "ERROR: missing input (-i).\n\n");
     help (argv);
     exit (1);
   }
-  if ((*pt_output).empty())
+  if (output.empty())
   {
-    *pt_output = "chrXX";
+    fprintf (stderr, "ERROR: missing output (-o).\n\n");
+    help (argv);
+    exit (1);
   }
 }
 
-void convertImputeFilesToBimbamFiles (string input,
-				      string output,
-				      const vector<size_t> vIdxIndsToSkip,
-				      int verbose)
+void convertImputeFileToBimbamFiles (
+  const string inFile,
+  const string output,
+  const vector<size_t> vIdxIndsToSkip,
+  const bool hasHeader,
+  const int verbose)
 {
   string line;
   ifstream inStream;
@@ -157,104 +174,100 @@ void convertImputeFilesToBimbamFiles (string input,
   size_t nbSamples = 0;
   stringstream ss;
   
-  for (int chrNb = 1; chrNb <= 22; ++chrNb)
+  if (verbose > 0)
   {
-    string inFile = copyString (input);
-    replaceAll (inFile, "XX", toString(chrNb));
-    if (! doesFileExist (inFile))
-    {
-      continue;
-    }
-    if (verbose > 0)
-    {
-      cout << "convert genotypes from file '" << inFile << "' ..." << endl;
-      fflush (stdout);
-    }
-    
-    inStream.open (inFile.c_str());
-    if (! inStream.is_open())
-    {
-      cerr << "ERROR: can't open file " << inFile << endl;
-      exit (1);
-    }
-    
-    ss.clear();
-    ss.str(string());  // http://stackoverflow.com/a/834631/597069
-    ss << output << ".bimbam";
-    string outFile1 = ss.str();
-    replaceAll (outFile1, "XX", toString(chrNb));
-    outStream1.open (outFile1.c_str());
-    if (! outStream1.is_open())
-    {
-      cerr << "ERROR: can't open file " << outFile1 << endl;
-      exit (1);
-    }
-    ss.clear();
-    ss.str(string());
-    ss << output << "_snpAnnot.txt";
-    string outFile2 = ss.str();
-    replaceAll (outFile2, "XX", toString(chrNb));
-    outStream2.open (outFile2.c_str());
-    if (! outStream2.is_open())
-    {
-      cerr << "ERROR: can't open file " << outFile2 << endl;
-      exit (1);
-    }
-    
-    while (inStream.good())
-    {
-      getline (inStream, line);
-      if (line.empty())
-      {
-	break;
-      }
-      if (line.find('\t') != string::npos)
-	split (line, '\t', tokens);
-      else
-	split (line, ' ', tokens);
-      outStream1 << tokens[1]          // SNP id
-		<< " " << tokens[3]    // allele A (minor allele for BimBam)
-		<< " " << tokens[4];   // allele B (major allele for BimBam)
-      nbSamples = (size_t) floor ((tokens.size() - 5) / 3);
-      for (size_t i = 0; i < nbSamples; ++i)
-      {
-	if (vIdxIndsToSkip.size() > 0 &
-	    find(vIdxIndsToSkip.begin(), vIdxIndsToSkip.end(), i) !=
-	    vIdxIndsToSkip.end())
-	  continue;
-	outStream1 << " " << 2 * atof(tokens[5+3*i].c_str())
-	  + 1 * atof(tokens[5+3*i+1].c_str())
-	  + 0 * atof(tokens[5+3*i+2].c_str());
-      }
-      outStream1 << endl;
-      outStream2 << tokens[1]          // SNP id
-		 << " " << tokens[2]   // SNP coordinate
-		 << " " << chrNb
-		 << endl;
-    }
-    
-    inStream.close();
-    outStream1.close();
-    outStream2.close();
+    cout << "convert genotypes from file '" << inFile << "' ..." << endl;
+    fflush (stdout);
   }
+  
+  inStream.open (inFile.c_str());
+  if (! inStream.is_open())
+  {
+    cerr << "ERROR: can't open file " << inFile << endl;
+    exit (1);
+  }
+  
+  ss.clear();
+  ss.str(string());  // http://stackoverflow.com/a/834631/597069
+  ss << output << ".bimbam";
+  string outFile1 = ss.str();
+  outStream1.open (outFile1.c_str());
+  if (! outStream1.is_open())
+  {
+    cerr << "ERROR: can't open file " << outFile1 << endl;
+    exit (1);
+  }
+  ss.clear();
+  ss.str(string());
+  ss << output << "_snpAnnot.txt";
+  string outFile2 = ss.str();
+  outStream2.open (outFile2.c_str());
+  if (! outStream2.is_open())
+  {
+    cerr << "ERROR: can't open file " << outFile2 << endl;
+    exit (1);
+  }
+  
+  if (hasHeader)
+    getline (inStream, line);
+  
+  while (inStream.good())
+  {
+    getline (inStream, line);
+    if (line.empty())
+      break;
+    
+    if (line.find('\t') != string::npos)
+      split (line, '\t', tokens);
+    else
+      split (line, ' ', tokens);
+    
+    outStream1 << tokens[1]           // SNP id
+	       << " " << tokens[3]    // allele A (minor allele for BimBam)
+	       << " " << tokens[4];   // allele B (major allele for BimBam)
+    nbSamples = (size_t) floor ((tokens.size() - 5) / 3);
+    for (size_t i = 0; i < nbSamples; ++i)
+    {
+      if (vIdxIndsToSkip.size() > 0 &
+	  find(vIdxIndsToSkip.begin(), vIdxIndsToSkip.end(), i) !=
+	  vIdxIndsToSkip.end())
+	continue;
+      outStream1 << " " << 2 * atof(tokens[5+3*i].c_str())
+	+ 1 * atof(tokens[5+3*i+1].c_str())
+	+ 0 * atof(tokens[5+3*i+2].c_str());
+    }
+    outStream1 << endl;
+    outStream2 << tokens[1]          // SNP id
+	       << " " << tokens[2]   // SNP coordinate
+	       << " " << tokens[0]   // chromosome
+	       << endl;
+  }
+  
+  inStream.close();
+  outStream1.close();
+  outStream2.close();
 }
 
 int main (int argc, char ** argv)
 {
-  string input, output, indsFile;
+  string inFile, output, indsFile;
+  bool hasHeader = false;
   int verbose = 1;
-  parse_args (argc, argv, &input, &output, &indsFile, &verbose);
+  parse_args (argc, argv, inFile, output, indsFile, hasHeader, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
   {
     time (&startRawTime);
-    cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")" << endl;
+    cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
+	 << endl;
   }
   
-  vector<size_t> vIdxIndsToSkip = loadOneColumnFileAsNumbers (indsFile, verbose);
+  vector<size_t> vIdxIndsToSkip = loadOneColumnFileAsNumbers (indsFile,
+							      verbose);
   
-  convertImputeFilesToBimbamFiles (input, output, vIdxIndsToSkip, verbose);
+  convertImputeFileToBimbamFiles (inFile, output, vIdxIndsToSkip, hasHeader,
+				  verbose);
   
   if (verbose > 0)
   {
