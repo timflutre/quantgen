@@ -109,17 +109,17 @@ void help (char ** argv)
        << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
        << "  -c, --chr\tname of the chromosome to analyze (eg. 'chr21')" << endl
        << "  -f, --ftr\tgzipped file with a list of features to analyze" << endl
-       << "\t\t(one feature name per line)" << endl
+       << "\t\tone feature name per line" << endl
        << "  -s, --snp\tgzipped file with a list of SNPs to analyze" << endl
-       << "\t\t(one SNP coordinate per line)" << endl
+       << "\t\tone SNP coordinate per line" << endl
        << "  -d, --discard\tgzipped file with a list of samples to discard" << endl
-       << "\t\t(one individual per line, should match header of phenotype file)" << endl
+       << "\t\tone individual per line, should match header of phenotype file" << endl
        << "  -q, --qnorm\tquantile-normalize phenotypes to a standard normal" << endl
        << "\t\tvery useful when using linear regression (versus Spearman coef)" << endl
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
-       << "\t\t(whatever the option, the MAF will still be computed and saved)" << endl
+       << "\t\twhatever the option, the MAF will still be computed and saved" << endl
        << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
-       << "\t\tdefault=0, recommended=10000 (but stop after 100 if P-value > 0.1)" << endl
+       << "\t\tdefault=0, recommended=10000 (is multi-threaded)" << endl
        << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
        << "\t\tinstead of performing linear regressions" << endl
        << "  -t, --thread\tnumber of threads (used only for permutations)" << endl
@@ -1351,7 +1351,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
     cerr << "ERROR: can't open file " << outFile << endl;
     exit (1);
   }
-  outStream << "ftr chr start end snp chr coord maf n";
+  outStream << "ftr chrF start end snp chrS coord maf n";
   if (! calcSpearman)
   {
     outStream << " betahat sebetahat sigmahat betaPval R2";
