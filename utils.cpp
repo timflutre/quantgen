@@ -29,8 +29,6 @@
 #include <fstream>
 using namespace std;
 
-#include <gzstream.h>
-
 // http://stackoverflow.com/questions/1644868/c-define-macro-for-debug-printing/1644898#1644898
 #ifdef DEBUG
 #define DEBUG_TEST 1
@@ -96,7 +94,7 @@ string time2string (time_t inTime)
   return string(buffer);
 }
 
-/** \brief Load a one-column file compressed with gzip.
+/** \brief Load a one-column file.
  */
 vector<string> loadOneColumnFile (string inFile, int verbose)
 {
@@ -106,7 +104,7 @@ vector<string> loadOneColumnFile (string inFile, int verbose)
     return vItems;
   
   string line;
-  igzstream stream;
+  ifstream stream;
   vector<string> tokens;
   size_t line_id = 0;
   
@@ -152,7 +150,7 @@ vector<string> loadOneColumnFile (string inFile, int verbose)
   return vItems;
 }
 
-/** \brief Load a one-column file compressed with gzip into a vector of size_t.
+/** \brief Load a one-column file into a vector of size_t.
  */
 vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose)
 {
@@ -162,7 +160,7 @@ vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose)
     return vItems;
   
   string line;
-  igzstream stream;
+  ifstream stream;
   vector<string> tokens;
   size_t line_id = 0;
   
