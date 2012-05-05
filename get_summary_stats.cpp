@@ -122,6 +122,9 @@ void help (char ** argv)
        << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
        << "\t\tinstead of performing linear regressions" << endl
        << "  -t, --thread\tnumber of threads (used only for permutations)" << endl
+       << "      --permf\tfile with a permutation of the samples" << endl
+       << "\t\tshould start at 0" << endl
+       << "\t\tshould have as many lines as the number of samples in --pheno" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -g <genotypes> -p <phenotypes> -o <output> \\" << endl
@@ -168,6 +171,7 @@ parse_args (
   bool & needQnorm,
   bool & calcSpearman,
   int & nbThreads,
+  string & permFile,
   int & verbose)
 {
   int c = 0;
@@ -192,6 +196,7 @@ parse_args (
 	{"perm", required_argument, 0, 'P'},
 	{"sp", no_argument, 0, 'S'},
 	{"thread", required_argument, 0, 't'},
+	{"permf", required_argument, 0, 0},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
@@ -207,6 +212,11 @@ parse_args (
       if (strcmp(long_options[option_index].name, "fcoord") == 0)
       {
 	ftrCoordsFile = optarg;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "permf") == 0)
+      {
+	permFile = optarg;
 	break;
       }
     case 'h':
@@ -348,6 +358,7 @@ FtrStats_init (
   const vector<string> vFtrsToKeep,
   vector<bool> & vIsPhenoNa,
   vector<double> & y_init,
+  const gsl_permutation * perm,
   const int verbose)
 {
   string linePheno, lineFtrCoords, lineLinks, tok;
@@ -414,7 +425,13 @@ FtrStats_init (
     {
       if(vIdxSamplesToSkip[colIdx-1])
 	continue;
-      tok = tokensPheno[colIdx];
+      if (perm != 0 &&
+	  vIdxSamplesToSkip[gsl_permutation_get (perm, colIdx-1) + 1])
+	continue;
+      if (perm == 0)
+	tok = tokensPheno[colIdx];
+      else
+	tok = tokensPheno[gsl_permutation_get (perm, colIdx-1) + 1];
       if (tok.compare("NA") == 0)
 	vIsPhenoNa[j] = true;
       else
@@ -1284,27 +1301,28 @@ computeAndWriteSummaryStatsFtrPerFtr (
   const string outFile,
   const string ftrCoordsFile,
   const string linksFile,
-  const vector<string> vFtrsToKeep,
-  const vector<string> vSnpsToKeep,
-  const vector<string> vSamplesToSkip,
+  const vector<string> & vFtrsToKeep,
+  const vector<string> & vSnpsToKeep,
+  const vector<string> & vSamplesToSkip,
   const string chrToKeep,
   const bool needQnorm,
   const double minMaf,
   const size_t nbPermutations,
   const bool calcSpearman,
   const int nbThreads,
+  const vector<size_t> & vPermIndices,
   const int verbose)
 {
   FtrStats iFtrStats;
   string linePheno, lineLinks;
   size_t nbFtrs = 0, nbAnalyzedPairs = 0, nbAnalyzedFtrs = 0;
-  vector<size_t> vCounters;
   vector<string> tokens, vSamples, vCisSnps;
   vector<double> y_init;
   vector<bool> vIdxSamplesToSkip, vIsPhenoNa;
   map<string, long int> mSnpNameCoord2Pos;
   ifstream phenoStream, genoStream, ftrCoordsStream, linksStream;
   ofstream outStream;
+  gsl_permutation * perm = 0;
   
   // open input files
   phenoStream.open(phenoFile.c_str());
@@ -1386,13 +1404,35 @@ computeAndWriteSummaryStatsFtrPerFtr (
       exit (1);
     }
   
+  // initialize the permutation struct if required
+  if (! vPermIndices.empty())
+  {
+    if (vPermIndices.size() != vSamples.size())
+    {
+      cerr << "ERROR: wrong number of permutation indices ("
+	   << vPermIndices.size() << " versus " << vSamples.size()
+	   << ")" << endl;
+      exit (1);
+    }
+    
+    perm = gsl_permutation_calloc (vPermIndices.size());
+    if (perm == 0)
+    {
+      cerr << "ERROR: can't allocate memory for the permutation" << endl;
+      exit (1);
+    }
+    
+    for (size_t i = 0; i < vPermIndices.size(); ++i)
+      perm->data[i] = vPermIndices[i];
+  }
+  
   // for each feature
   while (phenoStream.good())
   {
     // initialize it
     FtrStats_init (iFtrStats, phenoStream, ftrCoordsStream, chrToKeep,
 		   vIdxSamplesToSkip, vFtrsToKeep, vIsPhenoNa, y_init,
-		   verbose-1);
+		   perm, verbose-1);
     if (iFtrStats.name.empty())
       continue;
     ++nbFtrs;
@@ -1426,6 +1466,9 @@ computeAndWriteSummaryStatsFtrPerFtr (
     }
   }
   
+  if (! vPermIndices.empty())
+    gsl_permutation_free (perm);
+  
   phenoStream.close();
   genoStream.close();
   outStream.close();
@@ -1443,7 +1486,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
 int main (int argc, char ** argv)
 {
   string genoFile, phenoFile, outFile, ftrCoordsFile, linksFile,
-    ftrsFile, snpsFile, samplesFile, chrToKeep = "";
+    ftrsFile, snpsFile, samplesFile, chrToKeep = "", permFile;
   double minMaf = 0.0;
   size_t nbPermutations = 0;
   bool needQnorm = false, calcSpearman = false;
@@ -1451,7 +1494,7 @@ int main (int argc, char ** argv)
   parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
 	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
 	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
-	      verbose);
+	      permFile, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1464,6 +1507,7 @@ int main (int argc, char ** argv)
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
   vector<string> vSamplesToSkip = loadOneColumnFile (samplesFile, verbose);
+  vector<size_t> vPermIndices = loadOneColumnFileAsNumbers (permFile, verbose);
   
   computeAndWriteSummaryStatsFtrPerFtr (genoFile,
 					phenoFile,
@@ -1479,6 +1523,7 @@ int main (int argc, char ** argv)
 					nbPermutations,
 					calcSpearman,
 					nbThreads,
+					vPermIndices,
 					verbose);
   
   if (verbose > 0)
