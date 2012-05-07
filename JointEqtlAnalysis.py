@@ -26,7 +26,7 @@ class JointEqtlAnalysis(object):
     
     def __init__(self):
         self.verbose = 1
-        self.step = -1
+        self.step = 0
         self.nbPermutations = 10000
         self.seed = 1859
         self.pathToPhenoDir = ""
@@ -38,7 +38,6 @@ class JointEqtlAnalysis(object):
         
         self.originalAnalysisDir = "original_analysis"
         self.originalAbfsFile = "abfs_meta.txt"
-        self.permFile = "permutations.txt.gz"
         self.permDir = "permutations"
         self.lPathToPhenoFiles = []
         self.nbIndividuals = -1
@@ -56,17 +55,17 @@ class JointEqtlAnalysis(object):
         msg += " -h, --help\tdisplay the help and exit\n"
         msg += " -V, --version\toutput version information and exit\n"
         msg += " -v, --verbose\tverbosity level (default=1)\n"
-        msg += " -s, --step\tstep of the pipeline (0/1/2/3/4)\n"
-        msg += "\t\t0: give commands to launch full analysis on the original data\n"
-        msg += "\t\t1: write all permuted phenotypes (one file per subgroup)\n"
-        msg += "\t\t2: calculate the summary statistics for each permutation and subgroup\n"
-        msg += "\t\t3: calculate the ABF_meta for each permutation\n"
-        msg += "\t\t4: calculate the gene-level permutation P-values for the joint analysis\n"
-        msg += " -g, --geno\tfile with genotypes in IMPUTE format"
+        msg += " -s, --step\tstep of the pipeline (1/2/3/4/5)\n"
+        msg += "\t\t1: give commands to launch full analysis on the original data\n"
+        msg += "\t\t2: write all permuted phenotypes (one file per subgroup)\n"
+        msg += "\t\t3: calculate the summary statistics for each permutation and subgroup\n"
+        msg += "\t\t4: calculate the ABF_meta for each permutation\n"
+        msg += "\t\t5: calculate the gene-level joint-analysis permutation P-values\n"
+        msg += " -g, --geno\tfile with genotypes in IMPUTE format\n"
         msg += "\t\ta header line with sample names is required\n"
         msg += "\t\tsamples in columns should be in same order as in phenotype file\n"
         msg += " -p, --pheno\trelative path to directory with one phenotypes file per subgroup\n"
-        msg += "\t\trow 1 for sample names, column 1 for feature names, delimiter=<space/tab>\n"
+        msg += "\t\trow 1 for sample names, column 1 for feature names\n"
         msg += "     --fcoord\tBED file with the features coordinates\n"
         msg += "\t\tfeatures should be in same order than in phenotypes files\n"
         msg += " -l, --links\tfile with links between genes and SNPs\n"
@@ -156,7 +155,7 @@ class JointEqtlAnalysis(object):
                 
                 
     def checkAttributes(self):
-        if self.step == -1:
+        if self.step == 0:
             msg = "ERROR: step is missing (-s)"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -236,8 +235,7 @@ class JointEqtlAnalysis(object):
             
             
     def giveCommandsForFullAnalysisOnOriginalData(self):
-        self.parsePhenoDir()
-        scriptFile = "commands_for_step_0.txt"
+        scriptFile = "commands_for_step_1.txt"
         scriptH = open(scriptFile, "w")
         
         cmd = "qsub -cwd -j y -V -l h_vmem=1G"
@@ -288,87 +286,41 @@ class JointEqtlAnalysis(object):
         scriptH.close()
         
         print "you need to submit yourself the jobs from the file '%s'" % scriptFile
-        print "in the mean time, you can launch steps 1, 2 and 3"
+        print "in the mean time, you can launch steps 2, 3 and 4"
         
         
-    def writePhenotypesForOnePermutation(self, permId, aPerm, lPathToPhenoH):
-        """Write the permuted phenotypes for each subgroup for a given permutation."""
-        newDir = "permutation_%s" % str(permId).zfill(len(str(self.nbPermutations)))
-        os.mkdir(newDir)
-        os.chdir(newDir)
-        
-        for i in xrange(0, len(lPathToPhenoH)):
-            pathToPhenoFile = self.lPathToPhenoFiles[i]
-            pathToPhenoH = lPathToPhenoH[i]
-            pathToPhenoH.seek(0)
-            phenoFile = "%s_perm%i" % (os.path.basename(pathToPhenoFile), permId)
-            phenoH = open(phenoFile, "w")
-            
-            header = pathToPhenoH.readline()
-            phenoH.write(header)
-            
-            while True:
-                line = pathToPhenoH.readline()
-                if line == "":
-                    break
-                tokens = line.rstrip().split()
-                txt = tokens[0]
-                for j in xrange(0, self.nbIndividuals):
-                    txt += " %s" % tokens[aPerm[j]]
-                phenoH.write("%s\n" % txt)
-                
-            phenoH.close()
-            
-        os.chdir("..")
-        
-        
-    def writePhenotypesForAllPermutations(self):
-        """Write the permuted phenotypes for each subgroup and each permutation."""
+    def prepareDataForPermutations(self):
         if self.verbose > 0:
-            print "write permuted phenotypes ..."
+            print "prepare data for permutations ..."
             sys.stdout.flush()
             
-        self.parsePhenoDir()
-        lPathToPhenoH = []
-        for pathToPhenoFile in self.lPathToPhenoFiles:
-            pathToPhenoH = open(pathToPhenoFile)
-            lPathToPhenoH.append(pathToPhenoH)
-            
         if os.path.exists(self.permDir):
-            shutil.rmtree(self.permDir)
+            msg = "ERROR: directory '%s' already exists" % self.permDir
+            sys.stderr.write("%s\n" % msg)
+            sys.exit(1)
         os.mkdir(self.permDir)
         os.chdir(self.permDir)
         
-        permH = gzip.open(self.permFile, "w")
-        
         for permId in xrange(1, self.nbPermutations+1):
-            if self.verbose > 1:
-                print "%s / %i" % (str(permId).zfill(len(str(self.nbPermutations))),
-                                   self.nbPermutations)
-                
+            newDir = "permutation_%i" % permId
+            os.mkdir(newDir)
+            os.chdir(newDir)
+            permFile = "permutation_%i.txt" % permId
             aPerm = scipy.random.permutation(self.nbIndividuals)
-            scipy.savetxt(fname=permH, X=aPerm, fmt="%i", newline=" ")
-            permH.write("\n")
-            
-            self.writePhenotypesForOnePermutation(permId, aPerm, lPathToPhenoH)
-            
-        permH.close()
-        
-        for pathToPhenoH in lPathToPhenoH:
-            pathToPhenoH.close()
+            scipy.savetxt(fname=permFile, X=aPerm, fmt="%i")
+            os.chdir("..")
             
         os.chdir("..")
         
         if self.verbose > 0:
-            print "permuted phenotypes written in '%s/'" % self.permDir
+            print "see directory '%s/'" % self.permDir
             sys.stdout.flush()
             
             
     def calcSumStatsForEachPermAndEachSubgroup(self):
         """Write a shell script to be launched as a job array with
         one job per permutation."""
-        self.parsePhenoDir()
-        scriptFile = "script_for_array_job_step_1.sh"
+        scriptFile = "script_for_array_job_step_3.sh"
         scriptH = open(scriptFile, "w")
         txt = "#!/bin/sh\n"
         txt += "#$ -t 1-%i\n" % self.nbPermutations
@@ -378,12 +330,13 @@ class JointEqtlAnalysis(object):
             phenoFile = os.path.basename(pathToPhenoFile)
             txt += "get_summary_stats"
             txt += " -g %s" % self.pathToGenoFile
-            txt += " -p %s_perm${SGE_TASK_ID}" % phenoFile
+            txt += " -p %s" % pathToPhenoFile
             txt += " --fcoord %s" % self.pathToFtrCoords
             txt += " -l %s" % self.pathToFtrsSnpsLinks
             if self.pathToFtrsToKeep != "":
                 txt += " -f %s" % self.pathToFtrsToKeep
             txt += " -o %s_perm${SGE_TASK_ID}_sumstats" % phenoFile
+            txt += " --permf permutation_${SGE_TASK_ID}.txt"
             txt += "\n"
         txt += "cd .."
         scriptH.write("%s\n" % txt)
@@ -394,14 +347,13 @@ class JointEqtlAnalysis(object):
         
         print "you need to submit the array job to SGE yourself:"
         print cmd
-        print "once all jobs are finished, launch step 3"
+        print "once all jobs are finished, launch step 4"
         
         
     def calcAbfMetaForEachPermutation(self):
         """Write a shell script to be launched as a job array with
         one job per permutation."""
-        self.parsePhenoDir()
-        scriptFile = "script_for_array_job_step_2.sh"
+        scriptFile = "script_for_array_job_step_4.sh"
         scriptH = open(scriptFile, "w")
         txt = "#!/bin/sh\n"
         txt += "#$ -t 1-%i\n" % self.nbPermutations
@@ -426,7 +378,7 @@ class JointEqtlAnalysis(object):
         
         print "you need to submit the array job to SGE yourself:"
         print cmd
-        print "once all jobs are finished, launch step 4"
+        print "once all jobs are finished, launch step 5"
         
         
     def getMaxAbfForEachNonPermutedFeature(self):
@@ -567,19 +519,21 @@ class JointEqtlAnalysis(object):
             startTime = time.time()
             print msg; sys.stdout.flush()
             
-        if self.step == 0:
+        self.parsePhenoDir()
+        
+        if self.step == 1:
             self.giveCommandsForFullAnalysisOnOriginalData()
             
-        if self.step == 1:
-            self.writePhenotypesForAllPermutations()
-            
         if self.step == 2:
-            self.calcSumStatsForEachPermAndEachSubgroup()
+            self.prepareDataForPermutations()
             
         if self.step == 3:
-            self.calcAbfMetaForEachPermutation()
+            self.calcSumStatsForEachPermAndEachSubgroup()
             
         if self.step == 4:
+            self.calcAbfMetaForEachPermutation()
+            
+        if self.step == 5:
             self.calcPermutationPvaluesForAllFeatures()
             
         if self.verbose > 0:
