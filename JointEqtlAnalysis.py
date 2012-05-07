@@ -55,12 +55,11 @@ class JointEqtlAnalysis(object):
         msg += " -h, --help\tdisplay the help and exit\n"
         msg += " -V, --version\toutput version information and exit\n"
         msg += " -v, --verbose\tverbosity level (default=1)\n"
-        msg += " -s, --step\tstep of the pipeline (1/2/3/4/5)\n"
+        msg += " -s, --step\tstep of the pipeline (1/2/3/4)\n"
         msg += "\t\t1: give commands to launch full analysis on the original data\n"
-        msg += "\t\t2: write all permuted phenotypes (one file per subgroup)\n"
-        msg += "\t\t3: calculate the summary statistics for each permutation and subgroup\n"
-        msg += "\t\t4: calculate the ABF_meta for each permutation\n"
-        msg += "\t\t5: calculate the gene-level joint-analysis permutation P-values\n"
+        msg += "\t\t2: write the permutations\n"
+        msg += "\t\t3: give commands to launch full analysis on the permuted data\n"
+        msg += "\t\t4: calculate the gene-level joint-analysis permutation P-values\n"
         msg += " -g, --geno\tfile with genotypes in IMPUTE format\n"
         msg += "\t\ta header line with sample names is required\n"
         msg += "\t\tsamples in columns should be in same order as in phenotype file\n"
@@ -286,7 +285,7 @@ class JointEqtlAnalysis(object):
         scriptH.close()
         
         print "you need to submit yourself the jobs from the file '%s'" % scriptFile
-        print "in the mean time, you can launch steps 2, 3 and 4"
+        print "in the mean time, you can launch steps 2 and then 3"
         
         
     def prepareDataForPermutations(self):
@@ -317,15 +316,20 @@ class JointEqtlAnalysis(object):
             sys.stdout.flush()
             
             
-    def calcSumStatsForEachPermAndEachSubgroup(self):
-        """Write a shell script to be launched as a job array with
-        one job per permutation."""
+    def giveCommandsForFullAnalysisOnPermutedData(self):
         scriptFile = "script_for_array_job_step_3.sh"
         scriptH = open(scriptFile, "w")
+        
+        cmd = "qsub -cwd -j y -V -l h_vmem=1G"
+        
         txt = "#!/bin/sh\n"
         txt += "#$ -t 1-%i\n" % self.nbPermutations
         txt += "uname -a\n"
         txt += "cd permutation_${SGE_TASK_ID}\n"
+        scriptH.write("%s\n" % txt)
+        
+        # commands to compute summary stats in each subgroup
+        txt = ""
         for pathToPhenoFile in self.lPathToPhenoFiles:
             phenoFile = os.path.basename(pathToPhenoFile)
             txt += "get_summary_stats"
@@ -338,47 +342,36 @@ class JointEqtlAnalysis(object):
             txt += " -o %s_perm${SGE_TASK_ID}_sumstats" % phenoFile
             txt += " --permf permutation_${SGE_TASK_ID}.txt"
             txt += "\n"
-        txt += "cd .."
         scriptH.write("%s\n" % txt)
         
-        cmd = "cd permutations; qsub -cwd -j y -V -N get_summary_stats_perm -l h_vmem=1G ../%s" % scriptFile
-        scriptH.write("#%s\n" % cmd)
-        scriptH.close()
-        
-        print "you need to submit the array job to SGE yourself:"
-        print cmd
-        print "once all jobs are finished, launch step 4"
-        
-        
-    def calcAbfMetaForEachPermutation(self):
-        """Write a shell script to be launched as a job array with
-        one job per permutation."""
-        scriptFile = "script_for_array_job_step_4.sh"
-        scriptH = open(scriptFile, "w")
-        txt = "#!/bin/sh\n"
-        txt += "#$ -t 1-%i\n" % self.nbPermutations
-        txt += "uname -a\n"
-        txt += "cd permutation_${SGE_TASK_ID}\n"
-        txt += "rm -rf all_summary_stats_perm${SGE_TASK_ID}\n"
-        txt += "mkdir all_summary_stats_perm${SGE_TASK_ID}\n"
-        txt += "cd all_summary_stats_perm${SGE_TASK_ID}\n"
+        # commands to compute the ABF "meta" (joint analysis)
+        txt = ""
+        txt += "rm -rf all_sumstats_perm${SGE_TASK_ID}\n"
+        txt += "mkdir all_sumstats_perm${SGE_TASK_ID}\n"
+        txt += "cd all_sumstats_perm${SGE_TASK_ID}\n"
         for pathToPhenoFile in self.lPathToPhenoFiles:
             phenoFile = os.path.basename(pathToPhenoFile)
             txt += "ln -s ../%s_perm${SGE_TASK_ID}_sumstats .\n" % phenoFile
         txt += "cd ..\n"
-        txt += "get_abf_meta -i all_summary_stats_perm${SGE_TASK_ID}"
+        txt += "get_abf_meta -i all_sumstats_perm${SGE_TASK_ID}"
         txt += " -g %s" % self.pathToGridFile
         txt += " -o abfs_meta_perm${SGE_TASK_ID}.txt\n"
-        txt += "cd .."
         scriptH.write("%s\n" % txt)
         
-        cmd = "cd permutations; qsub -cwd -j y -V -N get_abf_meta_perm -l h_vmem=1G ../%s" % scriptFile
-        scriptH.write("#%s\n" % cmd)
+        # commands to remove temporary files
+        txt = ""
+        txt += "rm -rf *sumstats*\n"
+        txt += "cd ..\n"
+        scriptH.write("%s\n" % txt)
+        
+        scriptH.write("#cd %s; %s ../%s; cd ..\n" % (self.permDir,
+                                                     cmd, scriptFile))
+        
         scriptH.close()
         
-        print "you need to submit the array job to SGE yourself:"
-        print cmd
-        print "once all jobs are finished, launch step 5"
+        print "you need to submit yourself the array job:"
+        print "cd %s; %s ../%s; cd .." % (self.permDir,
+                                          cmd, scriptFile)
         
         
     def getMaxAbfForEachNonPermutedFeature(self):
@@ -528,12 +521,9 @@ class JointEqtlAnalysis(object):
             self.prepareDataForPermutations()
             
         if self.step == 3:
-            self.calcSumStatsForEachPermAndEachSubgroup()
+            self.giveCommandsForFullAnalysisOnPermutedData()
             
         if self.step == 4:
-            self.calcAbfMetaForEachPermutation()
-            
-        if self.step == 5:
             self.calcPermutationPvaluesForAllFeatures()
             
         if self.verbose > 0:
