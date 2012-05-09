@@ -16,7 +16,7 @@
   *  You should have received a copy of the GNU General Public License
   *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
   *
-  *  gcc -Wall -g -DDEBUG get_abf_meta.cpp -lstdc++ -lgsl -lgslcblas -o get_abf_meta
+  *  gcc -Wall -g -DDEBUG -O3 get_abf_meta.cpp -lstdc++ -lgsl -lgslcblas -o get_abf_meta
   *  help2man -o get_abf_meta.man ./get_abf_meta
   *  groff -mandoc get_abf_meta.man > get_abf_meta.ps
   */
@@ -69,6 +69,7 @@ void help (char ** argv)
        << "  -s, --snp\tfile with a list of SNP coordinates to analyze" << endl
        << "  -x, --index\twhich SNP info to use to index pairs feature-SNP" << endl
        << "\t\tdefault=id+coord, but can be only 'id' or 'coord'" << endl
+       << "  -b, --beta\tsave the summary statistics of each subgroup in the output file" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl
@@ -94,7 +95,8 @@ void version (char ** argv)
 /** \brief Parse the command-line arguments and check the values of the 
  *  compulsory ones.
 */
-void parse_args (
+void
+parse_args (
   int argc,
   char ** argv,
   string & inDir,
@@ -103,6 +105,7 @@ void parse_args (
   string & ftrsFile,
   string & snpsFile,
   string & snpIdx,
+  bool & saveSumStats,
   int & verbose)
 {
   int c = 0;
@@ -118,10 +121,12 @@ void parse_args (
 	{"output", required_argument, 0, 'o'},
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
-	{"index", required_argument, 0, 'x'}
+	{"index", required_argument, 0, 'x'},
+	{"beta", required_argument, 0, 'b'},
+	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:",
+    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:b",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -162,6 +167,9 @@ void parse_args (
     case 'x':
       snpIdx = optarg;
       break;
+    case 'b':
+      saveSumStats = true;
+      break;
     case '?':
       break;
     default:
@@ -198,8 +206,10 @@ void parse_args (
 
 /** \brief List the input directory with the OLS summary stats.
  */
-vector<string> scanInputDirectory (string inDir,
-				   int verbose)
+vector<string>
+scanInputDirectory (
+  const string inDir,
+  const int verbose)
 {
   vector<string> vInFiles;
   struct dirent ** inFiles = NULL;
@@ -226,6 +236,7 @@ vector<string> scanInputDirectory (string inDir,
       if (string(inFiles[s]->d_name) == "." ||
 	  string(inFiles[s]->d_name) == "..")
       {
+	free (inFiles[s]);
 	continue;
       }
       char path[1024];
@@ -251,12 +262,14 @@ vector<string> scanInputDirectory (string inDir,
 /** \brief Index the files with a map to know which pairs feature-SNP are 
  *  in common among subgroups.
  */
-void indexInputFiles (vector<string> vInFiles,
-		      vector<string> vFtrsToKeep,
-		      vector<string> vSnpsToKeep,
-		      const string snpIdx,
-		      map<string, vector<size_t> > & mPairs2Positions,
-		      int verbose)
+void
+indexInputFiles (
+  const vector<string> & vInFiles,
+  const vector<string> & vFtrsToKeep,
+  const vector<string> & vSnpsToKeep,
+  const string snpIdx,
+  map<string, vector<size_t> > & mPairs2Positions,
+  const int verbose)
 {
   size_t subgroup = 0, line_id = 0, pos = 0;
   string line;
@@ -379,7 +392,10 @@ void indexInputFiles (vector<string> vInFiles,
 
 /** \brief Load the file with the grid values.
  */
-vector< vector<double> > loadGrid (string gridFile, int verbose)
+vector< vector<double> >
+loadGrid (
+  const string gridFile,
+  const int verbose)
 {
   if (verbose > 0)
   {
@@ -430,7 +446,8 @@ vector< vector<double> > loadGrid (string gridFile, int verbose)
  *  but has infinite summary stats (should be coded as Inf in input file), only
  *  n will be an integer, the other summary stats remaining Inf.
  */
-void getSummaryStatsForPair (
+void
+getSummaryStatsForPair (
   const string pairId,
   const string snpIdx,
   const vector<size_t> & vPositions,
@@ -554,10 +571,12 @@ vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
  *  \note If bhat=0 and sebhat=Inf for a given subgroup, its ABF will be 1.
  *  If this is the case for all subgroups, the overall ABF will also be 1.
  */
-double getAbfFromStdSumStats (vector< vector<double> > stdSumStats,
-			      double phi2,
-			      double oma2,
-			      int verbose)
+double
+getAbfFromStdSumStats (
+  vector< vector<double> > stdSumStats,
+  const double phi2,
+  const double oma2,
+  const int verbose)
 {
   double lABF_all = 0;
   size_t subgroup = 0;
@@ -625,7 +644,11 @@ double getAbfFromStdSumStats (vector< vector<double> > stdSumStats,
 
 /** \brief Return log_{10}(\sum_i w_i 10^vec_i)
  */
-double log10_weighted_sum (double * vec, double * weights, size_t size)
+double
+log10_weighted_sum (
+  double * vec,
+  double * weights,
+  size_t size)
 {
   size_t i = 0;
   double max = vec[0];
@@ -641,14 +664,16 @@ double log10_weighted_sum (double * vec, double * weights, size_t size)
 /** \brief Compute the log10 of the three approximate Bayes factors for 
  *  a given pair feature-SNP, weighted over a grid of hyperparameter values.
  */
-void computeAbfsForPairOverGrid (vector< vector<double> > grid, 
-				 const map<size_t, vector<double> > & allSumStats,
-				 double * pt_l10_abf_meta,
-				 double * pt_l10_abf_fix,
-				 double * pt_l10_abf_maxh,
-				 int * pt_nbSubgroupsUsed,
-				 int * pt_nbSamplesUsed,
-				 int verbose)
+void
+computeAbfsForPairOverGrid (
+  const vector< vector<double> > grid, 
+  const map<size_t, vector<double> > & allSumStats,
+  double * pt_l10_abf_meta,
+  double * pt_l10_abf_fix,
+  double * pt_l10_abf_maxh,
+  int * pt_nbSubgroupsUsed,
+  int * pt_nbSamplesUsed,
+  const int verbose)
 {
   size_t subgroup = 0, gridIdx = 0;
   vector< vector<double> > allSumStatsCorr;
@@ -707,12 +732,15 @@ void computeAbfsForPairOverGrid (vector< vector<double> > grid,
 /** \brief Loop over all pairs to compute ABFs and write results.
  *  \note Use a string feature|coord for the pair id.
  */
-void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
-				     const map<string, vector<size_t> > & mPairs2Positions,
-				     string gridFile,
-				     string outFile,
-				     string snpIdx,
-				     int verbose)
+void
+computeAndWriteAbfsForAllPairs (
+  const vector<string> vInFiles,
+  const map<string, vector<size_t> > & mPairs2Positions,
+  const string gridFile,
+  const string outFile,
+  const string snpIdx,
+  const bool saveSumStats,
+  const int verbose)
 {
   size_t subgroup = 0, i = 0, nbPairs = 0;
   vector<ifstream *> vPtInStreams;
@@ -761,12 +789,11 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	    << " l10abf.avg"
 	    << " l10abf.fix"
 	    << " l10abf.maxh";
-  for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
-  {
-    outStream << " betahat.s" << subgroup+1
-	      << " sebetahat.s" << subgroup+1
-	      << " sigmahat.s" << subgroup+1;
-  }
+  if (saveSumStats)
+    for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+      outStream << " betahat.s" << subgroup+1
+		<< " sebetahat.s" << subgroup+1
+		<< " sigmahat.s" << subgroup+1;
   outStream << endl;
   
   vector< vector<double> > grid = loadGrid (gridFile, verbose);
@@ -809,12 +836,11 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 	      << " " << l10_abf_meta
 	      << " " << l10_abf_fix
 	      << " " << l10_abf_maxh;
-    for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
-    {
-      outStream << " " << allSumStats[subgroup][1]  // betahat
-		<< " " << allSumStats[subgroup][2]  // sebetahat
-		<< " " << allSumStats[subgroup][3]; // sigmahat
-    }
+    if (saveSumStats)
+      for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
+	outStream << " " << allSumStats[subgroup][1]  // betahat
+		  << " " << allSumStats[subgroup][2]  // sebetahat
+		  << " " << allSumStats[subgroup][3]; // sigmahat
     outStream << endl;
   }
   
@@ -854,9 +880,10 @@ void computeAndWriteAbfsForAllPairs (vector<string> vInFiles,
 int main (int argc, char ** argv)
 {
   string inDir, gridFile, outFile, ftrsFile, snpsFile, snpIdx;
+  bool saveSumStats = false;
   int verbose = 1;
   parse_args (argc, argv, inDir, gridFile, outFile,
-	      ftrsFile, snpsFile, snpIdx, verbose);
+	      ftrsFile, snpsFile, snpIdx, saveSumStats, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -883,6 +910,7 @@ int main (int argc, char ** argv)
 				  gridFile,
 				  outFile,
 				  snpIdx,
+				  saveSumStats,
 				  verbose);
   
   if (verbose > 0)
