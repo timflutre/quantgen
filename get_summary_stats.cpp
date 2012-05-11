@@ -99,18 +99,22 @@ void help (char ** argv)
        << "  -p, --pheno\tfile with phenotypes" << endl
        << "\t\trow 1 for sample names, column 1 for feature names" << endl
        << "\t\tdelimiter=<space/tab>" << endl
-       << "  -o, --output\tfile that will the summary stats" << endl
+       << "  -o, --output\tfile that will contain the summary stats" << endl
        << "      --fcoord\tBED file with the features coordinates" << endl
        << "\t\tfeatures should be in same order than in phenotype file" << endl
        << "  -l, --links\tfile with links between genes and SNPs" << endl
        << "\t\tcustom format: feature<space/tab>SNP|coord" << endl
        << "\t\tfeatures should be in same order than in phenotype file" << endl
        << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
+       << "  -a, --anchor\tfor the cis region if links is not specified" << endl
+       << "\t\tdefault=TSS+TES, can also be only TSS" << endl
+       << "      --cis\tlength of half of the cis region (in bp)" << endl
+       << "\t\tapart from the anchor(s), default=100000" << endl
        << "  -c, --chr\tname of the chromosome to analyze (eg. 'chr21')" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
        << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
-       << "\t\tone SNP coordinate per line" << endl
+       << "\t\tone SNP identifier per line" << endl
        << "  -d, --discard\tfile with a list of samples to discard" << endl
        << "\t\tone individual per line, should match header of phenotype file" << endl
        << "  -q, --qnorm\tquantile-normalize phenotypes to a standard normal" << endl
@@ -172,6 +176,8 @@ parse_args (
   bool & calcSpearman,
   int & nbThreads,
   string & permFile,
+  string & anchor,
+  size_t & lenCis,
   int & verbose)
 {
   int c = 0;
@@ -197,10 +203,12 @@ parse_args (
 	{"sp", no_argument, 0, 'S'},
 	{"thread", required_argument, 0, 't'},
 	{"permf", required_argument, 0, 0},
+	{"anchor", required_argument, 0, 'a'},
+	{"cis", required_argument, 0, 0},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:qm:P:St:",
+    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:qm:P:St:a:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -217,6 +225,11 @@ parse_args (
       if (strcmp(long_options[option_index].name, "permf") == 0)
       {
 	permFile = optarg;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "cis") == 0)
+      {
+	lenCis = atol(optarg);
 	break;
       }
     case 'h':
@@ -266,6 +279,9 @@ parse_args (
       break;
     case 't':
       nbThreads = atoi(optarg);
+      break;
+    case 'a':
+      anchor = optarg;
       break;
     case '?':
       printf ("\n"); help (argv);
@@ -317,13 +333,13 @@ parse_args (
     help (argv);
     exit (1);
   }
-  if (linksFile.empty())
+  if (linksFile.empty() && anchor.empty())
   {
-    fprintf (stderr, "ERROR: missing links file (-l).\n\n");
+    fprintf (stderr, "ERROR: missing links file and anchor (-l and -a).\n\n");
     help (argv);
     exit (1);
   }
-  if (! doesFileExist (linksFile))
+  if (! linksFile.empty() && ! doesFileExist (linksFile))
   {
     fprintf (stderr, "ERROR: can't find file '%s'.\n\n", linksFile.c_str());
     help (argv);
@@ -334,6 +350,37 @@ parse_args (
     fprintf (stderr, "ERROR: min MAF should be between 0 and 1 (-m).\n\n");
     help (argv);
     exit (1);
+  }
+  if (verbose > 1)
+  {
+    cout << "genotypes: " << genoFile << endl;
+    cout << "phenotypes: " << phenoFile << endl;
+    cout << "feature coordinates: " << ftrCoordsFile << endl;
+    if (linksFile.empty())
+    {
+      cout << "anchor: " << anchor << endl;
+      cout << "cis region: " << lenCis << endl;
+    }
+    else
+      cout << "links: " << linksFile << endl;
+    if (! chrToKeep.empty())
+      cout << "chr: " << chrToKeep << endl;
+    if (! ftrsFile.empty())
+      cout << "features: " << ftrsFile << endl;
+    if (! snpsFile.empty())
+      cout << "SNPs: " << snpsFile << endl;
+    if (! samplesFile.empty())
+      cout << "samples: " << samplesFile << endl;
+    if (needQnorm)
+      cout << "need quantile-normalization" << endl;
+    if (minMaf > 0)
+      cout << "min MAF: " << minMaf << endl;
+    if (nbPermutations > 0)
+      cout << "nb of permutations: " << nbPermutations << endl;
+    if (! permFile.empty())
+      cout << "permutations: " << permFile << endl;
+    if (calcSpearman)
+      cout << "calculate Spearman rank correlation coefficient" << endl;
   }
 }
 
@@ -447,12 +494,12 @@ void
 FtrStats_getCisSnps (
   const FtrStats & iFtrStats,
   ifstream & linksStream,
-  map<string, long int> & mSnpNameCoord2Pos,
+  const map<string, streampos> & mSnpNameCoord2Pos,
   vector<string> & vCisSnps)
 {
   string line;
-  long int linksPos;
-  vector<string> tokens;
+  streampos linksPos;
+  vector<string> tokens, tokens2;
   bool hasFtrBeenSeen = false;
   
   vCisSnps.clear();
@@ -485,9 +532,54 @@ FtrStats_getCisSnps (
       }
     }
     hasFtrBeenSeen = true;
+    split (tokens[1], '|', tokens2);
+    if (mSnpNameCoord2Pos.find(tokens2[0]) == mSnpNameCoord2Pos.end())
+      continue; // SNP to skip (see indexSnps)
+    vCisSnps.push_back (tokens2[0]);
+  }
+}
+
+void
+FtrStats_getCisSnps (
+  const FtrStats & iFtrStats,
+  ifstream & genoStream,
+  const map<string, streampos> & mSnpNameCoord2Pos,
+  const string & anchor,
+  const size_t & lenCis,
+  vector<string> & vCisSnps)
+{
+  string line;
+  vector<string> tokens;
+  
+  vCisSnps.clear();
+  genoStream.clear ();
+  genoStream.seekg (0, ios::beg);
+  
+  while (true)
+  {
+    getline (genoStream, line);
+    if (line.empty()) // end of file
+      break;
+    if (line.find('\t') != string::npos)
+      split (line, '\t', tokens);
+    else
+      split (line, ' ', tokens);
     if (mSnpNameCoord2Pos.find(tokens[1]) == mSnpNameCoord2Pos.end())
       continue; // SNP to skip (see indexSnps)
-    vCisSnps.push_back (tokens[1]);
+    if (tokens[0].compare(iFtrStats.chr) != 0)
+      continue; // not on same chr
+    if (anchor.compare("TSS") == 0)
+    {
+      if ((size_t) atol(tokens[2].c_str()) >= iFtrStats.start - lenCis
+	  && (size_t) atol(tokens[2].c_str()) <= iFtrStats.start + lenCis)
+	vCisSnps.push_back (tokens[1]);
+    }
+    else if (anchor.compare("TSS+TES") == 0)
+    {
+      if ((size_t) atol(tokens[2].c_str()) >= iFtrStats.start - lenCis
+	  && (size_t) atol(tokens[2].c_str()) <= iFtrStats.end + lenCis)
+	vCisSnps.push_back (tokens[1]);
+    }
   }
 }
 
@@ -536,7 +628,7 @@ SnpStats_init (
   SnpStats & iSnpStats,
   ifstream & genoStream,
   const string & snpNameCoord,
-  map<string, long int> & mSnpNameCoord2Pos,
+  map<string, streampos> & mSnpNameCoord2Pos,
   const vector<bool> & vIdxSamplesToSkip,
   vector<bool> & vIsGenoNa,
   vector<double> & g_init,
@@ -550,8 +642,14 @@ SnpStats_init (
 			    vIdxSamplesToSkip.end(),
 			    false);
   
+  genoStream.clear ();
   genoStream.seekg (mSnpNameCoord2Pos[snpNameCoord]);
   getline (genoStream, line);
+  if (line.empty())
+  {
+    cerr << "ERROR: empty genotype line for SNP " << snpNameCoord << endl;
+    exit (1);
+  }
   if (line.find('\t') != string::npos)
     split (line, '\t', tokens);
   else
@@ -624,32 +722,27 @@ getMaf (
  */
 void
 indexSnps (
-  const string genoFile,
+  ifstream & genoStream,
   const vector<string> & vSnpsToKeep,
   const string chrToKeep,
   const vector<string> & vSamplesToSkip,
   vector<string> & vSamples,
   vector<bool> & vIdxSamplesToSkip,
   const double minMaf,
-  map<string, long int> & mSnpNameCoord2Pos,
-  int verbose)
+  map<string, streampos> & mSnpNameCoord2Pos,
+  const int verbose)
 {
-  ifstream genoStream;
   string line;
   vector<string> tokens;
-  long int snpPos;
+  streampos snpPos;
   size_t totNbSamples, nbSamples;
   
-  genoStream.open(genoFile.c_str());
-  if (! genoStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << genoFile << endl;
-    exit (1);
-  }
   if (verbose > 0)
     cout << "index SNPs in genotype file ..." << endl;
   
   // read header line and record sample names with their column indices
+  genoStream.clear ();
+  genoStream.seekg (0, ios::beg);
   getline (genoStream, line);
   if (line.find('\t') != string::npos)
     split (line, '\t', tokens);
@@ -694,7 +787,7 @@ indexSnps (
     }
     
     if (! vSnpsToKeep.empty()
-	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2])
+	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1])
 	== vSnpsToKeep.end())
       continue;
     if (! chrToKeep.empty() && chrToKeep.compare(tokens[0]) != 0)
@@ -702,12 +795,8 @@ indexSnps (
     if (minMaf > 0 && getMaf (tokens, vIdxSamplesToSkip) < minMaf)
       continue;
     
-    stringstream ss;
-    ss << tokens[1] << "|" << tokens[2];  // SNP_name|SNP_coord
-    mSnpNameCoord2Pos.insert (make_pair(ss.str(), snpPos));
+    mSnpNameCoord2Pos.insert (make_pair(tokens[1], snpPos));
   }
-  
-  genoStream.close();
   
   if (verbose > 0)
     cout << "nb of indexed SNPs: " << mSnpNameCoord2Pos.size() << endl;
@@ -1184,7 +1273,7 @@ computeSummaryStatsForOneFeature (
   FtrStats & iFtrStats,
   ifstream & genoStream,
   const vector<string> & vCisSnps,
-  map<string, long int> & mSnpNameCoord2Pos,
+  map<string, streampos> & mSnpNameCoord2Pos,
   const vector<bool> vIdxSamplesToSkip,
   const vector<bool> vIsPhenoNa,
   const vector<double> y_init,
@@ -1296,11 +1385,13 @@ computeSummaryStatsForOneFeature (
 
 void
 computeAndWriteSummaryStatsFtrPerFtr (
-  const string genoFile,
-  const string phenoFile,
-  const string outFile,
-  const string ftrCoordsFile,
-  const string linksFile,
+  const string & genoFile,
+  const string & phenoFile,
+  const string & outFile,
+  const string & ftrCoordsFile,
+  const string & linksFile,
+  const string & anchor,
+  const size_t & lenCis,
   const vector<string> & vFtrsToKeep,
   const vector<string> & vSnpsToKeep,
   const vector<string> & vSamplesToSkip,
@@ -1319,32 +1410,35 @@ computeAndWriteSummaryStatsFtrPerFtr (
   vector<string> tokens, vSamples, vCisSnps;
   vector<double> y_init;
   vector<bool> vIdxSamplesToSkip, vIsPhenoNa;
-  map<string, long int> mSnpNameCoord2Pos;
+  map<string, streampos> mSnpNameCoord2Pos;
   ifstream phenoStream, genoStream, ftrCoordsStream, linksStream;
   ofstream outStream;
   gsl_permutation * perm = 0;
   
   // open input files
   phenoStream.open(phenoFile.c_str());
-  if (! phenoStream.good())
+  if (! phenoStream.is_open())
   {
     cerr << "ERROR: can't open file " << phenoFile << endl;
     exit (1);
   }
   genoStream.open(genoFile.c_str());
-  if (! genoStream.good())
+  if (! genoStream.is_open())
   {
     cerr << "ERROR: can't open file " << genoFile << endl;
     exit (1);
   }
-  linksStream.open(linksFile.c_str());
-  if (! linksStream.good())
+  if (! linksFile.empty())
   {
-    cerr << "ERROR: can't open file " << linksFile << endl;
-    exit (1);
-  } 
+    linksStream.open(linksFile.c_str());
+    if (! linksStream.is_open())
+    {
+      cerr << "ERROR: can't open file " << linksFile << endl;
+      exit (1);
+    }
+  }
   ftrCoordsStream.open(ftrCoordsFile.c_str());
-  if (! ftrCoordsStream.good())
+  if (! ftrCoordsStream.is_open())
   {
     cerr << "ERROR: can't open file " << ftrCoordsFile << endl;
     exit (1);
@@ -1352,7 +1446,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   
   // open output file and write the header line
   outStream.open(outFile.c_str());
-  if (! outStream.good())
+  if (! outStream.is_open())
   {
     cerr << "ERROR: can't open file " << outFile << endl;
     exit (1);
@@ -1373,7 +1467,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   outStream << endl;
   
   // index the genotype file
-  indexSnps (genoFile, vSnpsToKeep, chrToKeep, vSamplesToSkip, vSamples,
+  indexSnps (genoStream, vSnpsToKeep, chrToKeep, vSamplesToSkip, vSamples,
 	     vIdxSamplesToSkip, minMaf, mSnpNameCoord2Pos, verbose);
   
   if (verbose > 0)
@@ -1438,7 +1532,11 @@ computeAndWriteSummaryStatsFtrPerFtr (
     ++nbFtrs;
     
     // retrieve its SNPs in cis
-    FtrStats_getCisSnps (iFtrStats, linksStream, mSnpNameCoord2Pos, vCisSnps);
+    if (! linksFile.empty())
+      FtrStats_getCisSnps (iFtrStats, linksStream, mSnpNameCoord2Pos, vCisSnps);
+    else
+      FtrStats_getCisSnps (iFtrStats, genoStream, mSnpNameCoord2Pos,
+			   anchor, lenCis, vCisSnps);
     if (vCisSnps.empty())
       continue;
     
@@ -1486,15 +1584,12 @@ computeAndWriteSummaryStatsFtrPerFtr (
 int main (int argc, char ** argv)
 {
   string genoFile, phenoFile, outFile, ftrCoordsFile, linksFile,
-    ftrsFile, snpsFile, samplesFile, chrToKeep = "", permFile;
+    ftrsFile, snpsFile, samplesFile, chrToKeep = "", permFile,
+    anchor = "TSS+TES";
   double minMaf = 0.0;
-  size_t nbPermutations = 0;
+  size_t nbPermutations = 0, lenCis = 100000;
   bool needQnorm = false, calcSpearman = false;
   int nbThreads = 1, verbose = 1;
-  parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
-	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
-	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
-	      permFile, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1503,6 +1598,11 @@ int main (int argc, char ** argv)
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
 	 << endl;
   }
+  
+  parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
+	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
+	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
+	      permFile, anchor, lenCis, verbose);
   
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
@@ -1514,6 +1614,8 @@ int main (int argc, char ** argv)
 					outFile,
 					ftrCoordsFile,
 					linksFile,
+					anchor,
+					lenCis,
 					vFtrsToKeep,
 					vSnpsToKeep,
 					vSamplesToSkip,
