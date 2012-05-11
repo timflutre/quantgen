@@ -19,7 +19,6 @@ import glob
 import scipy
 import gzip
 import shutil
-import multiprocessing
 
 
 class JointEqtlAnalysis(object):
@@ -237,7 +236,7 @@ class JointEqtlAnalysis(object):
         scriptFile = "commands_for_step_1.txt"
         scriptH = open(scriptFile, "w")
         
-        cmd = "qsub -cwd -j y -V -l h_vmem=1G"
+        cmd = "qsub -cwd -j y -V -l h_vmem=2G"
         
         txt = ""
         txt += "rm -rf %s\n" % self.originalAnalysisDir
@@ -301,13 +300,9 @@ class JointEqtlAnalysis(object):
         os.chdir(self.permDir)
         
         for permId in xrange(1, self.nbPermutations+1):
-            newDir = "permutation_%i" % permId
-            os.mkdir(newDir)
-            os.chdir(newDir)
             permFile = "permutation_%i.txt" % permId
             aPerm = scipy.random.permutation(self.nbIndividuals)
             scipy.savetxt(fname=permFile, X=aPerm, fmt="%i")
-            os.chdir("..")
             
         os.chdir("..")
         
@@ -320,12 +315,17 @@ class JointEqtlAnalysis(object):
         scriptFile = "script_for_array_job_step_3.sh"
         scriptH = open(scriptFile, "w")
         
-        cmd = "qsub -cwd -j y -V -l h_vmem=1G"
+        cmd = "qsub -cwd -j y -V -l h_vmem=2G -t 1-%i" % self.nbPermutations
         
-        txt = "#!/bin/sh\n"
-        txt += "#$ -t 1-%i\n" % self.nbPermutations
+        txt = "#!/usr/bin/env bash\n"
+        txt += "set -o errexit -o pipefail\n"
+        txt += "mytmpdir=${TMPDIR}/tmp_${USER}_$$\n"
+        txt += "trap \"cd; rm -rf $mytmpdir; exit\" INT TERM EXIT\n"
         txt += "uname -a\n"
-        txt += "cd permutation_${SGE_TASK_ID}\n"
+#        txt += "cd permutation_${SGE_TASK_ID}\n"
+        txt += "mycwd=$(pwd); echo \"mycwd: \"$mycwd\n"
+        txt += "echo \"mytmpdir: \"$mytmpdir\n"
+        txt += "rm -rf $mytmpdir; mkdir $mytmpdir; cd $mytmpdir\n"
         scriptH.write("%s\n" % txt)
         
         # commands to compute summary stats in each subgroup
@@ -340,15 +340,14 @@ class JointEqtlAnalysis(object):
             if self.pathToFtrsToKeep != "":
                 txt += " -f %s" % self.pathToFtrsToKeep
             txt += " -o %s_perm${SGE_TASK_ID}_sumstats" % phenoFile
-            txt += " --permf permutation_${SGE_TASK_ID}.txt"
-            txt += "\n"
+            txt += " --permf ${mycwd}/permutation_${SGE_TASK_ID}.txt\n"
         scriptH.write("%s\n" % txt)
         
         # commands to compute the ABF "meta" (joint analysis)
         txt = ""
-        txt += "rm -rf all_sumstats_perm${SGE_TASK_ID}\n"
-        txt += "mkdir all_sumstats_perm${SGE_TASK_ID}\n"
-        txt += "cd all_sumstats_perm${SGE_TASK_ID}\n"
+        txt += "rm -rf all_sumstats_perm${SGE_TASK_ID};"
+        txt += " mkdir all_sumstats_perm${SGE_TASK_ID};"
+        txt += " cd all_sumstats_perm${SGE_TASK_ID}\n"
         for pathToPhenoFile in self.lPathToPhenoFiles:
             phenoFile = os.path.basename(pathToPhenoFile)
             txt += "ln -s ../%s_perm${SGE_TASK_ID}_sumstats .\n" % phenoFile
@@ -361,7 +360,14 @@ class JointEqtlAnalysis(object):
         # commands to remove temporary files
         txt = ""
         txt += "rm -rf *sumstats*\n"
-        txt += "cd ..\n"
+        txt += "awk 'NR>1 {if(! $1 in a){a[$1] = $6}"
+        txt += " else{if($6 > a[$1]){a[$1]=$6}}}"
+        txt += " END{for(i in a) print i,a[i]}' abfs_meta_perm${SGE_TASK_ID}.txt"
+        txt += " | sort -k1,1"
+        txt += " | gzip > best_abf_per_ftr_perm${SGE_TASK_ID}.txt.gz\n"
+        txt += "rm -f abfs_meta_perm${SGE_TASK_ID}.txt\n"
+        txt += "cp best_abf_per_ftr_perm${SGE_TASK_ID}.txt.gz ${mycwd}/\n"
+        txt += "cd $mycwd\n"
         scriptH.write("%s\n" % txt)
         
         scriptH.write("#cd %s; %s ../%s; cd ..\n" % (self.permDir,
@@ -399,64 +405,38 @@ class JointEqtlAnalysis(object):
         return dFtr2MaxAbf
     
     
-    def calcPermutationPvalueForOneFeature(self, lPathToAbfH, dFtr2MaxAbf):
+    def calcPermutationPvalueForOneFeature(self, lPositions, dFtr2MaxAbf):
         currentFtr = ""
         permPval = None
         
-        # fill array with ABFs (SNPs in rows, permutations in columns)
-        aAbfs = None
-        nbSnps = 0
-        endOfFile = False
-        while True:
-            lLines = []
-            lPositions = []
-            for pathToAbfH in lPathToAbfH:
-                pos = pathToAbfH.tell()
-                lPositions.append(pos)
-                line = pathToAbfH.readline()
-                if line == "":
-                    break
-                lLines.append(line)
-            if lLines == []:
-                endOfFile = True
+        # fill array with best ABF per permutation for this feature
+        aMaxAbfPerPerm = scipy.zeros(self.nbPermutations)
+        isEof = False
+        for i in xrange(0, self.nbPermutations):
+            pathToAbfFile = "%s/permutations/permutation_%i/best_abf_per_ftr_perm%i.txt.gz" % (os.getcwd(),
+                                                                                               i+1, i+1)
+            pathToAbfH = gzip.open(pathToAbfFile)
+            pathToAbfH.seek(lPositions[i])
+            line = pathToAbfH.readline()
+            lPositions[i] = pathToAbfH.tell()
+            pathToAbfH.close()
+            if line == "":
+                isEof = True
                 break
-            if len(lLines) != self.nbPermutations:
-                msg = "ERROR: ABF output files have different numbers"
-                msg += " of lines for all permutations"
+            tokens = line.rstrip().split()
+            if i == 0:
+                currentFtr = tokens[0]
+            elif i != 0 and tokens[0] != currentFtr:
+                msg = "ERROR: features are not sorted in each ABF output files"
+                msg += "\n%s versus %s (perm %i)" % (currentFtr, tokens[0], i+1)
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
-                
-            tmp = scipy.zeros(self.nbPermutations)
-            nextFtr = False
-            for i in xrange(0, len(lLines)):
-                tokens = lLines[i].rstrip().split()
-                if currentFtr == "":
-                    currentFtr = tokens[0]
-                else:
-                    if i == 0 and tokens[0] != currentFtr:
-                        for i in xrange(0, len(lPathToAbfH)):
-                            lPathToAbfH[i].seek(lPositions[i])
-                        nextFtr = True
-                        break
-                    if i != 0 and tokens[0] != currentFtr:
-                        msg = "ERROR: ABF output files have different numbers of SNPs"
-                        msg += " for feature '%s'" % currentFtr
-                        sys.stderr.write("%s\n" % msg)
-                        sys.exit(1)
-                tmp[i] = float(tokens[6])
-            if nextFtr:
-                break
-            if aAbfs == None:
-                aAbfs = tmp
-            else:
-                aAbfs = scipy.concatenate((aAbfs, tmp), axis=0)
-            nbSnps += 1
+            aMaxAbfPerPerm[i] = float(tokens[1])
+#            print i+1, "/", self.nbPermutations, pathToAbfFile, tokens[0], aMaxAbfPerPerm[i]
             
         # calculate the permutation P-value
-        if nbSnps != 0 or not endOfFile:
-            aAbfs = scipy.reshape(aAbfs, (nbSnps, self.nbPermutations))
-            aMaxPerPerm = scipy.amax(aAbfs, axis=0)
-            permPval = (1 + sum(aMaxPerPerm >= dFtr2MaxAbf[currentFtr])) \
+        if not isEof:
+            permPval = (1 + sum(aMaxAbfPerPerm >= dFtr2MaxAbf[currentFtr])) \
                 / float(1 + self.nbPermutations)
             
         return currentFtr, permPval
@@ -476,28 +456,20 @@ class JointEqtlAnalysis(object):
             print "nb of features: %i" % len(dFtr2MaxAbf)
             sys.stdout.flush()
             
-        lPathToAbfFiles = glob.glob("%s/permutations/permutation_*/abfs_meta_perm*.txt" % os.getcwd())
-        if len(lPathToAbfFiles) != self.nbPermutations:
-            msg = "ERROR: %i ABF file(s)," % len(lPathToAbfFiles)
-            msg +=" check if step 3 went well for all permutations"
-            sys.stderr.write("%s\n" % msg)
-            sys.exit(1)
-        lPathToAbfH = []
-        for pathToAbfFile in lPathToAbfFiles:
-            pathToAbfH = open(pathToAbfFile)
-            line = pathToAbfH.readline() # skip the header
-            lPathToAbfH.append(pathToAbfH)
-            
+        lPositions = list(0 for i in xrange(0, self.nbPermutations))
+        
         while True:
-            currentFtr, permPval = self.calcPermutationPvalueForOneFeature(lPathToAbfH,
+            currentFtr, permPval = self.calcPermutationPvalueForOneFeature(lPositions,
                                                                            dFtr2MaxAbf)
-            if currentFtr == "" and permPval == None:
+            if currentFtr == "":
                 break
+            elif permPval == None:
+                msg = "ERROR: undefined P-value for feature '%s'" % currentFtr
+                msg += "\ncheck that step 3 went well for all permutations"
+                sys.stderr.write("%s\n" % msg)
+                sys.exit(1)
             txt = "%s %f" % (currentFtr, permPval)
             outH.write("%s\n" % txt)
-            
-        for pathToAbfH in lPathToAbfH:
-            pathToAbfH.close()
             
         if self.verbose > 0:
             print "results written in file '%s'" % self.outFile
