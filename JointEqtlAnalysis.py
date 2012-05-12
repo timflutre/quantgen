@@ -322,7 +322,6 @@ class JointEqtlAnalysis(object):
         txt += "mytmpdir=${TMPDIR}/tmp_${USER}_$$\n"
         txt += "trap \"cd; rm -rf $mytmpdir; exit\" INT TERM EXIT\n"
         txt += "uname -a\n"
-#        txt += "cd permutation_${SGE_TASK_ID}\n"
         txt += "mycwd=$(pwd); echo \"mycwd: \"$mycwd\n"
         txt += "echo \"mytmpdir: \"$mytmpdir\n"
         txt += "rm -rf $mytmpdir; mkdir $mytmpdir; cd $mytmpdir\n"
@@ -360,7 +359,7 @@ class JointEqtlAnalysis(object):
         # commands to remove temporary files
         txt = ""
         txt += "rm -rf *sumstats*\n"
-        txt += "awk 'NR>1 {if(! $1 in a){a[$1] = $6}"
+        txt += "awk 'NR>1 {if(! ($1 in a)){a[$1] = $6}"
         txt += " else{if($6 > a[$1]){a[$1]=$6}}}"
         txt += " END{for(i in a) print i,a[i]}' abfs_meta_perm${SGE_TASK_ID}.txt"
         txt += " | sort -k1,1"
@@ -405,43 +404,6 @@ class JointEqtlAnalysis(object):
         return dFtr2MaxAbf
     
     
-    def calcPermutationPvalueForOneFeature(self, lPositions, dFtr2MaxAbf):
-        currentFtr = ""
-        permPval = None
-        
-        # fill array with best ABF per permutation for this feature
-        aMaxAbfPerPerm = scipy.zeros(self.nbPermutations)
-        isEof = False
-        for i in xrange(0, self.nbPermutations):
-            pathToAbfFile = "%s/permutations/permutation_%i/best_abf_per_ftr_perm%i.txt.gz" % (os.getcwd(),
-                                                                                               i+1, i+1)
-            pathToAbfH = gzip.open(pathToAbfFile)
-            pathToAbfH.seek(lPositions[i])
-            line = pathToAbfH.readline()
-            lPositions[i] = pathToAbfH.tell()
-            pathToAbfH.close()
-            if line == "":
-                isEof = True
-                break
-            tokens = line.rstrip().split()
-            if i == 0:
-                currentFtr = tokens[0]
-            elif i != 0 and tokens[0] != currentFtr:
-                msg = "ERROR: features are not sorted in each ABF output files"
-                msg += "\n%s versus %s (perm %i)" % (currentFtr, tokens[0], i+1)
-                sys.stderr.write("%s\n" % msg)
-                sys.exit(1)
-            aMaxAbfPerPerm[i] = float(tokens[1])
-#            print i+1, "/", self.nbPermutations, pathToAbfFile, tokens[0], aMaxAbfPerPerm[i]
-            
-        # calculate the permutation P-value
-        if not isEof:
-            permPval = (1 + sum(aMaxAbfPerPerm >= dFtr2MaxAbf[currentFtr])) \
-                / float(1 + self.nbPermutations)
-            
-        return currentFtr, permPval
-    
-    
     def calcPermutationPvaluesForAllFeatures(self):
         if self.verbose > 0:
             print "calculate feature-level permutation P-values ..."
@@ -456,19 +418,28 @@ class JointEqtlAnalysis(object):
             print "nb of features: %i" % len(dFtr2MaxAbf)
             sys.stdout.flush()
             
-        lPositions = list(0 for i in xrange(0, self.nbPermutations))
-        
-        while True:
-            currentFtr, permPval = self.calcPermutationPvalueForOneFeature(lPositions,
-                                                                           dFtr2MaxAbf)
-            if currentFtr == "":
-                break
-            elif permPval == None:
-                msg = "ERROR: undefined P-value for feature '%s'" % currentFtr
-                msg += "\ncheck that step 3 went well for all permutations"
-                sys.stderr.write("%s\n" % msg)
-                sys.exit(1)
-            txt = "%s %f" % (currentFtr, permPval)
+        dFtr2PermPval = {}
+        for i in xrange(0, self.nbPermutations):
+            pathToAbfFile = "%s/best_abf_per_ftr_perm%i.txt.gz" % (
+                self.permDir, i+1)
+            pathToAbfH = gzip.open(pathToAbfFile)
+            while True:
+                line = pathToAbfH.readline()
+                if line == "":
+                    break
+                tokens = line.rstrip().split()
+                if len(tokens) != 2:
+                    msg = "ERROR: check step 3 for permutation %i" % (i+1)
+                    sys.stderr.write("%s\n" % msg)
+                    sys.exit(1)
+                if not dFtr2PermPval.has_key(tokens[0]):
+                    dFtr2PermPval[tokens[0]] = 1
+                if float(tokens[1]) >= dFtr2MaxAbf[tokens[0]]:
+                    dFtr2PermPval[tokens[0]] += 1
+            pathToAbfH.close()
+            
+        for ftr, permPval in dFtr2PermPval.iteritems():
+            txt = "%s %f" % (ftr, permPval / float(1 + self.nbPermutations))
             outH.write("%s\n" % txt)
             
         if self.verbose > 0:
