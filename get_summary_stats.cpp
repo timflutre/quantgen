@@ -70,6 +70,8 @@ struct FtrStats
   string chr; // eg. chr21
   size_t start; // 1-based coordinate
   size_t end; // idem
+  vector<double> y_init; // phenotypes of samples
+  vector<bool> vIsNa; // missing values
   vector <SnpStats> vSnpStats;
   double betaPermPval; // permutation P-value based on beta P-value
   double rsPermPval; // permutation P-value based on Spearman-derived P-value
@@ -384,15 +386,17 @@ parse_args (
   }
 }
 
-void FtrStats_reset (FtrStats * pt_iFtrStats)
+void FtrStats_reset (FtrStats & iFtrStats)
 {
-  pt_iFtrStats->name.clear();
-  pt_iFtrStats->chr.clear();
-  pt_iFtrStats->start = string::npos;
-  pt_iFtrStats->end = string::npos;
-  pt_iFtrStats->vSnpStats.clear();
-  pt_iFtrStats->betaPermPval = numeric_limits<double>::quiet_NaN();
-  pt_iFtrStats->rsPermPval = numeric_limits<double>::quiet_NaN();
+  iFtrStats.name.clear();
+  iFtrStats.chr.clear();
+  iFtrStats.start = string::npos;
+  iFtrStats.end = string::npos;
+  iFtrStats.y_init.clear();
+  iFtrStats.vIsNa.clear();
+  iFtrStats.vSnpStats.clear();
+  iFtrStats.betaPermPval = numeric_limits<double>::quiet_NaN();
+  iFtrStats.rsPermPval = numeric_limits<double>::quiet_NaN();
 }
 
 void
@@ -403,8 +407,6 @@ FtrStats_init (
   const string chrToKeep,
   const vector<bool> & vIdxSamplesToSkip,
   const vector<string> vFtrsToKeep,
-  vector<bool> & vIsPhenoNa,
-  vector<double> & y_init,
   const gsl_permutation * perm,
   const int verbose)
 {
@@ -414,7 +416,7 @@ FtrStats_init (
 			    vIdxSamplesToSkip.end(),
 			    false);
   
-  FtrStats_reset (&iFtrStats);
+  FtrStats_reset (iFtrStats);
   
   while (true)
   {
@@ -465,8 +467,8 @@ FtrStats_init (
     iFtrStats.start = atol(tokensFtrCoords[1].c_str()) + 1;
     iFtrStats.end = atol(tokensFtrCoords[2].c_str());
     
-    vIsPhenoNa.assign (nbSamples, false);
-    y_init.assign (nbSamples, 0);
+    iFtrStats.vIsNa.assign (nbSamples, false);
+    iFtrStats.y_init.assign (nbSamples, 0);
     size_t j = 0;
     for (size_t colIdx = 1; colIdx < tokensPheno.size(); ++colIdx)
     {
@@ -480,9 +482,9 @@ FtrStats_init (
       else
 	tok = tokensPheno[gsl_permutation_get (perm, colIdx-1) + 1];
       if (tok.compare("NA") == 0)
-	vIsPhenoNa[j] = true;
+	iFtrStats.vIsNa[j] = true;
       else
-	y_init[j] = atof(tok.c_str());
+	iFtrStats.y_init[j] = atof(tok.c_str());
       ++j;
     }
     
@@ -1010,8 +1012,6 @@ void
 computePermutationPvaluesAtFeatureLevel (
   FtrStats & iFtrStats,
   const size_t nbPermutations,
-  const vector <double> & y_init,
-  const vector<bool> & vIsPhenoNa,
   const vector< vector <double> > & gAllSnps,
   const vector< vector<bool> > & vAreGenosNa,
   const bool needQnorm,
@@ -1042,7 +1042,7 @@ computePermutationPvaluesAtFeatureLevel (
   }
   gsl_rng_set (r, seed);
   
-  perm = gsl_permutation_calloc (y_init.size());
+  perm = gsl_permutation_calloc (iFtrStats.y_init.size());
   if (perm == 0)
   {
     cerr << "ERROR: can't allocate memory for the permutation" << endl;
@@ -1066,9 +1066,9 @@ computePermutationPvaluesAtFeatureLevel (
       for (i=0; i<perm->size; ++i)
       {
 	p = gsl_permutation_get (perm, i);
-	if (! vIsPhenoNa[p] && ! vAreGenosNa[snp_id][i])
+	if (! iFtrStats.vIsNa[p] && ! vAreGenosNa[snp_id][i])
 	{
-	  yPerm.push_back (y_init[p]);
+	  yPerm.push_back (iFtrStats.y_init[p]);
 	  gPerm.push_back (gAllSnps[snp_id][i]);
 	}
       }
@@ -1137,8 +1137,6 @@ void
 computePermutationPvaluesAtFeatureLevelParallel (
   FtrStats & iFtrStats,
   const size_t nbPermutations,
-  const vector <double> & y_init,
-  const vector<bool> & vIsPhenoNa,
   const vector< vector <double> > & gAllSnps,
   const vector< vector<bool> > & vAreGenosNa,
   const bool needQnorm,
@@ -1176,7 +1174,7 @@ computePermutationPvaluesAtFeatureLevelParallel (
     gsl_rng_set (r, seed * (t+1));
     vRngs.push_back (r);
     
-    gsl_permutation * perm = gsl_permutation_calloc (y_init.size());
+    gsl_permutation * perm = gsl_permutation_calloc (iFtrStats.y_init.size());
     if (perm == 0)
     {
       cerr << "ERROR: can't allocate memory for the permutation #" << t+1 << endl;
@@ -1202,9 +1200,9 @@ computePermutationPvaluesAtFeatureLevelParallel (
 	for (size_t i=0; i<vPerms[tid]->size; ++i)
 	{
 	  p = gsl_permutation_get (vPerms[tid], i);
-	  if (! vIsPhenoNa[p] && ! vAreGenosNa[snp_id][i])
+	  if (! iFtrStats.vIsNa[p] && ! vAreGenosNa[snp_id][i])
 	  {
-	    yPerm.push_back (y_init[p]);
+	    yPerm.push_back (iFtrStats.y_init[p]);
 	    gPerm.push_back (gAllSnps[snp_id][i]);
 	  }
 	}
@@ -1275,8 +1273,6 @@ computeSummaryStatsForOneFeature (
   const vector<string> & vCisSnps,
   map<string, streampos> & mSnpNameCoord2Pos,
   const vector<bool> vIdxSamplesToSkip,
-  const vector<bool> vIsPhenoNa,
-  const vector<double> y_init,
   const size_t nbPermutations,
   const bool needQnorm,
   const bool calcSpearman,
@@ -1316,9 +1312,9 @@ computeSummaryStatsForOneFeature (
     y.clear();
     g.clear();
     for (i = 0; i < nbSamples; ++i)
-      if (! vIsPhenoNa[i] && ! vIsGenoNa[i])
+      if (! iFtrStats.vIsNa[i] && ! vIsGenoNa[i])
       {
-	y.push_back (y_init[i]);
+	y.push_back (iFtrStats.y_init[i]);
 	g.push_back (g_init[i]);
       }
     iSnpStats.n = g.size();
@@ -1359,8 +1355,6 @@ computeSummaryStatsForOneFeature (
     if (nbThreads <= 1)
       computePermutationPvaluesAtFeatureLevel (iFtrStats,
 					       nbPermutations,
-					       y_init,
-					       vIsPhenoNa,
 					       gAllSnps,
 					       vAreGenosNa,
 					       needQnorm,
@@ -1371,8 +1365,6 @@ computeSummaryStatsForOneFeature (
     else
       computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
 						       nbPermutations,
-						       y_init,
-						       vIsPhenoNa,
 						       gAllSnps,
 						       vAreGenosNa,
 						       needQnorm,
@@ -1408,8 +1400,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   string linePheno, lineLinks;
   size_t nbFtrs = 0, nbAnalyzedPairs = 0, nbAnalyzedFtrs = 0;
   vector<string> tokens, vSamples, vCisSnps;
-  vector<double> y_init;
-  vector<bool> vIdxSamplesToSkip, vIsPhenoNa;
+  vector<bool> vIdxSamplesToSkip;
   map<string, streampos> mSnpNameCoord2Pos;
   ifstream phenoStream, genoStream, ftrCoordsStream, linksStream;
   ofstream outStream;
@@ -1525,8 +1516,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   {
     // initialize it
     FtrStats_init (iFtrStats, phenoStream, ftrCoordsStream, chrToKeep,
-		   vIdxSamplesToSkip, vFtrsToKeep, vIsPhenoNa, y_init,
-		   perm, verbose-1);
+		   vIdxSamplesToSkip, vFtrsToKeep, perm, verbose-1);
     if (iFtrStats.name.empty())
       continue;
     ++nbFtrs;
@@ -1552,9 +1542,8 @@ computeAndWriteSummaryStatsFtrPerFtr (
     // loop over SNPs in cis
     computeSummaryStatsForOneFeature (iFtrStats, genoStream, vCisSnps,
 				      mSnpNameCoord2Pos, vIdxSamplesToSkip,
-				      vIsPhenoNa, y_init, nbPermutations,
-				      needQnorm, calcSpearman, nbThreads,
-				      verbose-1);
+				      nbPermutations, needQnorm, calcSpearman,
+				      nbThreads, verbose-1);
     
     // write the results (one line per SNP)
     if (iFtrStats.vSnpStats.size() > 0)
