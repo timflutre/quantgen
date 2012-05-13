@@ -52,6 +52,8 @@ struct SnpStats
   string name; // eg. rs2205177
   string chr; // eg. chr21
   size_t coord; // 1-based coordinate
+  vector<double> g_init; // genotypes of samples
+  vector<bool> vIsNa; // missing values
   double maf; // minor allele frequency
   size_t n; // sample size
   double betahat; // MLE of beta
@@ -494,17 +496,16 @@ FtrStats_init (
 
 void
 FtrStats_getCisSnps (
-  const FtrStats & iFtrStats,
+  FtrStats & iFtrStats,
   ifstream & linksStream,
-  const map<string, streampos> & mSnpNameCoord2Pos,
-  vector<string> & vCisSnps)
+  const map<string, streampos> & mSnpNameCoord2Pos)
 {
   string line;
   streampos linksPos;
   vector<string> tokens, tokens2;
   bool hasFtrBeenSeen = false;
   
-  vCisSnps.clear();
+  iFtrStats.vSnpStats.clear();
   
   while (true)
   {
@@ -537,23 +538,24 @@ FtrStats_getCisSnps (
     split (tokens[1], '|', tokens2);
     if (mSnpNameCoord2Pos.find(tokens2[0]) == mSnpNameCoord2Pos.end())
       continue; // SNP to skip (see indexSnps)
-    vCisSnps.push_back (tokens2[0]);
+    SnpStats iSnpStats;
+    iSnpStats.name = tokens2[0];
+    iFtrStats.vSnpStats.push_back (iSnpStats);
   }
 }
 
 void
 FtrStats_getCisSnps (
-  const FtrStats & iFtrStats,
+  FtrStats & iFtrStats,
   ifstream & genoStream,
   const map<string, streampos> & mSnpNameCoord2Pos,
   const string & anchor,
-  const size_t & lenCis,
-  vector<string> & vCisSnps)
+  const size_t & lenCis)
 {
   string line;
   vector<string> tokens;
   
-  vCisSnps.clear();
+  iFtrStats.vSnpStats.clear();
   genoStream.clear ();
   genoStream.seekg (0, ios::beg);
   
@@ -574,13 +576,21 @@ FtrStats_getCisSnps (
     {
       if ((size_t) atol(tokens[2].c_str()) >= iFtrStats.start - lenCis
 	  && (size_t) atol(tokens[2].c_str()) <= iFtrStats.start + lenCis)
-	vCisSnps.push_back (tokens[1]);
+      {
+	SnpStats iSnpStats;
+	iSnpStats.name = tokens[1];
+	iFtrStats.vSnpStats.push_back (iSnpStats);
+      }
     }
     else if (anchor.compare("TSS+TES") == 0)
     {
       if ((size_t) atol(tokens[2].c_str()) >= iFtrStats.start - lenCis
 	  && (size_t) atol(tokens[2].c_str()) <= iFtrStats.end + lenCis)
-	vCisSnps.push_back (tokens[1]);
+      {
+	SnpStats iSnpStats;
+	iSnpStats.name = tokens[1];
+	iFtrStats.vSnpStats.push_back (iSnpStats);
+      }
     }
   }
 }
@@ -629,11 +639,8 @@ void
 SnpStats_init (
   SnpStats & iSnpStats,
   ifstream & genoStream,
-  const string & snpNameCoord,
   map<string, streampos> & mSnpNameCoord2Pos,
   const vector<bool> & vIdxSamplesToSkip,
-  vector<bool> & vIsGenoNa,
-  vector<double> & g_init,
   const int verbose)
 {
   size_t i, j;
@@ -645,25 +652,29 @@ SnpStats_init (
 			    false);
   
   genoStream.clear ();
-  genoStream.seekg (mSnpNameCoord2Pos[snpNameCoord]);
+  genoStream.seekg (mSnpNameCoord2Pos[iSnpStats.name]);
   getline (genoStream, line);
   if (line.empty())
   {
-    cerr << "ERROR: empty genotype line for SNP " << snpNameCoord << endl;
+    cerr << "ERROR: empty genotype line for SNP " << iSnpStats.name << endl;
     exit (1);
   }
   if (line.find('\t') != string::npos)
     split (line, '\t', tokens);
   else
     split (line, ' ', tokens);
+  if (iSnpStats.name.compare(tokens[1]) != 0)
+  {
+    cerr << "ERROR: wrong genotype line for SNP " << iSnpStats.name << endl;
+    exit (1);
+  }
   
   iSnpStats.chr = tokens[0];
-  iSnpStats.name = tokens[1];
   iSnpStats.coord = atol(tokens[2].c_str());
   
   maf = 0;
-  vIsGenoNa.assign (nbSamples, false);
-  g_init.assign (nbSamples, 0);
+  iSnpStats.vIsNa.assign (nbSamples, false);
+  iSnpStats.g_init.assign (nbSamples, 0);
   j = 0;
   for (i = 0; i < vIdxSamplesToSkip.size(); ++i)
   {
@@ -673,11 +684,11 @@ SnpStats_init (
     AB = atof(tokens[5+3*i+1].c_str());
     BB = atof(tokens[5+3*i+2].c_str());
     if (AA == 0 && AB == 0 && BB == 0)
-      vIsGenoNa[j] = true;
+      iSnpStats.vIsNa[j] = true;
     else
     {
-      g_init[j] = 0 * AA + 1 * AB + 2 * BB;
-      maf += g_init[j];
+      iSnpStats.g_init[j] = 0 * AA + 1 * AB + 2 * BB;
+      maf += iSnpStats.g_init[j];
     }
     ++j;
   }
@@ -685,8 +696,8 @@ SnpStats_init (
 	      - count (vIdxSamplesToSkip.begin(),
 		       vIdxSamplesToSkip.end(),
 		       true)
-	      - count (vIsGenoNa.begin(),
-		       vIsGenoNa.end(),
+	      - count (iSnpStats.vIsNa.begin(),
+		       iSnpStats.vIsNa.end(),
 		       true));
   iSnpStats.maf = maf <= 0.5 ? maf : (1 - maf);
 }
@@ -1012,8 +1023,6 @@ void
 computePermutationPvaluesAtFeatureLevel (
   FtrStats & iFtrStats,
   const size_t nbPermutations,
-  const vector< vector <double> > & gAllSnps,
-  const vector< vector<bool> > & vAreGenosNa,
   const bool needQnorm,
   const double minBetaPval,
   const bool calcSpearman,
@@ -1060,16 +1069,16 @@ computePermutationPvaluesAtFeatureLevel (
       rsZscore;
     gsl_ran_shuffle (r, perm->data, perm->size, sizeof(size_t));
     
-    for(snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
+    for(snp_id=0; snp_id<iFtrStats.vSnpStats.size(); ++snp_id)
     {
       vector<double> yPerm, gPerm;
       for (i=0; i<perm->size; ++i)
       {
 	p = gsl_permutation_get (perm, i);
-	if (! iFtrStats.vIsNa[p] && ! vAreGenosNa[snp_id][i])
+	if (! iFtrStats.vIsNa[p] && ! iFtrStats.vSnpStats[snp_id].vIsNa[i])
 	{
 	  yPerm.push_back (iFtrStats.y_init[p]);
-	  gPerm.push_back (gAllSnps[snp_id][i]);
+	  gPerm.push_back (iFtrStats.vSnpStats[snp_id].g_init[i]);
 	}
       }
       if (needQnorm)
@@ -1137,8 +1146,6 @@ void
 computePermutationPvaluesAtFeatureLevelParallel (
   FtrStats & iFtrStats,
   const size_t nbPermutations,
-  const vector< vector <double> > & gAllSnps,
-  const vector< vector<bool> > & vAreGenosNa,
   const bool needQnorm,
   const double minBetaPval,
   const bool calcSpearman,
@@ -1193,17 +1200,17 @@ computePermutationPvaluesAtFeatureLevelParallel (
 	minRsPvalPerm = 1, rsPvalPerm, rsZscore;
       gsl_ran_shuffle (vRngs[tid], vPerms[tid]->data, vPerms[tid]->size, sizeof(size_t));
       
-      for(size_t snp_id=0; snp_id<gAllSnps.size(); ++snp_id)
+      for(size_t snp_id=0; snp_id<iFtrStats.vSnpStats.size(); ++snp_id)
       {
 	size_t p;
 	vector<double> yPerm, gPerm;
 	for (size_t i=0; i<vPerms[tid]->size; ++i)
 	{
 	  p = gsl_permutation_get (vPerms[tid], i);
-	  if (! iFtrStats.vIsNa[p] && ! vAreGenosNa[snp_id][i])
+	  if (! iFtrStats.vIsNa[p] && ! iFtrStats.vSnpStats[snp_id].vIsNa[i])
 	  {
 	    yPerm.push_back (iFtrStats.y_init[p]);
-	    gPerm.push_back (gAllSnps[snp_id][i]);
+	    gPerm.push_back (iFtrStats.vSnpStats[snp_id].g_init[i]);
 	  }
 	}
 	if (needQnorm)
@@ -1270,7 +1277,6 @@ void
 computeSummaryStatsForOneFeature (
   FtrStats & iFtrStats,
   ifstream & genoStream,
-  const vector<string> & vCisSnps,
   map<string, streampos> & mSnpNameCoord2Pos,
   const vector<bool> vIdxSamplesToSkip,
   const size_t nbPermutations,
@@ -1286,48 +1292,37 @@ computeSummaryStatsForOneFeature (
   size_t nbSamples = count (vIdxSamplesToSkip.begin(),
 			    vIdxSamplesToSkip.end(),
 			    false);
-  
-  // used for permutations
-  vector< vector<double> > gAllSnps;
-  vector< vector<bool> > vAreGenosNa;
+  SnpStats * pt_iSnpStats;
   double minBetaPval = 1, minRsPval = 1;
   
-  for (snp_id = 0; snp_id < vCisSnps.size(); ++snp_id)
+  for (snp_id = 0; snp_id < iFtrStats.vSnpStats.size(); ++snp_id)
   {
-    SnpStats iSnpStats;
-    snpNameCoord = vCisSnps[snp_id];
-    vector<double> g_init;
-    vector<bool> vIsGenoNa;
-    SnpStats_init (iSnpStats, genoStream, snpNameCoord, mSnpNameCoord2Pos,
-		   vIdxSamplesToSkip, vIsGenoNa, g_init, verbose-1);
-    
-    if (iSnpStats.name.empty())
-      continue;
+    pt_iSnpStats = &(iFtrStats.vSnpStats[snp_id]);
+    SnpStats_init (*pt_iSnpStats, genoStream, mSnpNameCoord2Pos,
+		   vIdxSamplesToSkip, verbose-1);
     if (verbose > 1)
       printf ("ftr=%s snp=%s\n", iFtrStats.name.c_str(),
-	      iSnpStats.name.c_str());
-    gAllSnps.push_back (g_init);
-    vAreGenosNa.push_back (vIsGenoNa);
+	      pt_iSnpStats->name.c_str());
     
     y.clear();
     g.clear();
     for (i = 0; i < nbSamples; ++i)
-      if (! iFtrStats.vIsNa[i] && ! vIsGenoNa[i])
+      if (! iFtrStats.vIsNa[i] && ! pt_iSnpStats->vIsNa[i])
       {
 	y.push_back (iFtrStats.y_init[i]);
-	g.push_back (g_init[i]);
+	g.push_back (pt_iSnpStats->g_init[i]);
       }
-    iSnpStats.n = g.size();
+    pt_iSnpStats->n = g.size();
     if (needQnorm)
       qnorm (y);
     
     if (! calcSpearman)
     {
-      ols (iFtrStats.name, iSnpStats.name, g, y, &iSnpStats.betahat,
-	   &iSnpStats.sebetahat, &iSnpStats.sigmahat,
-	   &iSnpStats.betaPval, &iSnpStats.R2, verbose-1);
-      if (iSnpStats.betaPval < minBetaPval)
-	minBetaPval = iSnpStats.betaPval;
+      ols (iFtrStats.name, pt_iSnpStats->name, g, y, &(pt_iSnpStats->betahat),
+	   &(pt_iSnpStats->sebetahat), &(pt_iSnpStats->sigmahat),
+	   &(pt_iSnpStats->betaPval), &(pt_iSnpStats->R2), verbose-1);
+      if (pt_iSnpStats->betaPval < minBetaPval)
+	minBetaPval = pt_iSnpStats->betaPval;
     }
     else
     {
@@ -1335,28 +1330,24 @@ computeSummaryStatsForOneFeature (
 								 g.size());
       gsl_vector_const_view gsl_y = gsl_vector_const_view_array (&y[0],
 								 y.size());
-      iSnpStats.rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
+      pt_iSnpStats->rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
 						    gsl_y.vector.data, 1,
 						    g.size());
-      iSnpStats.rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
-	* (log(1 + iSnpStats.rs) - log(1 - iSnpStats.rs));
-      if (iSnpStats.rsZscore >= 0)
-	iSnpStats.rsPval = gsl_cdf_ugaussian_Q (iSnpStats.rsZscore);
+      pt_iSnpStats->rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
+	* (log(1 + pt_iSnpStats->rs) - log(1 - pt_iSnpStats->rs));
+      if (pt_iSnpStats->rsZscore >= 0)
+	pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (pt_iSnpStats->rsZscore);
       else
-	iSnpStats.rsPval = gsl_cdf_ugaussian_Q (-iSnpStats.rsZscore);
-      if (iSnpStats.rsPval < minRsPval)
-	minRsPval = iSnpStats.rsPval;
+	pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (-pt_iSnpStats->rsZscore);
+      if (pt_iSnpStats->rsPval < minRsPval)
+	minRsPval = pt_iSnpStats->rsPval;
     }
-    
-    iFtrStats.vSnpStats.push_back (iSnpStats);
   }
   
   if (nbPermutations > 0)
     if (nbThreads <= 1)
       computePermutationPvaluesAtFeatureLevel (iFtrStats,
 					       nbPermutations,
-					       gAllSnps,
-					       vAreGenosNa,
 					       needQnorm,
 					       minBetaPval,
 					       calcSpearman,
@@ -1365,8 +1356,6 @@ computeSummaryStatsForOneFeature (
     else
       computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
 						       nbPermutations,
-						       gAllSnps,
-						       vAreGenosNa,
 						       needQnorm,
 						       minBetaPval,
 						       calcSpearman,
@@ -1523,24 +1512,24 @@ computeAndWriteSummaryStatsFtrPerFtr (
     
     // retrieve its SNPs in cis
     if (! linksFile.empty())
-      FtrStats_getCisSnps (iFtrStats, linksStream, mSnpNameCoord2Pos, vCisSnps);
+      FtrStats_getCisSnps (iFtrStats, linksStream, mSnpNameCoord2Pos);
     else
       FtrStats_getCisSnps (iFtrStats, genoStream, mSnpNameCoord2Pos,
-			   anchor, lenCis, vCisSnps);
-    if (vCisSnps.empty())
+			   anchor, lenCis);
+    if (iFtrStats.vSnpStats.empty())
       continue;
     
     if (verbose > 1)
     {
       printf ("analyzing feature %s (%s, %zu cis SNPs) ...\n",
 	      iFtrStats.name.c_str(), iFtrStats.chr.c_str(),
-	      vCisSnps.size());
+	      iFtrStats.vSnpStats.size());
       fflush (stdout);
     }
     ++nbAnalyzedFtrs;
     
     // loop over SNPs in cis
-    computeSummaryStatsForOneFeature (iFtrStats, genoStream, vCisSnps,
+    computeSummaryStatsForOneFeature (iFtrStats, genoStream,
 				      mSnpNameCoord2Pos, vIdxSamplesToSkip,
 				      nbPermutations, needQnorm, calcSpearman,
 				      nbThreads, verbose-1);
