@@ -355,6 +355,11 @@ parse_args (
     help (argv);
     exit (1);
   }
+  if (nbThreads > 1)
+  {
+    nbThreads = min(nbThreads, omp_get_max_threads());
+    omp_set_num_threads (nbThreads);
+  }
   if (verbose > 1)
   {
     cout << "genotypes: " << genoFile << endl;
@@ -1157,20 +1162,18 @@ computePermutationPvaluesAtFeatureLevelParallel (
   size_t seed = 1859;
   int t;
   vector<double> resPerm (nbPermutations, 1);
-  int maxNbThreads = omp_get_max_threads();
   vector<gsl_rng *> vRngs;
   vector<gsl_permutation *> vPerms; // for the indices of the phenotypes vector
   
-  omp_set_num_threads (min(nbThreads, maxNbThreads));
   if (verbose > 0)
   {
     printf ("perform %zu permutations on the phenotypes (%d threads) ...\n",
-	    nbPermutations, min(nbThreads, maxNbThreads));
+	    nbPermutations, nbThreads);
     fflush (stdout);
   }
   
   gsl_rng_env_setup();
-  for (t=0; t<min(nbThreads, maxNbThreads); ++t)
+  for (t=0; t<nbThreads; ++t)
   {
     gsl_rng * r = gsl_rng_alloc (gsl_rng_default);
     if (r == 0)
@@ -1249,7 +1252,7 @@ computePermutationPvaluesAtFeatureLevelParallel (
     }
   }
   
-  for (t=0; t<min(nbThreads, maxNbThreads); ++t)
+  for (t=0; t<nbThreads; ++t)
   {
     gsl_permutation_free (vPerms[t]);
     gsl_rng_free (vRngs[t]);
@@ -1286,8 +1289,6 @@ computeSummaryStatsForOneFeature (
   const int verbose)
 {
   size_t snp_id, i;
-  string snpNameCoord;
-  vector<string> tokens;
   vector<double> y, g;
   size_t nbSamples = count (vIdxSamplesToSkip.begin(),
 			    vIdxSamplesToSkip.end(),
@@ -1362,6 +1363,129 @@ computeSummaryStatsForOneFeature (
 						       minRsPval,
 						       nbThreads,
 						       verbose);
+}
+
+void
+computeSummaryStatsForOneFeatureParallel (
+  FtrStats & iFtrStats,
+  const string & genoFile,
+  map<string, streampos> & mSnpNameCoord2Pos,
+  const vector<bool> vIdxSamplesToSkip,
+  const size_t nbPermutations,
+  const bool needQnorm,
+  const bool calcSpearman,
+  const int nbThreads,
+  const int verbose)
+{
+  long int snp_id;
+  int t;
+  size_t nbSamples = count (vIdxSamplesToSkip.begin(),
+			    vIdxSamplesToSkip.end(),
+			    false);
+  
+  // need one file handle per thread
+  vector<ifstream *> vPtGenoStreams;
+  for (t=0; t<nbThreads; ++t)
+  {
+    ifstream * pt_genoStream = new ifstream;
+    pt_genoStream->open(genoFile.c_str());
+    if (! pt_genoStream->is_open())
+    {
+      cerr << "ERROR: can't open file " << genoFile
+	   << " for thread " << t << endl;
+      exit (1);
+    }
+    vPtGenoStreams.push_back (pt_genoStream);
+  }
+  
+#pragma omp parallel private(snp_id)
+  {
+#pragma omp for nowait
+    for (snp_id = 0; snp_id < (long int) iFtrStats.vSnpStats.size(); ++snp_id)
+    {
+      SnpStats * pt_iSnpStats = &(iFtrStats.vSnpStats[snp_id]);
+      SnpStats_init (*pt_iSnpStats, *(vPtGenoStreams[omp_get_thread_num()]),
+		     mSnpNameCoord2Pos, vIdxSamplesToSkip, verbose-1);
+      if (verbose > 1)
+	printf ("ftr=%s snp=%s\n", iFtrStats.name.c_str(),
+		pt_iSnpStats->name.c_str());
+      
+      vector<double> y, g;
+      for (size_t i = 0; i < nbSamples; ++i)
+	if (! iFtrStats.vIsNa[i] && ! pt_iSnpStats->vIsNa[i])
+	{
+	  y.push_back (iFtrStats.y_init[i]);
+	  g.push_back (pt_iSnpStats->g_init[i]);
+	}
+      pt_iSnpStats->n = g.size();
+      if (needQnorm)
+	qnorm (y);
+      
+      if (! calcSpearman)
+      {
+	ols (iFtrStats.name, pt_iSnpStats->name, g, y, &(pt_iSnpStats->betahat),
+	     &(pt_iSnpStats->sebetahat), &(pt_iSnpStats->sigmahat),
+	     &(pt_iSnpStats->betaPval), &(pt_iSnpStats->R2), verbose-1);
+      }
+      else
+      {
+	gsl_vector_const_view gsl_g = gsl_vector_const_view_array (&g[0],
+								   g.size());
+	gsl_vector_const_view gsl_y = gsl_vector_const_view_array (&y[0],
+								   y.size());
+	pt_iSnpStats->rs = my_stats_correlation_spearman (gsl_g.vector.data, 1,
+							  gsl_y.vector.data, 1,
+							  g.size());
+	pt_iSnpStats->rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
+	  * (log(1 + pt_iSnpStats->rs) - log(1 - pt_iSnpStats->rs));
+	if (pt_iSnpStats->rsZscore >= 0)
+	  pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (pt_iSnpStats->rsZscore);
+	else
+	  pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (-pt_iSnpStats->rsZscore);
+      }
+    }
+  }
+  
+  for (t=0; t<nbThreads; ++t)
+  {
+    vPtGenoStreams[t]->close ();
+    delete vPtGenoStreams[t];
+  }
+  vPtGenoStreams.clear();
+  
+  if (nbPermutations > 0)
+  {
+    double minBetaPval = 1, minRsPval = 1;
+    if (! calcSpearman)
+    {
+      for (snp_id = 0; snp_id < (long int) iFtrStats.vSnpStats.size(); ++snp_id)
+	if (iFtrStats.vSnpStats[snp_id].betaPval < minBetaPval)
+	  minBetaPval = iFtrStats.vSnpStats[snp_id].betaPval;
+    }
+    else
+    {
+      for (snp_id = 0; snp_id < (long int) iFtrStats.vSnpStats.size(); ++snp_id)
+	if (iFtrStats.vSnpStats[snp_id].rsPval < minRsPval)
+	  minRsPval = iFtrStats.vSnpStats[snp_id].rsPval;
+    }
+    if (nbThreads <= 1)
+      computePermutationPvaluesAtFeatureLevel (iFtrStats,
+					       nbPermutations,
+					       needQnorm,
+					       minBetaPval,
+					       calcSpearman,
+					       minRsPval,
+					       verbose);
+    else
+      computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
+						       nbPermutations,
+						       needQnorm,
+						       minBetaPval,
+						       calcSpearman,
+						       minRsPval,
+						       nbThreads,
+						       verbose);
+  }
 }
 
 void
@@ -1452,7 +1576,11 @@ computeAndWriteSummaryStatsFtrPerFtr (
   
   if (verbose > 0)
   {
-    printf ("look for association between each pair feature-SNP ...\n");
+    if (nbThreads <= 1)
+      printf ("look for association between each pair feature-SNP ...\n");
+    else
+      printf ("look for association between each pair feature-SNP (%d threads) ...\n",
+	nbThreads);
     fflush (stdout);
   }
   
@@ -1529,10 +1657,18 @@ computeAndWriteSummaryStatsFtrPerFtr (
     ++nbAnalyzedFtrs;
     
     // loop over SNPs in cis
-    computeSummaryStatsForOneFeature (iFtrStats, genoStream,
-				      mSnpNameCoord2Pos, vIdxSamplesToSkip,
-				      nbPermutations, needQnorm, calcSpearman,
-				      nbThreads, verbose-1);
+    if (nbThreads <= 1)
+      computeSummaryStatsForOneFeature (iFtrStats, genoStream,
+					mSnpNameCoord2Pos, vIdxSamplesToSkip,
+					nbPermutations, needQnorm, calcSpearman,
+					nbThreads, verbose-1);
+    else
+      computeSummaryStatsForOneFeatureParallel (iFtrStats, genoFile,
+						mSnpNameCoord2Pos,
+						vIdxSamplesToSkip,
+						nbPermutations, needQnorm,
+						calcSpearman,
+						nbThreads, verbose-1);
     
     // write the results (one line per SNP)
     if (iFtrStats.vSnpStats.size() > 0)
