@@ -126,10 +126,11 @@ void help (char ** argv)
        << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
        << "\t\twhatever the option, the MAF will still be computed and saved" << endl
        << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
-       << "\t\tdefault=0, recommended=10000 (is multi-threaded)" << endl
+       << "\t\tdefault=0, recommended=10000" << endl
        << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
        << "\t\tinstead of performing linear regressions" << endl
-       << "  -t, --thread\tnumber of threads (used only for permutations)" << endl
+       << "  -t, --thread\tnumber of threads (default=1)" << endl
+       << "\t\tused for SNPs in cis of the same feature, and for permutations" << endl
        << "      --permf\tfile with a permutation of the samples" << endl
        << "\t\tshould start at 0" << endl
        << "\t\tshould have as many lines as the number of samples in --pheno" << endl
