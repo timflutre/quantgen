@@ -16,7 +16,7 @@
   *  You should have received a copy of the GNU General Public License
   *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
   *
-  *  gcc -Wall -g -DDEBUG -O3 get_abf_meta.cpp -lstdc++ -lgsl -lgslcblas -o get_abf_meta
+  *  g++ -Wall -O3 get_abf_meta.cpp -lgsl -lgslcblas -o get_abf_meta
   *  help2man -o get_abf_meta.man ./get_abf_meta
   *  groff -mandoc get_abf_meta.man > get_abf_meta.ps
   */
@@ -786,7 +786,7 @@ computeAndWriteAbfsForAllPairs (
 	    << " coord"
 	    << " nb.subgroups"
 	    << " nb.samples"
-	    << " l10abf.avg"
+	    << " l10abf.meta"
 	    << " l10abf.fix"
 	    << " l10abf.maxh";
   if (saveSumStats)
