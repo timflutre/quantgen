@@ -66,7 +66,7 @@ void help (char ** argv)
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
        << "  -o, --out\toutput file" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
-       << "  -s, --snp\tfile with a list of SNP coordinates to analyze" << endl
+       << "  -s, --snp\tfile with a list of SNP identifiers to analyze" << endl
        << "  -x, --index\twhich SNP info to use to index pairs feature-SNP" << endl
        << "\t\tdefault=id+coord, but can be only 'id' or 'coord'" << endl
        << "  -b, --beta\tsave the summary statistics of each subgroup in the output file" << endl
@@ -359,7 +359,7 @@ indexInputFiles (
 	  find(vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[4]) ==
 	  vSnpsToKeep.end())
       {
-	continue;  // skip line, based on SNP coordinate
+	continue;  // skip line, based on SNP identifier
       }
       stringstream ss; // ftr|snp-id or ftr|snp-coord or ftr|snp-id|snp-coord
       ss << tokens[0];
