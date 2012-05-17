@@ -452,7 +452,7 @@ getSummaryStatsForPair (
   const string snpIdx,
   const vector<size_t> & vPositions,
   vector<ifstream *> & vPtInStreams,
-  map<size_t, vector<double> > & allSumStats,
+  map<size_t, vector<double> > & mAllSumStats,
   int & nbSubgroupsUsed,
   int & nbSamplesUsed,
   const int verbose)
@@ -461,7 +461,7 @@ getSummaryStatsForPair (
   string line;
   vector<string> tokens;
   
-  allSumStats.clear();
+  mAllSumStats.clear();
   nbSubgroupsUsed = 0;
   nbSamplesUsed = 0;
   
@@ -509,7 +509,7 @@ getSummaryStatsForPair (
       }
     }
     
-    allSumStats.insert (make_pair(subgroup, vSumStats) );
+    mAllSumStats.insert (make_pair(subgroup, vSumStats) );
   }
 }
 
@@ -521,20 +521,23 @@ getSummaryStatsForPair (
  *  variation in the genotype (betahat=0, sebetahat=Inf), t will be 0, whereas
  *  bhat will be 0 and sebhat will be Inf.
  */
-vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
+vector<double>
+correctSummaryStats (
+  const vector<double> & vSumStats,
+  const int verbose)
 {
   vector<double> stdSumStatsCorr;
   double n = 0, bhat = 0, sebhat = 0, sigmahat = 0, t = 0;
   
-  if (sumStats[0] != 0)  // if=0 -> pair is not present in the given subgroup
+  if (vSumStats[0] != 0)  // if=0 -> pair is not present in the given subgroup
   {
-    n = sumStats[0];
-    bhat = sumStats[1] / sumStats[3];      // before correction
-    sebhat = sumStats[2] / sumStats[3];    // before correction
+    n = vSumStats[0];
+    bhat = vSumStats[1] / vSumStats[3];      // before correction
+    sebhat = vSumStats[2] / vSumStats[3];    // before correction
 #ifdef DEBUG
     if (verbose > 0)
       printf ("n=%i betahat=%e sebetahat=%e sigmahat=%e bhat=%e sebhat=%e\n",
-	      (int) n, sumStats[1], sumStats[2], sumStats[3], bhat, sebhat);
+	      (int) n, vSumStats[1], vSumStats[2], vSumStats[3], bhat, sebhat);
 #endif
     t = gsl_cdf_gaussian_Pinv(gsl_cdf_tdist_P(-fabs(bhat/sebhat), n-2), 1.0);
 #ifdef DEBUG
@@ -543,8 +546,8 @@ vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
 #endif
     if (fabs(t) > 1e-8)
     {
-      sigmahat = fabs(sumStats[1]) / (fabs(t) * sebhat);
-      bhat = sumStats[1] / sigmahat;
+      sigmahat = fabs(vSumStats[1]) / (fabs(t) * sebhat);
+      bhat = vSumStats[1] / sigmahat;
       sebhat = bhat / t;
     }
     else
@@ -573,7 +576,7 @@ vector<double> correctSummaryStats (const vector<double> sumStats, int verbose)
  */
 double
 getAbfFromStdSumStats (
-  vector< vector<double> > stdSumStats,
+  const vector< vector<double> > & stdSumStats,
   const double phi2,
   const double oma2,
   const int verbose)
@@ -667,7 +670,7 @@ log10_weighted_sum (
 void
 computeAbfsForPairOverGrid (
   const vector< vector<double> > grid, 
-  const map<size_t, vector<double> > & allSumStats,
+  const map<size_t, vector<double> > & mAllSumStats,
   double * pt_l10_abf_meta,
   double * pt_l10_abf_fix,
   double * pt_l10_abf_maxh,
@@ -687,14 +690,14 @@ computeAbfsForPairOverGrid (
   // apply small sample size correction for the summary stats of each study,
   // and keep the one being defined
   *pt_nbSamplesUsed = 0;
-  for (subgroup = 0; subgroup < allSumStats.size(); ++subgroup)
+  for (subgroup = 0; subgroup < mAllSumStats.size(); ++subgroup)
   {
-    vector<double> sumStats = allSumStats.find(subgroup)->second;  // can't use [] because map is const
-    vector<double> sumStatsCorr = correctSummaryStats (sumStats, verbose-1);
-    if (sumStatsCorr.size() > 0)  // otherwise, pair not present in subgroup
+    vector<double> vSumStats = mAllSumStats.find(subgroup)->second;  // can't use [] because map is const
+    vector<double> vSumStatsCorr = correctSummaryStats (vSumStats, verbose-1);
+    if (vSumStatsCorr.size() > 0)  // otherwise, pair not present in subgroup
     {
-      allSumStatsCorr.push_back (sumStatsCorr);
-      *pt_nbSamplesUsed += (int) sumStats[0];
+      allSumStatsCorr.push_back (vSumStatsCorr);
+      *pt_nbSamplesUsed += (int) vSumStats[0];
     }
   }
   *pt_nbSubgroupsUsed = allSumStatsCorr.size();
@@ -703,19 +706,19 @@ computeAbfsForPairOverGrid (
   for (gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
   {
     l10_abf_metas[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
-						grid[gridIdx][0],
-						grid[gridIdx][1],
-						verbose-1);
+						    grid[gridIdx][0],
+						    grid[gridIdx][1],
+						    verbose-1);
     l10_abf_fixs[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
-					       0,
-					       grid[gridIdx][0]
-					       + grid[gridIdx][1],
-					       verbose-1);
+						   0,
+						   grid[gridIdx][0]
+						   + grid[gridIdx][1],
+						   verbose-1);
     l10_abf_maxhs[gridIdx] = getAbfFromStdSumStats (allSumStatsCorr,
-						grid[gridIdx][0]
-						+ grid[gridIdx][1],
-						0,
-						verbose-1);
+						    grid[gridIdx][0]
+						    + grid[gridIdx][1],
+						    0,
+						    verbose-1);
     weights[gridIdx] = 1.0 / (double) grid.size();
   }
   
@@ -734,7 +737,7 @@ computeAbfsForPairOverGrid (
  */
 void
 computeAndWriteAbfsForAllPairs (
-  const vector<string> vInFiles,
+  const vector<string> & vInFiles,
   const map<string, vector<size_t> > & mPairs2Positions,
   const string gridFile,
   const string outFile,
@@ -748,7 +751,7 @@ computeAndWriteAbfsForAllPairs (
   string pairId;
   vector<string> tokens;
   vector<size_t> vPositions;
-  map<size_t, vector<double> > allSumStats;  // 1 vector of doubles per subgroup
+  map<size_t, vector<double> > mAllSumStats;  // 1 vector of doubles per subgroup
   double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0;
   int nbSamplesUsed = 0, nbSubgroupsUsed = 0;
   ofstream outStream;
@@ -811,7 +814,7 @@ computeAndWriteAbfsForAllPairs (
     
     // retrieve its summary statistics
     getSummaryStatsForPair (pairId, snpIdx, vPositions, vPtInStreams,
-			    allSumStats, nbSubgroupsUsed,
+			    mAllSumStats, nbSubgroupsUsed,
 			    nbSamplesUsed, verbose-1);
     ++vNbSubgroups2Occurrences[nbSubgroupsUsed];
     if (verbose > 1)
@@ -819,7 +822,7 @@ computeAndWriteAbfsForAllPairs (
 	   << " " << nbSubgroupsUsed << " subgroups" << endl;
     
     // compute the Bayes Factors for the 3 models over the grid
-    computeAbfsForPairOverGrid (grid, allSumStats, &l10_abf_meta, &l10_abf_fix, &l10_abf_maxh,
+    computeAbfsForPairOverGrid (grid, mAllSumStats, &l10_abf_meta, &l10_abf_fix, &l10_abf_maxh,
 				&nbSubgroupsUsed, &nbSamplesUsed, verbose-1);
     
     // write the results
@@ -838,9 +841,9 @@ computeAndWriteAbfsForAllPairs (
 	      << " " << l10_abf_maxh;
     if (saveSumStats)
       for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
-	outStream << " " << allSumStats[subgroup][1]  // betahat
-		  << " " << allSumStats[subgroup][2]  // sebetahat
-		  << " " << allSumStats[subgroup][3]; // sigmahat
+	outStream << " " << mAllSumStats[subgroup][1]  // betahat
+		  << " " << mAllSumStats[subgroup][2]  // sebetahat
+		  << " " << mAllSumStats[subgroup][3]; // sigmahat
     outStream << endl;
   }
   
