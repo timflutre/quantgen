@@ -1107,10 +1107,7 @@ computePermutationPvaluesAtFeatureLevel (
 						    gsl_gPerm.vector.size);
       rsZscore = sqrt((gPerm.size() - 3) / 1.06) * 1/2
 	* (log(1 + rsPvalPerm) - log(1 - rsPvalPerm));
-      if (rsZscore >= 0)
-	rsPvalPerm = gsl_cdf_ugaussian_Q (rsZscore);
-      else
-	rsPvalPerm = gsl_cdf_ugaussian_Q (-rsZscore);
+      rsPvalPerm = 2 * gsl_cdf_ugaussian_Q (fabs(rsZscore));
       if (rsPvalPerm < minRsPvalPerm)
 	minRsPvalPerm = rsPvalPerm;
       }
@@ -1237,10 +1234,7 @@ computePermutationPvaluesAtFeatureLevelParallel (
 						      gsl_gPerm.vector.size);
 	  rsZscore = sqrt((gPerm.size() - 3) / 1.06) * 1/2
 	    * (log(1 + rsPvalPerm) - log(1 - rsPvalPerm));
-	  if (rsZscore >= 0)
-	    rsPvalPerm = gsl_cdf_ugaussian_Q (rsZscore);
-	  else
-	    rsPvalPerm = gsl_cdf_ugaussian_Q (-rsZscore);
+	  rsPvalPerm = 2 * gsl_cdf_ugaussian_Q (fabs(rsZscore));
 	  if (rsPvalPerm < minRsPvalPerm)
 	    minRsPvalPerm = rsPvalPerm;
 	}
@@ -1337,10 +1331,7 @@ computeSummaryStatsForOneFeature (
 						    g.size());
       pt_iSnpStats->rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
 	* (log(1 + pt_iSnpStats->rs) - log(1 - pt_iSnpStats->rs));
-      if (pt_iSnpStats->rsZscore >= 0)
-	pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (pt_iSnpStats->rsZscore);
-      else
-	pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (-pt_iSnpStats->rsZscore);
+      pt_iSnpStats->rsPval = 2 * gsl_cdf_ugaussian_Q (fabs(pt_iSnpStats->rsZscore));
       if (pt_iSnpStats->rsPval < minRsPval)
 	minRsPval = pt_iSnpStats->rsPval;
     }
@@ -1439,10 +1430,7 @@ computeSummaryStatsForOneFeatureParallel (
 							  g.size());
 	pt_iSnpStats->rsZscore = sqrt((g.size() - 3) / 1.06) * 1/2
 	  * (log(1 + pt_iSnpStats->rs) - log(1 - pt_iSnpStats->rs));
-	if (pt_iSnpStats->rsZscore >= 0)
-	  pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (pt_iSnpStats->rsZscore);
-	else
-	  pt_iSnpStats->rsPval = gsl_cdf_ugaussian_Q (-pt_iSnpStats->rsZscore);
+	pt_iSnpStats->rsPval = 2 * gsl_cdf_ugaussian_Q (fabs(pt_iSnpStats->rsZscore));
       }
     }
   }
