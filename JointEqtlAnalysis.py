@@ -438,8 +438,10 @@ class JointEqtlAnalysis(object):
                     dFtr2PermPval[tokens[0]] += 1
             pathToAbfH.close()
             
-        for ftr, permPval in dFtr2PermPval.iteritems():
-            txt = "%s %f" % (ftr, permPval / float(1 + self.nbPermutations))
+        lFeatures = dFtr2PermPval.keys()
+        lFeatures.sort()
+        for ftr in lFeatures:
+            txt = "%s %f" % (ftr, dFtr2PermPval[ftr] / float(1 + self.nbPermutations))
             outH.write("%s\n" % txt)
             
         if self.verbose > 0:
