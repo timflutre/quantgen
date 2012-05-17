@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  gcc -Wall -fopenmp -g -DDEBUG -O3 get_summary_stats.cpp -lstdc++ -lgsl -lgslcblas -o get_summary_stats
+ *  g++ -Wall -fopenmp -O3 get_summary_stats.cpp -lgsl -lgslcblas -o get_summary_stats
  *  help2man -o get_summary_stats.man ./get_summary_stats
  *  groff -mandoc get_summary_stats.man > get_summary_stats.ps
 */
