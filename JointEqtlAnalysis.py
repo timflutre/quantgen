@@ -26,7 +26,8 @@ class JointEqtlAnalysis(object):
     def __init__(self):
         self.verbose = 1
         self.step = 0
-        self.nbPermutations = 10000
+        self.nbPermutationsSep = 0
+        self.nbPermutationsJoint = 10000
         self.seed = 1859
         self.pathToPhenoDir = ""
         self.pathToGenoFile = ""
@@ -34,13 +35,15 @@ class JointEqtlAnalysis(object):
         self.pathToFtrsSnpsLinks = ""
         self.pathToFtrsToKeep = ""
         self.pathToGridFile = ""
+        self.permDir = "permutations"
+        self.nbThreads = 1
+        self.whichAbf = "abf.meta"
         
         self.originalAnalysisDir = "original_analysis"
         self.originalAbfsFile = "abfs_meta.txt"
-        self.permDir = "permutations"
         self.lPathToPhenoFiles = []
         self.nbIndividuals = -1
-        self.outFile = "ftr-level_permutation_pvalues.txt"
+        self.outFile = ""
         
         
     def help(self):
@@ -72,12 +75,20 @@ class JointEqtlAnalysis(object):
         msg += "\t\tuseful to focus on genetic variants in cis (use windowBed)\n"
         msg += " -f, --ftr\tfile with a list of features to analyze\n"
         msg += "\t\tone feature name per line\n"
-        msg += "     --perm\tnumber of phenotype permutations at each feature\n"
-        msg += "\t\tdefault=10000\n"
+        msg += "     --perm1\tnumber of phenotype permutations at each feature\n"
+        msg += "\t\tfor the separate analysis analysis of step 1, default=0\n"
+        msg += "     --perm2\tnumber of phenotype permutations at each feature\n"
+        msg += "\t\tfor the joint analysis of steps 2-3-4, default=10000\n"
+        msg += "     --permdir\tname of the directory for the permutations\n"
+        msg += "\t\tdefault=permutations\n"
         msg += "     --seed\tseed for the random number generator\n"
         msg += "\t\tdefault=1859\n"
         msg += "     --grid\tfile with the grid of values for phi2 and omega2 (ES model)\n"
         msg += "\t\tsee GetGridPhiOmega() in package Rquantgen\n"
+        msg += " -t, --thread\tnumber of threads (default=1)\n"
+        msg += "\t\tused for SNPs in cis of the same feature (get_summary_stats)\n"
+        msg += "     --abf\twhich ABF to use as the test statistic for the permutations\n"
+        msg += "\t\tdefault=abf.meta/abf.fix/abf.meta.avg.all/abf.meta.avg.subset\n"
         msg += "\n"
         msg += "Example:\n"
         print msg; sys.stdout.flush()
@@ -94,11 +105,12 @@ class JointEqtlAnalysis(object):
         
     def setAttributesFromCmdLine(self):
         try:
-            opts, args = getopt.getopt(sys.argv[1:], "hVv:s:g:p:l:f:",
+            opts, args = getopt.getopt(sys.argv[1:], "hVv:s:g:p:l:f:t:",
                                        ["help", "version", "verbose=",
                                         "step=", "geno=", "pheno=", "fcoord=",
-                                        "links=", "ftr=", "perm=", "seed=",
-                                        "grid="])
+                                        "links=", "ftr=", "perm1=", "perm2=", 
+                                        "seed=", "grid=", "permdir=",
+                                        "thread=", "abf="])
         except getopt.GetoptError, err:
             sys.stderr.write("%s\n" % str(err))
             self.help()
@@ -139,8 +151,10 @@ class JointEqtlAnalysis(object):
                     self.pathToFtrsToKeep = "%s/%s" % (os.getcwd(), a)
                 else:
                     self.pathToFtrsToKeep = a
-            elif o in ("--perm"):
-                self.nbPermutations = int(a)
+            elif o in ("--perm1"):
+                self.nbPermutationsSep = int(a)
+            elif o in ("--perm2"):
+                self.nbPermutationsJoint = int(a)
             elif o in ("--seed"):
                 seed = int(a)
             elif o in ("--grid"):
@@ -148,10 +162,18 @@ class JointEqtlAnalysis(object):
                     self.pathToGridFile = "%s/%s" % (os.getcwd(), a)
                 else:
                     self.pathToGridFile = a
+            elif o in ("--permdir"):
+                self.permDir = a
+            elif o in ("-t", "--thread"):
+                self.nbThreads = int(a) if int(a) > 1 else 1
+            elif o in ("--abf"):
+                self.whichAbf = a
             else:
                 assert False, "unhandled option"
-                
-                
+        self.outFile = "ftr-level-pvalues_%s_%s.txt" % (self.permDir,
+                                                        self.whichAbf.replace(".","-"))
+        
+        
     def checkAttributes(self):
         if self.step == 0:
             msg = "ERROR: step is missing (-s)"
@@ -205,6 +227,12 @@ class JointEqtlAnalysis(object):
             sys.exit(1)
         if not os.path.exists(self.pathToGridFile):
             msg = "ERROR: file '%s' doesn't exist" % self.pathToGridFile
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.whichAbf not in ("abf.meta", "abf.fix", "abf.meta.avg.all",
+                                 "abf.meta.avg.subset"):
+            msg = "ERROR: can't recognize option --abf %s" % self.whichAbf
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -263,8 +291,15 @@ class JointEqtlAnalysis(object):
                 txt += " -f %s" % self.pathToFtrsToKeep
             txt += " -o %s/%s_subgroup%i_sumstats" % (pathToSumstatsDir, 
                                                       phenoFile, subgroup)
-            txt += "\" | %s -N get_summary_stats_subgroup%i\n" % (cmd,
-                                                                  subgroup)
+            if self.nbThreads > 1:
+                txt += " -t %i" % self.nbThreads
+            if self.nbPermutationsSep > 0:
+                txt += " --perm %i" % self.nbPermutationsSep
+            txt += "\" | %s" % cmd
+            if self.nbThreads > 1:
+                txt += " -pe simple_pe %i" % self.nbThreads
+            txt += " -N get_summary_stats_subgroup%i\n" % subgroup
+            txt += "\n"
         scriptH.write("%s\n" % txt)
         
         # commands to compute the ABF "meta" (joint analysis)
@@ -274,6 +309,8 @@ class JointEqtlAnalysis(object):
         txt += " -i %s" % pathToSumstatsDir
         txt += " -g %s" % self.pathToGridFile
         txt += " -o %s" % self.originalAbfsFile
+        if self.whichAbf in ("abf.meta.avg.all", "abf.meta.avg.subset"):
+            txt += " -c"
         txt += "\" | %s -N get_abf_meta\n" % cmd
         scriptH.write("%s\n" % txt)
         
@@ -299,7 +336,7 @@ class JointEqtlAnalysis(object):
         os.mkdir(self.permDir)
         os.chdir(self.permDir)
         
-        for permId in xrange(1, self.nbPermutations+1):
+        for permId in xrange(1, self.nbPermutationsJoint+1):
             permFile = "permutation_%i.txt" % permId
             aPerm = scipy.random.permutation(self.nbIndividuals)
             scipy.savetxt(fname=permFile, X=aPerm, fmt="%i")
@@ -312,11 +349,14 @@ class JointEqtlAnalysis(object):
             
             
     def giveCommandsForFullAnalysisOnPermutedData(self):
-        scriptFile = "script_for_array_job_step_3.sh"
+        scriptFile = "jobarray_%s.bash" % self.permDir
         scriptH = open(scriptFile, "w")
         
-        cmd = "qsub -cwd -j y -V -l h_vmem=2G -t 1-%i" % self.nbPermutations
-        
+        cmd = "qsub -cwd -j y -V -l h_vmem=2G -t 1-%i" % self.nbPermutationsJoint
+        cmd += " -N jobarray_%s" % self.permDir
+        if self.nbThreads > 1:
+            cmd += " -pe simple_pe %i" % self.nbThreads
+            
         txt = "#!/usr/bin/env bash\n"
         txt += "set -o errexit -o pipefail\n"
         txt += "mytmpdir=${TMPDIR}/tmp_${USER}_$$\n"
@@ -339,7 +379,10 @@ class JointEqtlAnalysis(object):
             if self.pathToFtrsToKeep != "":
                 txt += " -f %s" % self.pathToFtrsToKeep
             txt += " -o %s_perm${SGE_TASK_ID}_sumstats" % phenoFile
-            txt += " --permf ${mycwd}/permutation_${SGE_TASK_ID}.txt\n"
+            txt += " --permf ${mycwd}/permutation_${SGE_TASK_ID}.txt"
+            if self.nbThreads > 1:
+                txt += " -t %i" % self.nbThreads
+            txt += "\n"
         scriptH.write("%s\n" % txt)
         
         # commands to compute the ABF "meta" (joint analysis)
@@ -351,32 +394,53 @@ class JointEqtlAnalysis(object):
             phenoFile = os.path.basename(pathToPhenoFile)
             txt += "ln -s ../%s_perm${SGE_TASK_ID}_sumstats .\n" % phenoFile
         txt += "cd ..\n"
-        txt += "get_abf_meta -i all_sumstats_perm${SGE_TASK_ID}"
+        txt += "get_abf_meta"
+        txt += " -i all_sumstats_perm${SGE_TASK_ID}"
         txt += " -g %s" % self.pathToGridFile
-        txt += " -o abfs_meta_perm${SGE_TASK_ID}.txt\n"
+        txt += " -o abfs_perm${SGE_TASK_ID}.txt"
+        if self.whichAbf in ("abf.meta.avg.all", "abf.meta.avg.subset"):
+            txt += " -c"
+        txt += "\n"
+        txt += "rm -rf *sumstats*\n"
         scriptH.write("%s\n" % txt)
         
-        # commands to remove temporary files
+        # commands to extract results and remove temporary files
         txt = ""
-        txt += "rm -rf *sumstats*\n"
         txt += "awk 'NR>1 {if(! ($1 in a)){a[$1] = $6}"
         txt += " else{if($6 > a[$1]){a[$1]=$6}}}"
-        txt += " END{for(i in a) print i,a[i]}' abfs_meta_perm${SGE_TASK_ID}.txt"
+        txt += " END{for(i in a) print i,a[i]}' abfs_perm${SGE_TASK_ID}.txt"
         txt += " | sort -k1,1"
-        txt += " | gzip > best_abf_per_ftr_perm${SGE_TASK_ID}.txt.gz\n"
-        txt += "rm -f abfs_meta_perm${SGE_TASK_ID}.txt\n"
-        txt += "cp best_abf_per_ftr_perm${SGE_TASK_ID}.txt.gz ${mycwd}/\n"
+        txt += " | gzip > best_abf-meta_per_ftr_perm${SGE_TASK_ID}.txt.gz\n"
+        txt += "awk 'NR>1 {if(! ($1 in a)){a[$1] = $7}"
+        txt += " else{if($7 > a[$1]){a[$1]=$7}}}"
+        txt += " END{for(i in a) print i,a[i]}' abfs_perm${SGE_TASK_ID}.txt"
+        txt += " | sort -k1,1"
+        txt += " | gzip > best_abf-fix_per_ftr_perm${SGE_TASK_ID}.txt.gz\n"
+        if self.whichAbf in ("abf.meta.avg.all", "abf.meta.avg.subset"):
+            txt += "awk 'NR>1 {if(! ($1 in a)){a[$1] = $9}"
+            txt += " else{if($9 > a[$1]){a[$1]=$9}}}"
+            txt += " END{for(i in a) print i,a[i]}' abfs_perm${SGE_TASK_ID}.txt"
+            txt += " | sort -k1,1"
+            txt += " | gzip > best_abf-meta-avg-all_per_ftr_perm${SGE_TASK_ID}.txt.gz\n"
+            txt += "awk 'NR>1 {if(! ($1 in a)){a[$1] = $10}"
+            txt += " else{if($10 > a[$1]){a[$1]=$10}}}"
+            txt += " END{for(i in a) print i,a[i]}' abfs_perm${SGE_TASK_ID}.txt"
+            txt += " | sort -k1,1"
+            txt += " | gzip > best_abf-meta-avg-subset_per_ftr_perm${SGE_TASK_ID}.txt.gz\n"
+        txt += "cp best_abf-*_per_ftr_perm${SGE_TASK_ID}.txt.gz ${mycwd}/\n"
+        txt += "rm -f abfs_perm${SGE_TASK_ID}.txt\n"
         txt += "cd $mycwd\n"
         scriptH.write("%s\n" % txt)
         
-        scriptH.write("#cd %s; %s ../%s; cd ..\n" % (self.permDir,
-                                                     cmd, scriptFile))
+        cmd2 = "cd %s;" % self.permDir
+        cmd2 += " echo \"time bash ../%s\" | %s" % (scriptFile, cmd)
+        cmd2 += "; cd .."
+        scriptH.write("#%s\n" % cmd2)
         
         scriptH.close()
         
-        print "you need to submit yourself the array job:"
-        print "cd %s; %s ../%s; cd .." % (self.permDir,
-                                          cmd, scriptFile)
+        print "you need to submit yourself the job array:"
+        print cmd2
         
         
     def getMaxAbfForEachNonPermutedFeature(self):
@@ -394,10 +458,13 @@ class JointEqtlAnalysis(object):
             tokens = line.rstrip().split()
             ftrName = tokens[0]
             abfMeta = float(tokens[5])
+            abfFix = float(tokens[6])
             if ftrName not in dFtr2MaxAbf:
-                dFtr2MaxAbf[ftrName] = 0
-            if abfMeta > dFtr2MaxAbf[ftrName]:
-                dFtr2MaxAbf[ftrName] = abfMeta
+                dFtr2MaxAbf[ftrName] = [0, 0]
+            if abfMeta > dFtr2MaxAbf[ftrName][0]:
+                dFtr2MaxAbf[ftrName][0] = abfMeta
+            if abfFix > dFtr2MaxAbf[ftrName][1]:
+                dFtr2MaxAbf[ftrName][1] = abfFix
                 
         abfsH.close()
         
@@ -410,7 +477,7 @@ class JointEqtlAnalysis(object):
             sys.stdout.flush()
             
         outH = open(self.outFile, "w")
-        txt = "ftr permPval"
+        txt = "ftr permPvalAbfMeta permPvalAbfFix"
         outH.write("%s\n" % txt)
         
         dFtr2MaxAbf = self.getMaxAbfForEachNonPermutedFeature()
@@ -419,8 +486,8 @@ class JointEqtlAnalysis(object):
             sys.stdout.flush()
             
         dFtr2PermPval = {}
-        for i in xrange(0, self.nbPermutations):
-            pathToAbfFile = "%s/best_abf_per_ftr_perm%i.txt.gz" % (
+        for i in xrange(0, self.nbPermutationsJoint):
+            pathToAbfFile = "%s/best_abf-meta_per_ftr_perm%i.txt.gz" % (
                 self.permDir, i+1)
             pathToAbfH = gzip.open(pathToAbfFile)
             while True:
@@ -433,15 +500,19 @@ class JointEqtlAnalysis(object):
                     sys.stderr.write("%s\n" % msg)
                     sys.exit(1)
                 if not dFtr2PermPval.has_key(tokens[0]):
-                    dFtr2PermPval[tokens[0]] = 1
-                if float(tokens[1]) >= dFtr2MaxAbf[tokens[0]]:
-                    dFtr2PermPval[tokens[0]] += 1
+                    dFtr2PermPval[tokens[0]] = [1, 1]
+                if float(tokens[1]) >= dFtr2MaxAbf[tokens[0]][0]:
+                    dFtr2PermPval[tokens[0]][0] += 1
+                if float(tokens[1]) >= dFtr2MaxAbf[tokens[0]][1]:
+                    dFtr2PermPval[tokens[0]][1] += 1
             pathToAbfH.close()
             
         lFeatures = dFtr2PermPval.keys()
         lFeatures.sort()
         for ftr in lFeatures:
-            txt = "%s %f" % (ftr, dFtr2PermPval[ftr] / float(1 + self.nbPermutations))
+            txt = "%s %f %f" % (ftr,
+                                dFtr2PermPval[ftr][0] / float(1 + self.nbPermutationsJoint),
+                                dFtr2PermPval[ftr][1] / float(1 + self.nbPermutationsJoint))
             outH.write("%s\n" % txt)
             
         if self.verbose > 0:
