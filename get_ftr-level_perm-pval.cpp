@@ -1,7 +1,7 @@
 /** \file get_ftr-level_perm-pval.cpp
  *
  *  `get_ftr-level_perm-pval' computes feature-level permutation P-values.
- *  Copyright (C) 2011,2012 Timothee Flutre
+ *  Copyright (C) 2012 Timothee Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -fopenmp -O3 get_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_ftr-level_perm-pval
+ *  g++ -Wall -O3 get_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_ftr-level_perm-pval
  *  help2man -o .man ./get_ftr-level_perm-pval
  *  groff -mandoc get_ftr-level_perm-pval.man > get_ftr-level_perm-pval.ps
 */
@@ -85,11 +85,10 @@ void help (char ** argv)
        << "\t\tis larger than or equal to the true value, and sample from a" << endl
        << "\t\tuniform between 11/(nbPerm+2) and 11/(nbPerm+1)" << endl
        << "      --seed\tseed for the random number generator" << endl
-       << "\t\tdefault=1859" << endl
+       << "\t\tby default, the RNG is initialized via microseconds from epoch" << endl
        << "  -t, --thread\tnumber of threads (default=1)" << endl
        << "\t\tused for SNPs in cis of the same feature (get_summary_stats)" << endl
-       << endl
-    ;
+       << endl;
 }
 
 /** \brief Display version and license information on stdout.
@@ -98,7 +97,7 @@ void version (char ** argv)
 {
   cout << argv[0] << " 0.1" << endl
        << endl
-       << "Copyright (C) 2011,2012 T. Flutre." << endl
+       << "Copyright (C) 2012 T. Flutre." << endl
        << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
        << "This is free software; see the source for copying conditions.  There is NO" << endl
        << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
@@ -575,12 +574,11 @@ computeJointAnalysisPermPvaluesForOneFtr (
   double & jointPermPval,
   const size_t & nbPermutations,
   const bool & trickPerm,
-  const int & seed,
+  gsl_rng * rng,
   const int & nbThreads,
   const int & verbose)
 {
   size_t permId = 0;
-  gsl_rng * rng = NULL;
   gsl_permutation * perm = NULL;
   FILE * pt_permFile = NULL;
   stringstream ssFtrFile, ssTmpGenoFile, ssTmpLinksFile, ssPermFile,
@@ -608,15 +606,6 @@ computeJointAnalysisPermPvaluesForOneFtr (
   extractCisSnpsForOneFtr (genoFile, linksFile, ftrToKeep,
 			   ssTmpGenoFile, ssTmpLinksFile,
     verbose);
-  
-  gsl_rng_env_setup();
-  rng = gsl_rng_alloc (gsl_rng_default);
-  if (rng == NULL)
-  {
-    cerr << "ERROR: can't allocate memory for the RNG" << endl;
-    exit (1);
-  }
-  gsl_rng_set (rng, seed);
   
   perm = gsl_permutation_calloc (getNbSamples (genoFile, verbose));
   if (perm == NULL)
@@ -782,7 +771,6 @@ computeJointAnalysisPermPvaluesForOneFtr (
   }
   
   gsl_permutation_free (perm);
-  gsl_rng_free (rng);
 }
 
 void computeJointAnalysisPermPvaluesFtrPerFtr (
@@ -804,6 +792,7 @@ void computeJointAnalysisPermPvaluesFtrPerFtr (
   vector<string>::const_iterator it;
   double trueL10Abf, jointPermPval;
   ofstream outStream;
+  gsl_rng * rng = NULL;
   
   if (verbose > 0)
   {
@@ -819,6 +808,18 @@ void computeJointAnalysisPermPvaluesFtrPerFtr (
   }
   outStream << "ftr jointPermPval" << endl;
   
+  gsl_rng_env_setup();
+  rng = gsl_rng_alloc (gsl_rng_default);
+  if (rng == NULL)
+  {
+    cerr << "ERROR: can't allocate memory for the RNG" << endl;
+    exit (1);
+  }
+  if (seed < 0)
+    gsl_rng_set (rng, getSeed());
+  else
+    gsl_rng_set (rng, seed);
+  
   for (it = vFtrsToKeep.begin(); it != vFtrsToKeep.end(); ++it)
   {
     computeJointAnalysisPermPvaluesForOneFtr (genoFile,
@@ -832,13 +833,14 @@ void computeJointAnalysisPermPvaluesFtrPerFtr (
 					      jointPermPval,
 					      nbPermutations,
 					      trickPerm,
-					      seed,
+					      rng,
 					      nbThreads,
 					      verbose-1);
     outStream << *it << " " << jointPermPval << endl;
   }
   
   outStream.close();
+  gsl_rng_free (rng);
   if (verbose > 0)
     cout << "results written in " << outFile << endl;
 }
@@ -849,7 +851,7 @@ int main (int argc, char ** argv)
     truthFile, whichAbf = "abf.meta", outFile;
   size_t nbPermutations = 10000;
   bool trickPerm = false;
-  int verbose = 1, seed = 1859, nbThreads = 1;
+  int verbose = 1, seed = -1, nbThreads = 1;
   
   parse_args (argc, argv, genoFile, phenoDir, ftrCoordsFile, linksFile,
 	      gridFile, ftrFile, truthFile, whichAbf, outFile, nbPermutations,
