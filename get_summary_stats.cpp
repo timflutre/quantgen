@@ -361,37 +361,6 @@ parse_args (
     nbThreads = min(nbThreads, omp_get_max_threads());
     omp_set_num_threads (nbThreads);
   }
-  if (verbose > 1)
-  {
-    cout << "genotypes: " << genoFile << endl;
-    cout << "phenotypes: " << phenoFile << endl;
-    cout << "feature coordinates: " << ftrCoordsFile << endl;
-    if (linksFile.empty())
-    {
-      cout << "anchor: " << anchor << endl;
-      cout << "cis region: " << lenCis << endl;
-    }
-    else
-      cout << "links: " << linksFile << endl;
-    if (! chrToKeep.empty())
-      cout << "chr: " << chrToKeep << endl;
-    if (! ftrsFile.empty())
-      cout << "features: " << ftrsFile << endl;
-    if (! snpsFile.empty())
-      cout << "SNPs: " << snpsFile << endl;
-    if (! samplesFile.empty())
-      cout << "samples: " << samplesFile << endl;
-    if (needQnorm)
-      cout << "need quantile-normalization" << endl;
-    if (minMaf > 0)
-      cout << "min MAF: " << minMaf << endl;
-    if (nbPermutations > 0)
-      cout << "nb of permutations: " << nbPermutations << endl;
-    if (! permFile.empty())
-      cout << "permutations: " << permFile << endl;
-    if (calcSpearman)
-      cout << "calculate Spearman rank correlation coefficient" << endl;
-  }
 }
 
 void FtrStats_reset (FtrStats & iFtrStats)
@@ -1694,6 +1663,11 @@ int main (int argc, char ** argv)
   bool needQnorm = false, calcSpearman = false;
   int nbThreads = 1, verbose = 1;
   
+  parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
+	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
+	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
+	      permFile, anchor, lenCis, verbose);
+  
   time_t startRawTime, endRawTime;
   if (verbose > 0)
   {
@@ -1701,11 +1675,6 @@ int main (int argc, char ** argv)
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
 	 << endl;
   }
-  
-  parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
-	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
-	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
-	      permFile, anchor, lenCis, verbose);
   
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
