@@ -23,7 +23,6 @@
 
 #include <cmath>
 #include <ctime>
-#include <dirent.h>
 #include <getopt.h>
 
 #include <iostream>
@@ -213,61 +212,6 @@ parse_args (
   }
   if (snpIdx.empty())
     snpIdx = "id+coord";
-}
-
-/** \brief List the input directory with the OLS summary stats.
- */
-vector<string>
-scanInputDirectory (
-  const string & inDir,
-  const int & verbose)
-{
-  vector<string> vInFiles;
-  struct dirent ** inFiles = NULL;
-  int nbInFiles;
-  if (verbose > 0)
-  {
-    cout << "scan directory " << inDir << " ..." << endl;
-  }
-  nbInFiles = scandir(inDir.c_str(), &inFiles, dummy_selector, alphasort);
-  if (nbInFiles == -1)
-  {
-    cerr << "ERROR: can't scan " << inDir << endl;
-    exit (1);
-  }
-  else if (nbInFiles == 0)
-  {
-    cerr << "ERROR: " << inDir << " contains no file" << endl;
-    exit (1);
-  }
-  else
-  {
-    for (int s = 0; s < nbInFiles; ++s)
-    {
-      if (string(inFiles[s]->d_name) == "." ||
-	  string(inFiles[s]->d_name) == "..")
-      {
-	free (inFiles[s]);
-	continue;
-      }
-      char path[1024];
-      int nbChar;
-      if (inDir[inDir.size()-1] != '/')
-	nbChar = sprintf (path, "%s/%s", inDir.c_str(), inFiles[s]->d_name);
-      else
-	nbChar = sprintf (path, "%s%s", inDir.c_str(), inFiles[s]->d_name);
-      if (nbChar < 0)
-      {
-	cerr << "ERROR: variable 'path' is not big enough" << endl;
-      }
-      vInFiles.push_back (string(path));
-      free (inFiles[s]);
-    }
-    if (verbose > 0)
-      cout << "nb of subgroups: " << vInFiles.size() << endl;
-  }
-  free (inFiles);
-  return vInFiles;
 }
 
 /** \brief Index the files with a map to know which pairs feature-SNP are 
