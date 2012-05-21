@@ -21,6 +21,8 @@
 #include <cmath>
 #include <cstring>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <cerrno>
 
 #include <vector>
 #include <string>
@@ -107,7 +109,7 @@ vector<string> loadOneColumnFile (string inFile, int verbose)
   }
   if (verbose > 0)
   {
-    cout <<"load file " << inFile << "..." << endl;
+    cout <<"load file " << inFile << " ..." << endl;
   }
   
   while (stream.good())
@@ -163,7 +165,7 @@ vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose)
   }
   if (verbose > 0)
   {
-    cout <<"load file " << inFile << "..." << endl;
+    cout <<"load file " << inFile << " ..." << endl;
   }
   
   while (stream.good())
@@ -290,4 +292,162 @@ bool doesFileExist (const string filename)
   struct stat buffer;
   fexists = ( stat(filename.c_str(), &buffer) == 0);
   return fexists;
+}
+
+/** \brief List a given directory.
+ */
+vector<string>
+scanInputDirectory (
+  const string & inDir,
+  const int & verbose)
+{
+  vector<string> vInFiles;
+  struct dirent ** inFiles = NULL;
+  int nbInFiles;
+  if (verbose > 0)
+  {
+    cout << "scan directory " << inDir << " ..." << endl;
+  }
+  nbInFiles = scandir(inDir.c_str(), &inFiles, dummy_selector, alphasort);
+  if (nbInFiles == -1)
+  {
+    cerr << "ERROR: can't scan " << inDir << endl;
+    exit (1);
+  }
+  else if (nbInFiles == 0)
+  {
+    cerr << "ERROR: " << inDir << " contains no file" << endl;
+    exit (1);
+  }
+  else
+  {
+    for (int s = 0; s < nbInFiles; ++s)
+    {
+      if (string(inFiles[s]->d_name) == "." ||
+	  string(inFiles[s]->d_name) == "..")
+      {
+	free (inFiles[s]);
+	continue;
+      }
+      char path[1024];
+      int nbChar;
+      if (inDir[inDir.size()-1] != '/')
+	nbChar = sprintf (path, "%s/%s", inDir.c_str(), inFiles[s]->d_name);
+      else
+	nbChar = sprintf (path, "%s%s", inDir.c_str(), inFiles[s]->d_name);
+      if (nbChar < 0)
+      {
+	cerr << "ERROR: variable 'path' is not big enough" << endl;
+      }
+      vInFiles.push_back (string(path));
+      free (inFiles[s]);
+    }
+    if (verbose > 0)
+      cout << "nb of files: " << vInFiles.size() << endl;
+  }
+  free (inFiles);
+  return vInFiles;
+}
+
+/** \brief Return true if the given path is a directory.
+ *  \note http://stackoverflow.com/a/1149769/597069
+ */
+bool isDirectory(char path[]) {
+  bool res = false;
+  if (path[strlen(path)] == '.') // exception for \. and \..
+    res = true;
+  else
+  {
+    for(int i = strlen(path) - 1; i >= 0; i--)
+    {
+      if (path[i] == '.')
+      {
+	res = false; // if we first encounter a . then it's a file
+	break;
+      }
+      else if (path[i] == '\\' || path[i] == '/')
+      {
+	res = true; // if we first encounter a \ it's a dir
+	break;
+      }
+    }
+  }
+  return res;
+}
+
+/** \brief Remove a directory even if it is not empty.
+ *  \note http://stackoverflow.com/a/1149769/597069
+ *  \note Don't do anything if the supplied path is empty
+ *  or if the directory doesn't exist.
+ */
+int removeDir(string path) {
+  if (path.empty())
+    return 0;
+  
+  if (path[path.size()] == '.')
+    return 0;
+  
+  if (path[path.length()-1] != '/')
+    path += "/";
+  
+  // create a pointer to a directory
+  DIR *pdir = NULL;
+  pdir = opendir (path.c_str());
+  if (pdir == NULL)
+  {
+    if (errno == 2) // No such file or directory
+      return 0;
+    else
+    {
+      cerr << "ERROR: opendir returned NULL for path " << path << endl;
+      fprintf (stderr, "errno=%i %s\n", errno, strerror(errno));
+      return errno;
+    }
+  }
+  
+  struct dirent *pent = NULL;
+  char file[1024];
+  int counter = 1; // use this to skip the first TWO which cause an infinite loop (and eventually, stack overflow)
+  while (true)
+  {
+    pent = readdir (pdir); // while there is still something in the directory
+    if (pent == NULL)
+    {
+      if (errno != 0) // if pent has not been initialised correctly
+      {
+	cerr << "ERROR: readdir returned NULL for path " << path << endl;
+	fprintf (stderr, "errno=%i %s\n", errno, strerror(errno));
+	return errno; // we couldn't do it
+      }
+      else // if the directory is empty
+	break;
+    }
+    if (counter > 2)
+    {
+      for (int i = 0; i < 256; i++)
+	file[i] = '\0';
+      strcat(file, path.c_str());
+      // otherwise, it was initialised correctly, so let's delete the file~
+      strcat(file, pent->d_name); // concatenate the strings to get the complete path
+      if (isDirectory(file) == true)
+	removeDir(file);
+      else // it's a file, we can use remove
+	remove(file);
+    }
+    counter++;
+  }
+  
+  // finally, let's clean up
+  closedir (pdir); // close the directory
+  if (rmdir(path.c_str()) != 0)
+  {
+    if (errno != 0)
+    {
+      cerr << "ERROR: rmdir returned an error" << endl;
+      fprintf (stderr, "errno=%i %s\n", errno, strerror(errno));
+      return errno;
+    }
+  }
+  
+  return 0;
 }
