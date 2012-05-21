@@ -20,9 +20,10 @@
 #include <ctime>
 #include <cmath>
 #include <cstring>
-#include <sys/stat.h>
-#include <dirent.h>
 #include <cerrno>
+#include <sys/stat.h>
+#include <sys/time.h> // for gettimeofday
+#include <dirent.h>
 
 #include <vector>
 #include <string>
@@ -450,4 +451,14 @@ int removeDir(string path) {
   }
   
   return 0;
+}
+
+/** \brief Return a seed based on microseconds since epoch.
+ *  \note http://www.guyrutenberg.com/2007/09/03/seeding-srand/
+ */
+size_t getSeed (void)
+{
+  timeval t1;
+  gettimeofday (&t1, NULL);
+  return ((size_t) t1.tv_usec * t1.tv_sec);
 }
