@@ -353,7 +353,7 @@ scanInputDirectory (
 /** \brief Return true if the given path is a directory.
  *  \note http://stackoverflow.com/a/1149769/597069
  */
-bool isDirectory(char path[]) {
+bool isDirectory(const char path[]) {
   bool res = false;
   if (path[strlen(path)] == '.') // exception for \. and \..
     res = true;
