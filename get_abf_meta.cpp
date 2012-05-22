@@ -62,6 +62,7 @@ void help (char ** argv)
        << "\t\tone file per subgroup, with at least 8 columns:" << endl
        << "\t\tftr chrF start end snp chrS coord maf n betahat sebetahat sigmahat" << endl
        << "\t\tsee output from other program 'get_summary_stats'" << endl
+       << "\t\tcan also be a single file (ie. ABFs for a single subgroup)" << endl
        << "  -g, --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
        << "  -o, --out\toutput file with the Bayes factors for each pair feature-SNP" << endl
@@ -1057,7 +1058,11 @@ int main (int argc, char ** argv)
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")" << endl;
   }
   
-  vector<string> vInFiles = scanInputDirectory (inDir, verbose);
+  vector<string> vInFiles;
+  if (isDirectory(inDir.c_str()))
+    vInFiles = scanInputDirectory (inDir, verbose);
+  else
+    vInFiles.push_back (inDir);
   vector< vector<double> > grid = loadGrid (gridFile, verbose);
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsFile, verbose);
