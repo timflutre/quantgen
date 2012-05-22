@@ -73,7 +73,6 @@ void help (char ** argv)
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
-       << "\t\tcompulsory to force parallelization on a cluster" << endl
        << "      --truth\tfile with the ABFs on the original dataset" << endl
        << "\t\toutput from get_abf_meta" << endl
        << "      --abf\twhich ABF to use as the test statistic for the permutations" << endl
@@ -278,18 +277,6 @@ parse_args (
     help (argv);
     exit (1);
   }
-  if (ftrFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing feature file (-f).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! doesFileExist (ftrFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", ftrFile.c_str());
-    help (argv);
-    exit (1);
-  }
   if (truthFile.empty())
   {
     fprintf (stderr, "ERROR: missing truth file (--truth).\n\n");
@@ -308,6 +295,47 @@ parse_args (
     help (argv);
     exit (1);
   }
+}
+
+vector<string>
+getListAllInputFeatures (
+  const vector<string> & vPhenoFiles,
+  const int & verbose)
+{
+  vector<string> vFtrsToKeep, tokens;
+  string line;
+  ifstream phenoStream;
+  
+  if (verbose > 0)
+  {
+    cout << "retrieve list of features ..." << endl;
+    fflush (stdout);
+  }
+  
+  for (vector<string>::const_iterator it = vPhenoFiles.begin();
+       it != vPhenoFiles.end(); ++it)
+  {
+    phenoStream.open((*it).c_str());
+    if (! phenoStream.is_open())
+    {
+      cerr << "ERROR: can't open file " << *it << endl;
+      exit (1);
+    }
+    getline (phenoStream, line); // skip header
+    while (true)
+    {
+      getline (phenoStream, line);
+      if (line.empty())
+	break;
+      split (line, ' ', tokens);
+      if (find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
+	  == vFtrsToKeep.end())
+	vFtrsToKeep.push_back (tokens[0]);
+    }
+    phenoStream.close();
+  }
+  
+  return vFtrsToKeep;
 }
 
 map<string, double>
@@ -330,7 +358,10 @@ getTrueAbfForEachFtr (
     exit (1);
   }
   if (verbose > 0)
+  {
     cout <<"retrieve true ABFs from file " << truthFile << " ..." << endl;
+    fflush (stdout);
+  }
   
   // check first line is proper header
   getline (truthStream, line);
@@ -412,7 +443,10 @@ getTrueAbfForEachFtr (
   }
   
   if (verbose > 0)
+  {
     cout << "ABFs retrieved: " << mFtr2TrueL10Abf.size() << endl;
+    fflush (stdout);
+  }
   
   return mFtr2TrueL10Abf;
 }
@@ -440,7 +474,10 @@ getNbSamples (const string & genoFile, const int & verbose)
   
   nbSamples = count (line.begin(), line.end(), ' ') - 4;
   if (verbose > 0)
+  {
     cout << "nb of samples: " << nbSamples << endl;
+    fflush (stdout);
+  }
   
   return nbSamples;
 }
@@ -554,7 +591,10 @@ extractCisSnpsForOneFtr (
   
   extractLinksForOneFtr (linksFile, ftrToKeep, ssTmpLinksFile, vCisSnps);
   if (verbose > 0)
+  {
     cout << "SNPs in cis: " << vCisSnps.size() << endl;
+    fflush (stdout);
+  }
   
   extractGenoForOneFtr (genoFile, ftrToKeep, ssTmpGenoFile, vCisSnps);
 }
@@ -796,7 +836,9 @@ void computeJointAnalysisPermPvaluesFtrPerFtr (
   
   if (verbose > 0)
   {
-    cout << "compute joint-analysis permutation P-values ..." << endl;
+    cout << "compute joint-analysis permutation P-values"
+	 << " (" << vFtrsToKeep.size()
+	 << " features) ..." << endl;
     fflush (stdout);
   }
   
@@ -865,12 +907,16 @@ int main (int argc, char ** argv)
 	 << endl;
   }
   
-  vector<string> vFtrsToKeep = loadOneColumnFile (ftrFile, verbose);
+  vector<string> vPhenoFiles = scanInputDirectory (phenoDir, verbose);
+  vector<string> vFtrsToKeep;
+  if (! ftrFile.empty())
+    vFtrsToKeep = loadOneColumnFile (ftrFile, verbose);
+  else
+    vFtrsToKeep = getListAllInputFeatures (vPhenoFiles, verbose);
   map<string, double> mFtr2TrueL10Abf = getTrueAbfForEachFtr (truthFile,
 							      whichAbf,
 							      vFtrsToKeep,
 							      verbose);
-  vector<string> vPhenoFiles = scanInputDirectory (phenoDir, verbose);
   
   computeJointAnalysisPermPvaluesFtrPerFtr (genoFile,
 					    vPhenoFiles,
