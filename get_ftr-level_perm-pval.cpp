@@ -457,7 +457,7 @@ getTrueAbfForEachFtr (
   
   if (verbose > 0)
   {
-    cout << "ABFs retrieved: " << mFtr2TrueL10Abf.size() << endl;
+    cout << "nb of ABFs: " << mFtr2TrueL10Abf.size() << endl;
     fflush (stdout);
   }
   
@@ -1394,15 +1394,18 @@ void computeJointAnalysisPermPvaluesFtrPerFtr2 (
   
   gsl_permutation_free (perm);
   gsl_rng_free (rng);
-  if (remove (tmpGenoFile.c_str()) != 0)
+  if (extractSnps)
   {
-    cerr << "ERROR: can't remove file " << tmpGenoFile << endl;
-    exit (1);
-  }
-  if (remove (tmpLinksFile.c_str()) != 0)
-  {
-    cerr << "ERROR: can't remove file " << tmpLinksFile << endl;
-    exit (1);
+    if (remove (tmpGenoFile.c_str()) != 0)
+    {
+      cerr << "ERROR: can't remove file " << tmpGenoFile << endl;
+      exit (1);
+    }
+    if (remove (tmpLinksFile.c_str()) != 0)
+    {
+      cerr << "ERROR: can't remove file " << tmpLinksFile << endl;
+      exit (1);
+    }
   }
 }
 
