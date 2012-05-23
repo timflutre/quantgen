@@ -351,27 +351,20 @@ scanInputDirectory (
 }
 
 /** \brief Return true if the given path is a directory.
- *  \note http://stackoverflow.com/a/1149769/597069
  */
 bool isDirectory(const char path[]) {
   bool res = false;
-  if (path[strlen(path)] == '.') // exception for \. and \..
-    res = true;
-  else
+  if (strlen (path) > 0)
   {
-    for(int i = strlen(path) - 1; i >= 0; i--)
+    struct stat st;
+    if (stat(path, &st) != 0)
     {
-      if (path[i] == '.')
-      {
-	res = false; // if we first encounter a . then it's a file
-	break;
-      }
-      else if (path[i] == '\\' || path[i] == '/')
-      {
-	res = true; // if we first encounter a \ it's a dir
-	break;
-      }
+      fprintf (stderr, "ERROR: stat failed for path %s\n", path);
+      fprintf (stderr, "errno=%i %s\n", errno, strerror(errno));
+      exit (1);
     }
+    if (S_ISDIR(st.st_mode))
+      res = true;
   }
   return res;
 }
