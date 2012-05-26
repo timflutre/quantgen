@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -fopenmp -O3 get_summary_stats.cpp -lgsl -lgslcblas -o get_summary_stats
+ *  g++ -Wall -fopenmp -O3 -DGET_SUMSTATS_MAIN get_summary_stats.cpp utils.cpp -lgsl -lgslcblas -o get_summary_stats
  *  help2man -o get_summary_stats.man ./get_summary_stats
  *  groff -mandoc get_summary_stats.man > get_summary_stats.ps
 */
@@ -45,7 +45,7 @@ using namespace std;
 #include <gsl/gsl_randist.h>
 #include <omp.h>
 
-#include "utils.cpp"
+#include "utils.h"
 
 struct SnpStats
 {
@@ -78,310 +78,6 @@ struct FtrStats
   double betaPermPval; // permutation P-value based on beta P-value
   double rsPermPval; // permutation P-value based on Spearman-derived P-value
 };
-
-/** \brief Display the help on stdout.
-*/
-void help (char ** argv)
-{
-  cout << "`" << argv[0] << "'"
-       << " assesses associations between genotypes and phenotypes" << endl
-       << "(one genetic variant per univariate phenotype) and returns the summary stats" << endl
-       << "betahat, se(betahat) and sigmahat, as well as the P-value"
-       << " for H0:\"beta=0\"." << endl
-       << "Spearman correlation coefficient and permutation P-values at the SNP and" << endl
-       << "gene level can also be computed." << endl
-       << endl
-       << "Usage: " << argv[0] << " [OPTIONS]..." << endl
-       << endl
-       << "Options:" << endl
-       << "  -h, --help\tdisplay the help and exit" << endl
-       << "  -V, --version\toutput version information and exit" << endl
-       << "  -v, --verbose\tverbosity level (default=1)" << endl
-       << "  -g, --geno\tfile with genotypes in IMPUTE format (delimiter=<space/tab>)" << endl
-       << "\t\ta header line with sample names is required" << endl
-       << "\t\tsamples in columns should be in same order as in phenotype file" << endl
-       << "  -p, --pheno\tfile with phenotypes" << endl
-       << "\t\trow 1 for sample names, column 1 for feature names" << endl
-       << "\t\tdelimiter=<space/tab>" << endl
-       << "  -o, --output\tfile that will contain the summary stats" << endl
-       << "      --fcoord\tBED file with the features coordinates" << endl
-       << "\t\tfeatures should be in same order than in phenotype file" << endl
-       << "  -l, --links\tfile with links between genes and SNPs" << endl
-       << "\t\tcustom format: feature<space/tab>SNP|coord" << endl
-       << "\t\tfeatures should be in same order than in phenotype file" << endl
-       << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
-       << "  -a, --anchor\tfor the cis region if links is not specified" << endl
-       << "\t\tdefault=TSS+TES, can also be only TSS" << endl
-       << "      --cis\tlength of half of the cis region (in bp)" << endl
-       << "\t\tapart from the anchor(s), default=100000" << endl
-       << "  -c, --chr\tname of the chromosome to analyze (eg. 'chr21')" << endl
-       << "  -f, --ftr\tfile with a list of features to analyze" << endl
-       << "\t\tone feature name per line" << endl
-       << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
-       << "\t\tone SNP identifier per line" << endl
-       << "  -d, --discard\tfile with a list of samples to discard" << endl
-       << "\t\tone individual per line, should match header of phenotype file" << endl
-       << "  -q, --qnorm\tquantile-normalize phenotypes to a standard normal" << endl
-       << "\t\tvery useful when using linear regression (versus Spearman coef)" << endl
-       << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
-       << "\t\twhatever the option, the MAF will still be computed and saved" << endl
-       << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
-       << "\t\tdefault=0, recommended=10000" << endl
-       << "      --trick\tstop after the tenth permutation for which the test statistic" << endl
-       << "\t\tis better than or equal to the true value, and sample from a" << endl
-       << "\t\tuniform between 11/(nbPermSoFar+2) and 11/(nbPermSoFar+1)" << endl
-       << "\t\tnot used when nbThreads > 1" << endl
-       << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
-       << "\t\tinstead of performing linear regressions" << endl
-       << "      --seed\tseed for the random number generator" << endl
-       << "\t\tby default, the RNG is initialized via microseconds from epoch" << endl
-       << "  -t, --thread\tnumber of threads (default=1)" << endl
-       << "\t\tused for SNPs in cis of the same feature, and for permutations" << endl
-       << "      --permf\tfile with a permutation of the samples" << endl
-       << "\t\tshould start at 0" << endl
-       << "\t\tshould have as many lines as the number of samples in --pheno" << endl
-       << endl
-       << "Examples:" << endl
-       << "  " << argv[0] << " -g <genotypes> -p <phenotypes> -o <output> \\" << endl
-       << "  -l <link> --fcoord <bed>" << endl
-       << endl
-       << "Remarks:" << endl
-       << "  Samples with missing phenotypes (NA) and/or genotypes (0 0 0) are skipped." << endl
-       << "For non-variable genotypes, a zero effect size is returned, along with an" << endl
-       << "infinite std error and a P-value of 1." << endl;
-}
-
-/** \brief Display version and license information on stdout.
- */
-void version (char ** argv)
-{
-  cout << argv[0] << " 0.1" << endl
-       << endl
-       << "Copyright (C) 2011 T. Flutre." << endl
-       << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
-       << "This is free software; see the source for copying conditions.  There is NO" << endl
-       << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
-       << endl
-       << "Written by T. Flutre." << endl;
-}
-
-/** \brief Parse the command-line arguments and check the values of the 
- *  compulsory ones.
- */
-void
-parse_args (
-  int argc,
-  char ** argv,
-  string & genoFile,
-  string & phenoFile,
-  string & outFile,
-  string & ftrCoordsFile,
-  string & linksFile,
-  string & chrToKeep,
-  string & ftrsFile,
-  string & snpsFile,
-  string & samplesFile,
-  double & minMaf,
-  size_t & nbPermutations,
-  bool & needQnorm,
-  bool & calcSpearman,
-  int & nbThreads,
-  string & permFile,
-  string & anchor,
-  size_t & lenCis,
-  bool & trickPerm,
-  int & seed,
-  int & verbose)
-{
-  int c = 0;
-  while (1)
-  {
-    static struct option long_options[] =
-      {
-	{"help", no_argument, 0, 'h'},
-	{"version", no_argument, 0, 'V'},
-	{"verbose", required_argument, 0, 'v'},
-	{"geno", required_argument, 0, 'g'},
-	{"pheno", required_argument, 0, 'p'},
-	{"output", required_argument, 0, 'o'},
-	{"fcoord", required_argument, 0, 0},
-	{"links", required_argument, 0, 'l'},
-	{"chr", required_argument, 0, 'c'},
-	{"ftr", required_argument, 0, 'f'},
-	{"snp", required_argument, 0, 's'},
-	{"discard", required_argument, 0, 'd'},
-	{"qnorm", no_argument, 0, 'q'},
-	{"maf", required_argument, 0, 'm'},
-	{"perm", required_argument, 0, 'P'},
-	{"sp", no_argument, 0, 'S'},
-	{"thread", required_argument, 0, 't'},
-	{"permf", required_argument, 0, 0},
-	{"anchor", required_argument, 0, 'a'},
-	{"cis", required_argument, 0, 0},
-	{"trick", no_argument, 0, 0},
-	{"seed", required_argument, 0, 0},
-	{0, 0, 0, 0}
-      };
-    int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:qm:P:St:a:",
-		     long_options, &option_index);
-    if (c == -1)
-      break;
-    switch (c)
-    {
-    case 0:
-      if (long_options[option_index].flag != 0)
-	break;
-      if (strcmp(long_options[option_index].name, "fcoord") == 0)
-      {
-	ftrCoordsFile = optarg;
-	break;
-      }
-      if (strcmp(long_options[option_index].name, "permf") == 0)
-      {
-	permFile = optarg;
-	break;
-      }
-      if (strcmp(long_options[option_index].name, "cis") == 0)
-      {
-	lenCis = atol(optarg);
-	break;
-      }
-      if (strcmp(long_options[option_index].name, "trick") == 0)
-      {
-	trickPerm = true;
-	break;
-      }
-      if (strcmp(long_options[option_index].name, "seed") == 0)
-      {
-	seed = atoi(optarg);
-	break;
-      }
-    case 'h':
-      help (argv);
-      exit (0);
-    case 'V':
-      version (argv);
-      exit (0);
-    case 'v':
-      verbose = atoi(optarg);
-      break;
-    case 'g':
-      genoFile = optarg;
-      break;
-    case 'p':
-      phenoFile = optarg;
-      break;
-    case 'o':
-      outFile = optarg;
-      break;
-    case 'l':
-      linksFile = optarg;
-      break;
-    case 'c':
-      chrToKeep = optarg;
-      break;
-    case 'f':
-      ftrsFile = optarg;
-      break;
-    case 's':
-      snpsFile = optarg;
-      break;
-    case 'd':
-      samplesFile = optarg;
-      break;
-    case 'q':
-      needQnorm = true;
-      break;
-    case 'm':
-      minMaf = atof(optarg);
-      break;
-    case 'P':
-      nbPermutations = atol(optarg);
-      break;
-    case 'S':
-      calcSpearman = true;
-      break;
-    case 't':
-      nbThreads = atoi(optarg);
-      break;
-    case 'a':
-      anchor = optarg;
-      break;
-    case '?':
-      printf ("\n"); help (argv);
-      abort ();
-    default:
-      printf ("\n"); help (argv);
-      abort ();
-    }
-  }
-  if (genoFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing file with genotypes (-g).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! doesFileExist (genoFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", genoFile.c_str());
-    help (argv);
-    exit (1);
-  }
-  if (phenoFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing file with phenotypes (-p).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! doesFileExist (phenoFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", phenoFile.c_str());
-    help (argv);
-    exit (1);
-  }
-  if (outFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing output file (-o).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (ftrCoordsFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing feature coordinates file (--fcoord).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! doesFileExist (ftrCoordsFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", ftrCoordsFile.c_str());
-    help (argv);
-    exit (1);
-  }
-  if (linksFile.empty() && anchor.empty())
-  {
-    fprintf (stderr, "ERROR: missing links file and anchor (-l and -a).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! linksFile.empty() && ! doesFileExist (linksFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", linksFile.c_str());
-    help (argv);
-    exit (1);
-  }
-  if (minMaf < 0 || minMaf > 1)
-  {
-    fprintf (stderr, "ERROR: min MAF should be between 0 and 1 (-m).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (nbThreads > 1)
-  {
-    nbThreads = min(nbThreads, omp_get_max_threads());
-    omp_set_num_threads (nbThreads);
-  }
-}
 
 void FtrStats_reset (FtrStats & iFtrStats)
 {
@@ -1468,7 +1164,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   const int & nbThreads,
   const vector<size_t> & vPermIndices,
   const bool & trickPerm,
-  int & seed,
+  const int & seed,
   const int & verbose)
 {
   FtrStats iFtrStats;
@@ -1538,17 +1234,21 @@ computeAndWriteSummaryStatsFtrPerFtr (
   
   if (verbose > 0)
   {
-    cout << "look for association between each pair feature-SNP ("
-	 << nbPermutations << " permutation"
-	 << (nbPermutations > 1 ? "s" : "");
-    if (trickPerm)
-      cout << ", with trick";
-    else
-      cout << ", without trick";
-    if (nbThreads <= 1)
-      cout << ", " << nbThreads << " thread"
-	   << (nbThreads > 1 ? "s" : "");
-    cout << ") ..." << endl;
+    cout << "look for association between each pair feature-SNP";
+    if (nbPermutations > 0)
+    {
+      cout << nbPermutations << " permutation"
+	   << (nbPermutations > 1 ? "s" : "");
+      if (trickPerm)
+	cout << ", with trick";
+      else
+	cout << ", without trick";
+      if (nbThreads <= 1)
+	cout << ", " << nbThreads << " thread"
+	     << (nbThreads > 1 ? "s" : "");
+      cout << ")";
+    }
+    cout << " ..." << endl;
     fflush (stdout);
   }
   
@@ -1580,8 +1280,6 @@ computeAndWriteSummaryStatsFtrPerFtr (
   if (nbPermutations > 0)
   {
     gsl_rng_env_setup();
-    if (seed < 0)
-      seed = getSeed();
     if (nbThreads <= 1)
     {
       rng = gsl_rng_alloc (gsl_rng_default);
@@ -1701,6 +1399,315 @@ computeAndWriteSummaryStatsFtrPerFtr (
   }
 }
 
+#ifdef GET_SUMSTATS_MAIN
+
+/** \brief Display the help on stdout.
+*/
+void help (char ** argv)
+{
+  cout << "`" << argv[0] << "'"
+       << " assesses associations between genotypes and phenotypes" << endl
+       << "(one genetic variant per univariate phenotype) and returns the summary stats" << endl
+       << "betahat, se(betahat) and sigmahat, as well as the P-value"
+       << " for H0:\"beta=0\"." << endl
+       << "Spearman correlation coefficient and permutation P-values at the SNP and" << endl
+       << "gene level can also be computed." << endl
+       << endl
+       << "Usage: " << argv[0] << " [OPTIONS]..." << endl
+       << endl
+       << "Options:" << endl
+       << "  -h, --help\tdisplay the help and exit" << endl
+       << "  -V, --version\toutput version information and exit" << endl
+       << "  -v, --verbose\tverbosity level (default=1)" << endl
+       << "  -g, --geno\tfile with genotypes in IMPUTE format (delimiter=<space/tab>)" << endl
+       << "\t\ta header line with sample names is required" << endl
+       << "\t\tsamples in columns should be in same order as in phenotype file" << endl
+       << "  -p, --pheno\tfile with phenotypes" << endl
+       << "\t\trow 1 for sample names, column 1 for feature names" << endl
+       << "\t\tdelimiter=<space/tab>" << endl
+       << "  -o, --output\tfile that will contain the summary stats" << endl
+       << "      --fcoord\tBED file with the features coordinates" << endl
+       << "\t\tfeatures should be in same order than in phenotype file" << endl
+       << "  -l, --links\tfile with links between genes and SNPs" << endl
+       << "\t\tcustom format: feature<space/tab>SNP|coord" << endl
+       << "\t\tfeatures should be in same order than in phenotype file" << endl
+       << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
+       << "  -a, --anchor\tfor the cis region if links is not specified" << endl
+       << "\t\tdefault=TSS+TES, can also be only TSS" << endl
+       << "      --cis\tlength of half of the cis region (in bp)" << endl
+       << "\t\tapart from the anchor(s), default=100000" << endl
+       << "  -c, --chr\tname of the chromosome to analyze (eg. 'chr21')" << endl
+       << "  -f, --ftr\tfile with a list of features to analyze" << endl
+       << "\t\tone feature name per line" << endl
+       << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
+       << "\t\tone SNP identifier per line" << endl
+       << "  -d, --discard\tfile with a list of samples to discard" << endl
+       << "\t\tone individual per line, should match header of phenotype file" << endl
+       << "  -q, --qnorm\tquantile-normalize phenotypes to a standard normal" << endl
+       << "\t\tvery useful when using linear regression (versus Spearman coef)" << endl
+       << "  -m, --maf\tthreshold for the minor allele frequency (default=0.0)" << endl
+       << "\t\twhatever the option, the MAF will still be computed and saved" << endl
+       << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
+       << "\t\tdefault=0, recommended=10000" << endl
+       << "      --trick\tstop after the tenth permutation for which the test statistic" << endl
+       << "\t\tis better than or equal to the true value, and sample from a" << endl
+       << "\t\tuniform between 11/(nbPermSoFar+2) and 11/(nbPermSoFar+1)" << endl
+       << "\t\tnot used when nbThreads > 1" << endl
+       << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
+       << "\t\tinstead of performing linear regressions" << endl
+       << "      --seed\tseed for the random number generator" << endl
+       << "\t\tby default, the RNG is initialized via microseconds from epoch" << endl
+       << "  -t, --thread\tnumber of threads (default=1)" << endl
+       << "\t\tused for SNPs in cis of the same feature, and for permutations" << endl
+       << "      --permf\tfile with a permutation of the samples" << endl
+       << "\t\tshould start at 0" << endl
+       << "\t\tshould have as many lines as the number of samples in --pheno" << endl
+       << endl
+       << "Examples:" << endl
+       << "  " << argv[0] << " -g <genotypes> -p <phenotypes> -o <output> \\" << endl
+       << "  -l <link> --fcoord <bed>" << endl
+       << endl
+       << "Remarks:" << endl
+       << "  Samples with missing phenotypes (NA) and/or genotypes (0 0 0) are skipped." << endl
+       << "For non-variable genotypes, a zero effect size is returned, along with an" << endl
+       << "infinite std error and a P-value of 1." << endl;
+}
+
+/** \brief Display version and license information on stdout.
+ */
+void version (char ** argv)
+{
+  cout << argv[0] << " 0.1" << endl
+       << endl
+       << "Copyright (C) 2011 T. Flutre." << endl
+       << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
+       << "This is free software; see the source for copying conditions.  There is NO" << endl
+       << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
+       << endl
+       << "Written by T. Flutre." << endl;
+}
+
+/** \brief Parse the command-line arguments and check the values of the 
+ *  compulsory ones.
+ */
+void
+parse_args (
+  int argc,
+  char ** argv,
+  string & genoFile,
+  string & phenoFile,
+  string & outFile,
+  string & ftrCoordsFile,
+  string & linksFile,
+  string & chrToKeep,
+  string & ftrsFile,
+  string & snpsFile,
+  string & samplesFile,
+  double & minMaf,
+  size_t & nbPermutations,
+  bool & needQnorm,
+  bool & calcSpearman,
+  int & nbThreads,
+  string & permFile,
+  string & anchor,
+  size_t & lenCis,
+  bool & trickPerm,
+  int & seed,
+  int & verbose)
+{
+  int c = 0;
+  while (1)
+  {
+    static struct option long_options[] =
+      {
+	{"help", no_argument, 0, 'h'},
+	{"version", no_argument, 0, 'V'},
+	{"verbose", required_argument, 0, 'v'},
+	{"geno", required_argument, 0, 'g'},
+	{"pheno", required_argument, 0, 'p'},
+	{"output", required_argument, 0, 'o'},
+	{"fcoord", required_argument, 0, 0},
+	{"links", required_argument, 0, 'l'},
+	{"chr", required_argument, 0, 'c'},
+	{"ftr", required_argument, 0, 'f'},
+	{"snp", required_argument, 0, 's'},
+	{"discard", required_argument, 0, 'd'},
+	{"qnorm", no_argument, 0, 'q'},
+	{"maf", required_argument, 0, 'm'},
+	{"perm", required_argument, 0, 'P'},
+	{"sp", no_argument, 0, 'S'},
+	{"thread", required_argument, 0, 't'},
+	{"permf", required_argument, 0, 0},
+	{"anchor", required_argument, 0, 'a'},
+	{"cis", required_argument, 0, 0},
+	{"trick", no_argument, 0, 0},
+	{"seed", required_argument, 0, 0},
+	{0, 0, 0, 0}
+      };
+    int option_index = 0;
+    c = getopt_long (argc, argv, "hVv:g:p:o:l:c:f:s:d:qm:P:St:a:",
+		     long_options, &option_index);
+    if (c == -1)
+      break;
+    switch (c)
+    {
+    case 0:
+      if (long_options[option_index].flag != 0)
+	break;
+      if (strcmp(long_options[option_index].name, "fcoord") == 0)
+      {
+	ftrCoordsFile = optarg;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "permf") == 0)
+      {
+	permFile = optarg;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "cis") == 0)
+      {
+	lenCis = atol(optarg);
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "trick") == 0)
+      {
+	trickPerm = true;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "seed") == 0)
+      {
+	seed = atoi(optarg);
+	break;
+      }
+    case 'h':
+      help (argv);
+      exit (0);
+    case 'V':
+      version (argv);
+      exit (0);
+    case 'v':
+      verbose = atoi(optarg);
+      break;
+    case 'g':
+      genoFile = optarg;
+      break;
+    case 'p':
+      phenoFile = optarg;
+      break;
+    case 'o':
+      outFile = optarg;
+      break;
+    case 'l':
+      linksFile = optarg;
+      break;
+    case 'c':
+      chrToKeep = optarg;
+      break;
+    case 'f':
+      ftrsFile = optarg;
+      break;
+    case 's':
+      snpsFile = optarg;
+      break;
+    case 'd':
+      samplesFile = optarg;
+      break;
+    case 'q':
+      needQnorm = true;
+      break;
+    case 'm':
+      minMaf = atof(optarg);
+      break;
+    case 'P':
+      nbPermutations = atol(optarg);
+      break;
+    case 'S':
+      calcSpearman = true;
+      break;
+    case 't':
+      nbThreads = atoi(optarg);
+      break;
+    case 'a':
+      anchor = optarg;
+      break;
+    case '?':
+      printf ("\n"); help (argv);
+      abort ();
+    default:
+      printf ("\n"); help (argv);
+      abort ();
+    }
+  }
+  if (genoFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing file with genotypes (-g).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (genoFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", genoFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (phenoFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing file with phenotypes (-p).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (phenoFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", phenoFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (outFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing output file (-o).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (ftrCoordsFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing feature coordinates file (--fcoord).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (ftrCoordsFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", ftrCoordsFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (linksFile.empty() && anchor.empty())
+  {
+    fprintf (stderr, "ERROR: missing links file and anchor (-l and -a).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! linksFile.empty() && ! doesFileExist (linksFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", linksFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (minMaf < 0 || minMaf > 1)
+  {
+    fprintf (stderr, "ERROR: min MAF should be between 0 and 1 (-m).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (nbThreads > 1)
+  {
+    nbThreads = min(nbThreads, omp_get_max_threads());
+    omp_set_num_threads (nbThreads);
+  }
+  if (nbPermutations > 0)
+    if (seed < 0)
+      seed = (int) getSeed();
+}
+
 int main (int argc, char ** argv)
 {
   string genoFile, phenoFile, outFile, ftrCoordsFile, linksFile,
@@ -1760,3 +1767,5 @@ int main (int argc, char ** argv)
   
   return 0;
 }
+
+#endif
