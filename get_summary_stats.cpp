@@ -127,8 +127,14 @@ void help (char ** argv)
        << "\t\twhatever the option, the MAF will still be computed and saved" << endl
        << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
        << "\t\tdefault=0, recommended=10000" << endl
+       << "      --trick\tstop after the tenth permutation for which the test statistic" << endl
+       << "\t\tis better than or equal to the true value, and sample from a" << endl
+       << "\t\tuniform between 11/(nbPermSoFar+2) and 11/(nbPermSoFar+1)" << endl
+       << "\t\tnot used when nbThreads > 1" << endl
        << "  -S, --sp\tcompute the Spearman rank correlation coefficient (and Z score)" << endl
        << "\t\tinstead of performing linear regressions" << endl
+       << "      --seed\tseed for the random number generator" << endl
+       << "\t\tby default, the RNG is initialized via microseconds from epoch" << endl
        << "  -t, --thread\tnumber of threads (default=1)" << endl
        << "\t\tused for SNPs in cis of the same feature, and for permutations" << endl
        << "      --permf\tfile with a permutation of the samples" << endl
@@ -183,6 +189,8 @@ parse_args (
   string & permFile,
   string & anchor,
   size_t & lenCis,
+  bool & trickPerm,
+  int & seed,
   int & verbose)
 {
   int c = 0;
@@ -210,6 +218,8 @@ parse_args (
 	{"permf", required_argument, 0, 0},
 	{"anchor", required_argument, 0, 'a'},
 	{"cis", required_argument, 0, 0},
+	{"trick", no_argument, 0, 0},
+	{"seed", required_argument, 0, 0},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
@@ -235,6 +245,16 @@ parse_args (
       if (strcmp(long_options[option_index].name, "cis") == 0)
       {
 	lenCis = atol(optarg);
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "trick") == 0)
+      {
+	trickPerm = true;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "seed") == 0)
+      {
+	seed = atoi(optarg);
 	break;
       }
     case 'h':
@@ -997,16 +1017,17 @@ my_stats_correlation_spearman (const double data1[], const size_t stride1,
 void
 computePermutationPvaluesAtFeatureLevel (
   FtrStats & iFtrStats,
-  const size_t nbPermutations,
-  const bool needQnorm,
-  const double minBetaPval,
-  const bool calcSpearman,
-  const double minRsPval,
-  const int verbose)
+  const size_t & nbPermutations,
+  const bool & needQnorm,
+  const double & minBetaPval,
+  const bool & calcSpearman,
+  const double & minRsPval,
+  const bool & trickPerm,
+  gsl_rng * rng,
+  const int & verbose)
 {
-  size_t i, p, perm_id, snp_id, seed = 1859;
+  size_t i, p, perm_id, snp_id;
   double betahat, sebetahat, sigmahat, R2;
-  gsl_rng * r;
   gsl_permutation * perm; // for the indices of the phenotypes vector
   vector<double> resPerm;
   
@@ -1016,15 +1037,6 @@ computePermutationPvaluesAtFeatureLevel (
 	    nbPermutations, minBetaPval);
     fflush (stdout);
   }
-  
-  gsl_rng_env_setup();
-  r = gsl_rng_alloc (gsl_rng_default);
-  if (r == 0)
-  {
-    cerr << "ERROR: can't allocate memory for the RNG" << endl;
-    exit (1);
-  }
-  gsl_rng_set (r, seed);
   
   perm = gsl_permutation_calloc (iFtrStats.y_init.size());
   if (perm == 0)
@@ -1042,7 +1054,7 @@ computePermutationPvaluesAtFeatureLevel (
   {
     double minBetaPvalPerm = 1, betaPvalPerm, minRsPvalPerm = 1, rsPvalPerm,
       rsZscore;
-    gsl_ran_shuffle (r, perm->data, perm->size, sizeof(size_t));
+    gsl_ran_shuffle (rng, perm->data, perm->size, sizeof(size_t));
     
     for(snp_id=0; snp_id<iFtrStats.vSnpStats.size(); ++snp_id)
     {
@@ -1087,22 +1099,39 @@ computePermutationPvaluesAtFeatureLevel (
       resPerm.push_back (minBetaPvalPerm);
       if (minBetaPvalPerm <= minBetaPval)
 	++iFtrStats.betaPermPval;
+      if (trickPerm && iFtrStats.betaPermPval == 11)
+	break;
     }
     else
     {
       resPerm.push_back (minRsPvalPerm);
       if (minRsPvalPerm <= minRsPval)
 	++iFtrStats.rsPermPval;
-    }    
+      if (trickPerm && iFtrStats.rsPermPval == 11)
+	break;
+    }
+  }
+  
+  if (!calcSpearman)
+  {
+    if (resPerm.size() == nbPermutations)
+      iFtrStats.betaPermPval /= (resPerm.size() + 1);
+    else
+      iFtrStats.betaPermPval = gsl_ran_flat (rng, 
+					     (11 / ((double) (resPerm.size() + 2))),
+					     (11 / ((double) (resPerm.size() + 1))));
+  }
+  else
+  {
+    if (resPerm.size() == nbPermutations)
+      iFtrStats.rsPermPval /= (resPerm.size() + 1);
+    else
+      iFtrStats.rsPermPval = gsl_ran_flat (rng, 
+					   (11 / ((double) (resPerm.size() + 2))),
+					   (11 / ((double) (resPerm.size() + 1))));
   }
   
   gsl_permutation_free (perm);
-  gsl_rng_free (r);
-  
-  if (!calcSpearman)
-    iFtrStats.betaPermPval /= (resPerm.size() + 1);
-  else
-    iFtrStats.rsPermPval /= (resPerm.size() + 1);
 }
 
 /** \brief Compute the permutation P-value at the feature level using, as SNP-
@@ -1123,13 +1152,12 @@ computePermutationPvaluesAtFeatureLevelParallel (
   const bool calcSpearman,
   const double minRsPval,
   const int nbThreads,
+  vector<gsl_rng *> & vRngs,
   const int verbose)
 {
   long int perm_id;
-  size_t seed = 1859;
   int t;
   vector<double> resPerm (nbPermutations, 1);
-  vector<gsl_rng *> vRngs;
   vector<gsl_permutation *> vPerms; // for the indices of the phenotypes vector
   
   if (verbose > 0)
@@ -1139,20 +1167,10 @@ computePermutationPvaluesAtFeatureLevelParallel (
     fflush (stdout);
   }
   
-  gsl_rng_env_setup();
   for (t=0; t<nbThreads; ++t)
   {
-    gsl_rng * r = gsl_rng_alloc (gsl_rng_default);
-    if (r == 0)
-    {
-      cerr << "ERROR: can't allocate memory for the RNG #" << t+1 << endl;
-      exit (1);
-    }
-    gsl_rng_set (r, seed * (t+1));
-    vRngs.push_back (r);
-    
     gsl_permutation * perm = gsl_permutation_calloc (iFtrStats.y_init.size());
-    if (perm == 0)
+    if (perm == NULL)
     {
       cerr << "ERROR: can't allocate memory for the permutation #" << t+1 << endl;
       exit (1);
@@ -1217,10 +1235,7 @@ computePermutationPvaluesAtFeatureLevelParallel (
   }
   
   for (t=0; t<nbThreads; ++t)
-  {
     gsl_permutation_free (vPerms[t]);
-    gsl_rng_free (vRngs[t]);
-  }
   
   if (! calcSpearman)
   {
@@ -1245,12 +1260,14 @@ computeSummaryStatsForOneFeature (
   FtrStats & iFtrStats,
   ifstream & genoStream,
   map<string, streampos> & mSnpNameCoord2Pos,
-  const vector<bool> vIdxSamplesToSkip,
-  const size_t nbPermutations,
-  const bool needQnorm,
-  const bool calcSpearman,
-  const int nbThreads,
-  const int verbose)
+  const vector<bool> & vIdxSamplesToSkip,
+  const size_t & nbPermutations,
+  const bool & needQnorm,
+  const bool & calcSpearman,
+  const int & nbThreads,
+  const bool & trickPerm,
+  gsl_rng * rng,
+  const int & verbose)
 {
   size_t snp_id, i;
   vector<double> y, g;
@@ -1307,23 +1324,15 @@ computeSummaryStatsForOneFeature (
   }
   
   if (nbPermutations > 0)
-    if (nbThreads <= 1)
-      computePermutationPvaluesAtFeatureLevel (iFtrStats,
-					       nbPermutations,
-					       needQnorm,
-					       minBetaPval,
-					       calcSpearman,
-					       minRsPval,
-					       verbose);
-    else
-      computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
-						       nbPermutations,
-						       needQnorm,
-						       minBetaPval,
-						       calcSpearman,
-						       minRsPval,
-						       nbThreads,
-						       verbose);
+    computePermutationPvaluesAtFeatureLevel (iFtrStats,
+					     nbPermutations,
+					     needQnorm,
+					     minBetaPval,
+					     calcSpearman,
+					     minRsPval,
+					     trickPerm,
+					     rng,
+					     verbose);
 }
 
 void
@@ -1331,12 +1340,13 @@ computeSummaryStatsForOneFeatureParallel (
   FtrStats & iFtrStats,
   const string & genoFile,
   map<string, streampos> & mSnpNameCoord2Pos,
-  const vector<bool> vIdxSamplesToSkip,
-  const size_t nbPermutations,
-  const bool needQnorm,
-  const bool calcSpearman,
-  const int nbThreads,
-  const int verbose)
+  const vector<bool> & vIdxSamplesToSkip,
+  const size_t & nbPermutations,
+  const bool & needQnorm,
+  const bool & calcSpearman,
+  const int & nbThreads,
+  vector<gsl_rng *> & vRngs,
+  const int & verbose)
 {
   long int snp_id;
   int t;
@@ -1426,23 +1436,15 @@ computeSummaryStatsForOneFeatureParallel (
 	if (iFtrStats.vSnpStats[snp_id].rsPval < minRsPval)
 	  minRsPval = iFtrStats.vSnpStats[snp_id].rsPval;
     }
-    if (nbThreads <= 1)
-      computePermutationPvaluesAtFeatureLevel (iFtrStats,
-					       nbPermutations,
-					       needQnorm,
-					       minBetaPval,
-					       calcSpearman,
-					       minRsPval,
-					       verbose);
-    else
-      computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
-						       nbPermutations,
-						       needQnorm,
-						       minBetaPval,
-						       calcSpearman,
-						       minRsPval,
-						       nbThreads,
-						       verbose);
+    computePermutationPvaluesAtFeatureLevelParallel (iFtrStats,
+						     nbPermutations,
+						     needQnorm,
+						     minBetaPval,
+						     calcSpearman,
+						     minRsPval,
+						     nbThreads,
+						     vRngs,
+						     verbose);
   }
 }
 
@@ -1458,14 +1460,16 @@ computeAndWriteSummaryStatsFtrPerFtr (
   const vector<string> & vFtrsToKeep,
   const vector<string> & vSnpsToKeep,
   const vector<string> & vSamplesToSkip,
-  const string chrToKeep,
-  const bool needQnorm,
-  const double minMaf,
-  const size_t nbPermutations,
-  const bool calcSpearman,
-  const int nbThreads,
+  const string & chrToKeep,
+  const bool & needQnorm,
+  const double & minMaf,
+  const size_t & nbPermutations,
+  const bool & calcSpearman,
+  const int & nbThreads,
   const vector<size_t> & vPermIndices,
-  const int verbose)
+  const bool & trickPerm,
+  int & seed,
+  const int & verbose)
 {
   FtrStats iFtrStats;
   string linePheno, lineLinks;
@@ -1534,11 +1538,17 @@ computeAndWriteSummaryStatsFtrPerFtr (
   
   if (verbose > 0)
   {
-    if (nbThreads <= 1)
-      printf ("look for association between each pair feature-SNP ...\n");
+    cout << "look for association between each pair feature-SNP ("
+	 << nbPermutations << " permutation"
+	 << (nbPermutations > 1 ? "s" : "");
+    if (trickPerm)
+      cout << ", with trick";
     else
-      printf ("look for association between each pair feature-SNP (%d threads) ...\n",
-	nbThreads);
+      cout << ", without trick";
+    if (nbThreads <= 1)
+      cout << ", " << nbThreads << " thread"
+	   << (nbThreads > 1 ? "s" : "");
+    cout << ") ..." << endl;
     fflush (stdout);
   }
   
@@ -1564,6 +1574,40 @@ computeAndWriteSummaryStatsFtrPerFtr (
       exit (1);
     }
   
+  // initialize RNG (only if permutations)
+  gsl_rng * rng = NULL;
+  vector<gsl_rng *> vRngs;
+  if (nbPermutations > 0)
+  {
+    gsl_rng_env_setup();
+    if (seed < 0)
+      seed = getSeed();
+    if (nbThreads <= 1)
+    {
+      rng = gsl_rng_alloc (gsl_rng_default);
+      if (rng == NULL)
+      {
+	cerr << "ERROR: can't allocate memory for the RNG" << endl;
+	exit (1);
+      }
+      gsl_rng_set (rng, seed);
+    }
+    else
+    {
+      for (int t=0; t<nbThreads; ++t)
+      {
+	gsl_rng * rng = gsl_rng_alloc (gsl_rng_default);
+	if (rng == NULL)
+	{
+	  cerr << "ERROR: can't allocate memory for the RNG #" << t+1 << endl;
+	  exit (1);
+	}
+	gsl_rng_set (rng, seed * (t+1));
+	vRngs.push_back (rng);
+      }
+    }
+  }
+  
   // initialize the permutation struct if required
   if (! vPermIndices.empty())
   {
@@ -1576,7 +1620,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
     }
     
     perm = gsl_permutation_calloc (vPermIndices.size());
-    if (perm == 0)
+    if (perm == NULL)
     {
       cerr << "ERROR: can't allocate memory for the permutation" << endl;
       exit (1);
@@ -1618,15 +1662,16 @@ computeAndWriteSummaryStatsFtrPerFtr (
     if (nbThreads <= 1)
       computeSummaryStatsForOneFeature (iFtrStats, genoStream,
 					mSnpNameCoord2Pos, vIdxSamplesToSkip,
-					nbPermutations, needQnorm, calcSpearman,
-					nbThreads, verbose-1);
+					nbPermutations, needQnorm,
+					calcSpearman, nbThreads, trickPerm,
+					rng, verbose-1);
     else
       computeSummaryStatsForOneFeatureParallel (iFtrStats, genoFile,
 						mSnpNameCoord2Pos,
 						vIdxSamplesToSkip,
 						nbPermutations, needQnorm,
-						calcSpearman,
-						nbThreads, verbose-1);
+						calcSpearman, nbThreads,
+						vRngs, verbose-1);
     
     // write the results (one line per SNP)
     if (iFtrStats.vSnpStats.size() > 0)
@@ -1638,12 +1683,15 @@ computeAndWriteSummaryStatsFtrPerFtr (
   
   if (! vPermIndices.empty())
     gsl_permutation_free (perm);
-  
+  gsl_rng_free (rng);
+  for (size_t t=0; t<vRngs.size(); ++t)
+    gsl_rng_free (vRngs[t]);
   phenoStream.close();
   genoStream.close();
   outStream.close();
   linksStream.close();
   ftrCoordsStream.close();
+  
   if (verbose > 0)
   {
     cout << "nb of features: " << nbFtrs << endl;
@@ -1660,13 +1708,13 @@ int main (int argc, char ** argv)
     anchor = "TSS+TES";
   double minMaf = 0.0;
   size_t nbPermutations = 0, lenCis = 100000;
-  bool needQnorm = false, calcSpearman = false;
-  int nbThreads = 1, verbose = 1;
+  bool needQnorm = false, calcSpearman = false, trickPerm = false;
+  int verbose = 1, nbThreads = 1, seed = -1;
   
   parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
 	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
 	      minMaf, nbPermutations, needQnorm, calcSpearman, nbThreads,
-	      permFile, anchor, lenCis, verbose);
+	      permFile, anchor, lenCis, trickPerm, seed, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1698,6 +1746,8 @@ int main (int argc, char ** argv)
 					calcSpearman,
 					nbThreads,
 					vPermIndices,
+					trickPerm,
+					seed,
 					verbose);
   
   if (verbose > 0)
