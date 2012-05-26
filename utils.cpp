@@ -17,20 +17,19 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <ctime>
 #include <cmath>
 #include <cstring>
 #include <cerrno>
 #include <sys/stat.h>
-#include <sys/time.h> // for gettimeofday
+#include <sys/time.h>
 #include <dirent.h>
 
-#include <vector>
-#include <string>
 #include <sstream>
 #include <iostream>
 #include <fstream>
 using namespace std;
+
+#include "utils.h"
 
 // http://stackoverflow.com/questions/1644868/c-define-macro-for-debug-printing/1644898#1644898
 #ifdef DEBUG
@@ -352,7 +351,8 @@ scanInputDirectory (
 
 /** \brief Return true if the given path is a directory.
  */
-bool isDirectory(const char path[]) {
+bool isDirectory(const char path[])
+{
   bool res = false;
   if (strlen (path) > 0)
   {
@@ -374,7 +374,8 @@ bool isDirectory(const char path[]) {
  *  \note Don't do anything if the supplied path is empty
  *  or if the directory doesn't exist.
  */
-int removeDir(string path) {
+int removeDir(string path)
+{
   if (path.empty())
     return 0;
   
