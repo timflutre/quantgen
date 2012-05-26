@@ -16,7 +16,7 @@
   *  You should have received a copy of the GNU General Public License
   *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
   *
-  *  g++ -Wall -O3 get_abf_meta.cpp -lgsl -lgslcblas -o get_abf_meta
+  *  g++ -Wall -O3 utils.cpp get_abf_meta.cpp -lgsl -lgslcblas -o get_abf_meta
   *  help2man -o get_abf_meta.man ./get_abf_meta
   *  groff -mandoc get_abf_meta.man > get_abf_meta.ps
   */
@@ -41,7 +41,7 @@ using namespace std;
 #include <gsl/gsl_cdf.h>
 #include <gsl/gsl_combination.h>
 
-#include "utils.cpp"
+#include "utils.h"
 
 /** \brief Display the help on stdout.
  */
@@ -943,7 +943,7 @@ computeAndWriteAbfsForAllPairs (
   double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0;
   ofstream outStream;
   vector<size_t> vNbSubgroups2Occurrences (nbSubgroups+1, 0);
-  vector<size_t> vCounters = getCounters (mPairs2Positions.size());
+  vector<size_t> vCounters = getCounters (mPairs2Positions.size(), 5);
   gsl_combination * c = NULL;
   map<string, double> mAllConfigsAbfs;
   
