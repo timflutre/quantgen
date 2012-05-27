@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -O3 get_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_ftr-level_perm-pval
+ *  g++ -Wall -O3 -fopenmp utils.cpp get_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_ftr-level_perm-pval
  *  help2man -o .man ./get_ftr-level_perm-pval
  *  groff -mandoc get_ftr-level_perm-pval.man > get_ftr-level_perm-pval.ps
 */
@@ -42,7 +42,8 @@ using namespace std;
 #include <gsl/gsl_randist.h>
 #include <gsl/gsl_permutation.h>
 
-#include "utils.cpp"
+#include "utils.h"
+#include "get_summary_stats.cpp"
 
 /** \brief Display the help on stdout.
 */
@@ -518,7 +519,7 @@ extractLinks (
   }
   
   stringstream ssTmpLinksFile;
-  ssTmpLinksFile << "tmp_" << studyId << "_links.txt";
+  ssTmpLinksFile << "tmp2_" << studyId << "_links.txt";
   tmpLinksFile = ssTmpLinksFile.str();
   ofstream tmpLinksStream;
   tmpLinksStream.open(tmpLinksFile.c_str());
@@ -569,7 +570,7 @@ extractGeno (
   }
 
   stringstream ssTmpGenoFile;
-  ssTmpGenoFile << "tmp_" << studyId << "_geno.impute";
+  ssTmpGenoFile << "tmp2_" << studyId << "_geno.impute";
   tmpGenoFile = ssTmpGenoFile.str();
   ofstream tmpGenoStream;
   tmpGenoStream.open(tmpGenoFile.c_str());
@@ -627,56 +628,29 @@ extractCisSnps (
   }
 }
 
-/** \brief Shuffle the identifiers of the samples and write them in a file.
+/** \brief Shuffle the identifiers of the samples and return them.
  */
-void 
-makeNewPermutationAndWriteToFile (
-  const string & studyId,
-  const size_t & permId,
-  string & permFile,
+vector<size_t>
+getNewPermutation (
   gsl_rng * rng,
   gsl_permutation * perm)
 {
-  stringstream ssPermFile;
-  ssPermFile << "tmp_" << studyId << "_perm" << permId << "_idx.txt";
-  permFile = ssPermFile.str();
-  FILE * pt_permFile = fopen (ssPermFile.str().c_str(), "w");
-  if (pt_permFile == NULL)
-  {
-    cerr << "ERROR: can't open file " << ssPermFile.str() << endl;
-    exit (1);
-  }
   gsl_ran_shuffle (rng, perm->data, perm->size, sizeof(size_t));
-  gsl_permutation_fprintf (pt_permFile, perm, "%i\n");
-  fclose (pt_permFile);
+  vector<size_t> vPermIndices (perm->data, perm->data + perm->size);
+  return vPermIndices;
 }
 
-/** \brief For each feature in mFtr2MaxPermAbf, write its name in a file.
+/** \brief Retrieve the keys of mFtr2MaxPermAbf into a vector.
 */
 void
-writeFeaturesToAnalyze (
-  const string & studyId,
-  const size_t & permId,
+getRemainingFeatures (
   const map<string, double> & mFtr2MaxPermAbf,
-  string & tmpFtrFile)
+  vector<string> & vRemainingFtrs)
 {
-  stringstream ssTmpFtrFile;
-  ssTmpFtrFile << "tmp_" << studyId << "_perm" << permId << "_ftrs.txt";
-  tmpFtrFile = ssTmpFtrFile.str();
-  
-  ofstream tmpFtrStream;
-  tmpFtrStream.open(tmpFtrFile.c_str());
-  if (! tmpFtrStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << tmpFtrFile << endl;
-    exit (1);
-  }
-  
+  vRemainingFtrs.clear();
   for (map<string, double>::const_iterator it = mFtr2MaxPermAbf.begin();
        it != mFtr2MaxPermAbf.end(); ++it)
-    tmpFtrStream << it->first << endl;
-  
-  tmpFtrStream.close();
+    vRemainingFtrs.push_back (it->first);
 }
 
 /** \brief Launch "get_summary_stats" on each subgroup.
@@ -685,18 +659,17 @@ void
 getSumStatsInEachSubgroup (
   const string & studyId,
   const size_t & permId,
-  const string & permFile,
+  const vector<size_t> & vPermIndices,
   const string & genoFile,
   const vector<string> & vPhenoFiles,
   const string & ftrCoordsFile,
   const string & linksFile,
-  const string & ftrFile,
+  const vector<string> & vFtrsToKeep,
   string & sumStatsDir,
-  string & stdoutFile,
   const int & verbose)
 {
   stringstream ssSumStatsDir;
-  ssSumStatsDir << "tmp_" << studyId << "_perm" << permId << "_sumstats";
+  ssSumStatsDir << "tmp2_" << studyId << "_perm" << permId << "_sumstats";
   sumStatsDir = ssSumStatsDir.str();
   if (removeDir (sumStatsDir) != 0)
   {
@@ -710,36 +683,33 @@ getSumStatsInEachSubgroup (
     exit (1);
   }
   
-  stringstream ssStdoutFile;
-  ssStdoutFile << "tmp_" << studyId << "_perm" << permId << "_stdout.txt";
-  stdoutFile = ssStdoutFile.str();
-  if (doesFileExist (stdoutFile))
-    remove (stdoutFile.c_str());
-  
+  vector<string> vSnpsToKeep, vSamplesToSkip;
   for (vector<string>::const_iterator it = vPhenoFiles.begin();
        it != vPhenoFiles.end(); ++it)
   {
-    stringstream ssCmd, ssStdoutFile;
-    ssCmd << "get_summary_stats"
-	  << " -g " << genoFile
-	  << " -p " << *it
-	  << " -o " << sumStatsDir << "/"
-	  << basename(it->c_str()) << "_sumstats"
-	  << " --fcoord " << ftrCoordsFile
-	  << " -l " << linksFile;
-    if (! ftrFile.empty())
-      ssCmd << " -f " << ftrFile;
-    ssCmd << " --permf " << permFile
-	  << " >> " << stdoutFile
-	  << " 2>> " << stdoutFile;
-    if (verbose > 0)
-      cout << "launch: " << ssCmd.str() << endl;
-    if (system (ssCmd.str().c_str()) != 0)
-    {
-      cerr << "ERROR: get_summary_stats failed" << endl;
-      cerr << ssCmd.str() << endl;
-      exit (1);
-    }
+    stringstream ssPathToOutFile;
+    ssPathToOutFile << sumStatsDir << "/" << basename(it->c_str())
+		    << "_sumstats";
+    computeAndWriteSummaryStatsFtrPerFtr (genoFile,
+					  *it,
+					  ssPathToOutFile.str(),
+					  ftrCoordsFile,
+					  linksFile,
+					  "",
+					  0,
+					  vFtrsToKeep,
+					  vSnpsToKeep,
+					  vSamplesToSkip,
+					  "",
+					  false,
+					  0.0,
+					  0,
+					  false,
+					  0,
+					  vPermIndices,
+					  false,
+					  0,
+					  verbose);
   }
 }
 
@@ -753,11 +723,20 @@ getAbfs (
   const string & sumStatsDir,
   const string & gridFile,
   const string & whichAbf,
-  const string & stdoutFile,
+  string & stdoutFile,
   const int & verbose)
 {
+  stringstream ssStdoutFile;
+  if (stdoutFile.empty())
+  {
+    ssStdoutFile << "tmp2_" << studyId << "_perm" << permId << "_stdout.txt";
+    stdoutFile = ssStdoutFile.str();
+    if (doesFileExist (stdoutFile))
+      remove (stdoutFile.c_str());
+  }
+  
   stringstream ssAbfFile, ssCmd;
-  ssAbfFile << "tmp_" << studyId << "_perm" << permId << "_abfs.txt";
+  ssAbfFile << "tmp2_" << studyId << "_perm" << permId << "_abfs.txt";
   abfsFile = ssAbfFile.str();
   ssCmd << "get_abf_meta"
 	<< " -i " << sumStatsDir
@@ -834,22 +813,10 @@ getMaxAbfAcrossSnps (
  */
 void
 cleanPermutationTmp (
-  const string & permFile,
-  const string & tmpFtrFile,
   const string & sumStatsDir,
   const string & abfsFile,
   const string & stdoutFile)
 {
-  if (remove (permFile.c_str()) != 0)
-  {
-    cerr << "ERROR: can't remove file " << permFile << endl;
-    exit (1);
-  }
-  if (remove (tmpFtrFile.c_str()) != 0)
-  {
-    cerr << "ERROR: can't remove file " << tmpFtrFile << endl;
-    exit (1);
-  }
   if (removeDir (sumStatsDir) != 0)
   {
     cerr << "ERROR: can't remove directory " << sumStatsDir << endl;
@@ -896,7 +863,7 @@ updateFtrsToAnalyzeAndCalcPermPval (
 }
 
 void
-computeJointAnalysisPermPvaluesFtrPerFtr2 (
+computeJointAnalysisPermPvaluesFtrPerFtr (
   const string & genoFile,
   const vector<string> & vPhenoFiles,
   const string & ftrCoordsFile,
@@ -920,7 +887,7 @@ computeJointAnalysisPermPvaluesFtrPerFtr2 (
 	 << " (" << vFtrsToKeep.size()
 	 << " feature" << (vFtrsToKeep.size() > 1 ? "s" : "");
     if (trickPerm)
-      cout << " , with trick";
+      cout << ", with trick";
     cout << ") ..." << endl;
     fflush (stdout);
   }
@@ -973,22 +940,21 @@ computeJointAnalysisPermPvaluesFtrPerFtr2 (
     extractCisSnps (genoFile, linksFile, vFtrsToKeep, ssStudyId.str(),
 		    tmpGenoFile, tmpLinksFile, verbose);
   
-  string permFile, tmpFtrFile, stdoutFile, sumStatsDir, abfsFile;
+  string sumStatsDir, stdoutFile, abfsFile;
+  vector<string> vRemainingFtrs;
   for (size_t permId = 1; permId <= nbPermutations; ++permId)
   {
-    makeNewPermutationAndWriteToFile (ssStudyId.str(), permId, permFile, rng,
-				      perm);
-    writeFeaturesToAnalyze (ssStudyId.str(), permId, mFtr2MaxPermAbf,
-			    tmpFtrFile);
-    getSumStatsInEachSubgroup (ssStudyId.str(), permId, permFile,
-			       (extractSnps ? tmpGenoFile : genoFile),
-			       vPhenoFiles, ftrCoordsFile,
-			       (extractSnps ? tmpLinksFile : linksFile),
-			       tmpFtrFile, sumStatsDir, stdoutFile, verbose-1);
+    vector<size_t> vPermIndices = getNewPermutation (rng, perm);
+    getRemainingFeatures (mFtr2MaxPermAbf, vRemainingFtrs);
+    getSumStatsInEachSubgroup (ssStudyId.str(), permId, vPermIndices,
+    			       (extractSnps ? tmpGenoFile : genoFile),
+    			       vPhenoFiles, ftrCoordsFile,
+    			       (extractSnps ? tmpLinksFile : linksFile),
+    			       vRemainingFtrs, sumStatsDir, verbose-1);
     getAbfs (ssStudyId.str(), permId, abfsFile, sumStatsDir, gridFile,
 	     whichAbf, stdoutFile, verbose-1);
     getMaxAbfAcrossSnps (abfsFile, whichAbf, mFtr2MaxPermAbf);
-    cleanPermutationTmp (permFile, tmpFtrFile, sumStatsDir, abfsFile, stdoutFile);
+    cleanPermutationTmp (sumStatsDir, abfsFile, stdoutFile);
     updateFtrsToAnalyzeAndCalcPermPval (mFtr2TrueL10Abf, permId,
 					mFtr2MaxPermAbf, mFtr2PermPval,
 					trickPerm);
@@ -1061,12 +1027,12 @@ int main (int argc, char ** argv)
 							      vFtrsToKeep,
 							      verbose);
   
-  computeJointAnalysisPermPvaluesFtrPerFtr2 (genoFile,
+  computeJointAnalysisPermPvaluesFtrPerFtr (genoFile,
 					    vPhenoFiles,
 					    ftrCoordsFile,
 					    linksFile,
 					    gridFile,
-					     ftrFile,
+					    ftrFile,
 					    vFtrsToKeep,
 					    mFtr2TrueL10Abf,
 					    whichAbf,
