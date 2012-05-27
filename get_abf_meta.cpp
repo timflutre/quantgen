@@ -16,7 +16,7 @@
   *  You should have received a copy of the GNU General Public License
   *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
   *
-  *  g++ -Wall -O3 utils.cpp get_abf_meta.cpp -lgsl -lgslcblas -o get_abf_meta
+  *  g++ -Wall -O3 -DGET_ABF_MAIN utils.cpp get_abf_meta.cpp -lgsl -lgslcblas -o get_abf_meta
   *  help2man -o get_abf_meta.man ./get_abf_meta
   *  groff -mandoc get_abf_meta.man > get_abf_meta.ps
   */
@@ -42,178 +42,6 @@ using namespace std;
 #include <gsl/gsl_combination.h>
 
 #include "utils.h"
-
-/** \brief Display the help on stdout.
- */
-void help (char ** argv)
-{
-  cout << "`" << argv[0] << "'"
-       <<" performs the meta-analysis by computing three Bayes Factors," << endl
-       << "one per model (meta-analysis, fixed-effects, max heterogeneity)," << endl
-       << "for each pair feature-SNP." << endl
-       << endl
-       << "Usage: " << argv[0] << " [OPTIONS]..." << endl
-       << endl
-       << "Options:" << endl
-       << "  -h, --help\tdisplay the help and exit" << endl
-       << "  -V, --version\toutput version information and exit" << endl
-       << "  -v, --verbose\tverbosity level (default=1)" << endl
-       << "  -i, --input\tdirectory with the summary stats for each subgroup" << endl
-       << "\t\tone file per subgroup, with at least 8 columns:" << endl
-       << "\t\tftr chrF start end snp chrS coord maf n betahat sebetahat sigmahat" << endl
-       << "\t\tsee output from other program 'get_summary_stats'" << endl
-       << "\t\tcan also be a single file (ie. ABFs for a single subgroup)" << endl
-       << "  -g, --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
-       << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
-       << "  -o, --out\toutput file with the Bayes factors for each pair feature-SNP" << endl
-       << "\t\t3 BFs are reported: meta-analysis, fixed-effects, max-heterogeneity" << endl
-       << "  -f, --ftr\tfile with a list of features to analyze" << endl
-       << "  -s, --snp\tfile with a list of SNP identifiers to analyze" << endl
-       << "  -x, --index\twhich SNP info to use to index pairs feature-SNP" << endl
-       << "\t\tdefault=id+coord, but can be only 'id' or 'coord'" << endl
-       << "  -b, --beta\tsave the summary statistics of each subgroup in the output file" << endl
-       << "  -c, --config\tcalculate the BF 'meta' for each configuration" << endl
-       << "\t\tthe total number of configurations is 2^nb.subgroups" << endl
-       << "\t\t2 average BFs are reported (over all configs, or only subgroup-" << endl
-       << "\t\tconsistent and each single-subgroup-specific)" << endl
-       << endl
-       << "Examples:" << endl
-       << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl
-       << endl
-       << "References:" << endl
-       << "  Wen and Stephens (http://arxiv.org/abs/1111.1210)" << endl;
-}
-
-/** \brief Display version and license information on stdout.
- */
-void version (char ** argv)
-{
-  cout << argv[0] << " 0.1" << endl
-       << endl
-       << "Copyright (C) 2011 T. Flutre." << endl
-       << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
-       << "This is free software; see the source for copying conditions.  There is NO" << endl
-       << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
-       << endl
-       << "Written by T. Flutre." << endl;
-}
-
-/** \brief Parse the command-line arguments and check the values of the 
- *  compulsory ones.
-*/
-void
-parse_args (
-  int argc,
-  char ** argv,
-  string & inDir,
-  string & gridFile,
-  string & outFile,
-  string & ftrsFile,
-  string & snpsFile,
-  string & snpIdx,
-  bool & saveSumStats,
-  bool & calcAllConfigs,
-  int & verbose)
-{
-  int c = 0;
-  while (1)
-  {
-    static struct option long_options[] =
-      {
-	{"help", no_argument, 0, 'h'},
-	{"version", no_argument, 0, 'V'},
-	{"verbose", required_argument, 0, 'v'},
-	{"input", required_argument, 0, 'i'},
-	{"grid", required_argument, 0, 'g'},
-	{"output", required_argument, 0, 'o'},
-	{"ftr", required_argument, 0, 'f'},
-	{"snp", required_argument, 0, 's'},
-	{"index", required_argument, 0, 'x'},
-	{"beta", no_argument, 0, 'b'},
-	{"config",no_argument, 0, 'c'},
-	{0, 0, 0, 0}
-      };
-    int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:bc",
-		     long_options, &option_index);
-    if (c == -1)
-      break;
-    switch (c)
-    {
-    case 0:
-      if (long_options[option_index].flag != 0)
-	break;
-      printf ("option %s", long_options[option_index].name);
-      if (optarg)
-	printf (" with arg %s", optarg);
-      printf ("\n");
-      break;
-    case 'h':
-      help (argv);
-      exit (0);
-    case 'V':
-      version (argv);
-      exit (0);
-    case 'v':
-      verbose = atoi(optarg);
-      break;
-    case 'i':
-      inDir = optarg;
-      break;
-    case 'g':
-      gridFile = optarg;
-      break;
-    case 'o':
-      outFile = optarg;
-      break;
-    case 'f':
-      ftrsFile = optarg;
-      break;
-    case 's':
-      snpsFile = optarg;
-      break;
-    case 'x':
-      snpIdx = optarg;
-      break;
-    case 'b':
-      saveSumStats = true;
-      break;
-    case 'c':
-      calcAllConfigs = true;
-      break;
-    case '?':
-      break;
-    default:
-      abort ();
-    }
-  }
-  if (inDir.empty())
-  {
-    fprintf (stderr, "ERROR: missing input directory with summary statistics (-i).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (gridFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing grid file (-g).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! doesFileExist (gridFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", gridFile.c_str());
-    help (argv);
-    exit (1);
-  }
-  if (outFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing output file (-o).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (snpIdx.empty())
-    snpIdx = "id+coord";
-}
 
 /** \brief Index the files with a map to know which pairs feature-SNP are 
  *  in common among subgroups.
@@ -528,12 +356,12 @@ getSummaryStatsForPair (
  *  variation in the genotype (betahat=0, sebetahat=Inf), t will be 0, whereas
  *  bhat will be 0 and sebhat will be Inf.
  */
-vector<double>
+void
 correctSummaryStats (
+  vector<double> & vStdSumStatsCorr,
   const vector<double> & vSumStats,
   const int & verbose)
 {
-  vector<double> stdSumStatsCorr;
   double n = 0, bhat = 0, sebhat = 0, sigmahat = 0, t = 0;
   
   if (vSumStats[0] != 0)  // if=0 -> pair is not present in the given subgroup
@@ -568,12 +396,10 @@ correctSummaryStats (
       printf ("after: sigmahat=%e bhat=%e sebhat=%e t=%e\n",
 	      sigmahat, bhat, sebhat, t);
 #endif
-    stdSumStatsCorr.push_back (bhat);
-    stdSumStatsCorr.push_back (sebhat);
-    stdSumStatsCorr.push_back (t);
+    vStdSumStatsCorr.push_back (bhat);
+    vStdSumStatsCorr.push_back (sebhat);
+    vStdSumStatsCorr.push_back (t);
   }
-  
-  return stdSumStatsCorr;
 }
 
 /** \brief Return the log10 approximate Bayes Factor given standardized 
@@ -656,9 +482,9 @@ getAbfFromStdSumStats (
  */
 double
 log10_weighted_sum (
-  double * vec,
-  double * weights,
-  size_t size)
+  const double * vec,
+  const double * weights,
+  const size_t size)
 {
   size_t i = 0;
   double max = vec[0];
@@ -788,12 +614,13 @@ computeAbfsForPairOverGrid (
   nbSamplesUsed = 0;
   for (subgroup = 0; subgroup < mAllSumStats.size(); ++subgroup)
   {
-    vector<double> vSumStats = mAllSumStats.find(subgroup)->second;  // can't use [] because map is const
-    vector<double> vSumStatsCorr = correctSummaryStats (vSumStats, verbose-1);
+    vector<double> vSumStatsCorr;
+    correctSummaryStats (vSumStatsCorr, mAllSumStats.find(subgroup)->second,
+			 verbose-1);
     if (vSumStatsCorr.size() > 0)  // otherwise, pair not present in subgroup
     {
       mAllSumStatsCorr.push_back (vSumStatsCorr);
-      nbSamplesUsed += (int) vSumStats[0];
+      nbSamplesUsed += (int) mAllSumStats.find(subgroup)->second[0];
     }
   }
   nbSubgroupsUsed = mAllSumStatsCorr.size();
@@ -1042,6 +869,180 @@ computeAndWriteAbfsForAllPairs (
   }
 }
 
+#ifdef GET_ABF_MAIN
+
+/** \brief Display the help on stdout.
+ */
+void help (char ** argv)
+{
+  cout << "`" << argv[0] << "'"
+       <<" performs the meta-analysis by computing three Bayes Factors," << endl
+       << "one per model (meta-analysis, fixed-effects, max heterogeneity)," << endl
+       << "for each pair feature-SNP." << endl
+       << endl
+       << "Usage: " << argv[0] << " [OPTIONS]..." << endl
+       << endl
+       << "Options:" << endl
+       << "  -h, --help\tdisplay the help and exit" << endl
+       << "  -V, --version\toutput version information and exit" << endl
+       << "  -v, --verbose\tverbosity level (default=1)" << endl
+       << "  -i, --input\tdirectory with the summary stats for each subgroup" << endl
+       << "\t\tone file per subgroup, with at least 8 columns:" << endl
+       << "\t\tftr chrF start end snp chrS coord maf n betahat sebetahat sigmahat" << endl
+       << "\t\tsee output from other program 'get_summary_stats'" << endl
+       << "\t\tcan also be a single file (ie. ABFs for a single subgroup)" << endl
+       << "  -g, --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
+       << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
+       << "  -o, --out\toutput file with the Bayes factors for each pair feature-SNP" << endl
+       << "\t\t3 BFs are reported: meta-analysis, fixed-effects, max-heterogeneity" << endl
+       << "  -f, --ftr\tfile with a list of features to analyze" << endl
+       << "  -s, --snp\tfile with a list of SNP identifiers to analyze" << endl
+       << "  -x, --index\twhich SNP info to use to index pairs feature-SNP" << endl
+       << "\t\tdefault=id+coord, but can be only 'id' or 'coord'" << endl
+       << "  -b, --beta\tsave the summary statistics of each subgroup in the output file" << endl
+       << "  -c, --config\tcalculate the BF 'meta' for each configuration" << endl
+       << "\t\tthe total number of configurations is 2^nb.subgroups" << endl
+       << "\t\t2 average BFs are reported (over all configs, or only subgroup-" << endl
+       << "\t\tconsistent and each single-subgroup-specific)" << endl
+       << endl
+       << "Examples:" << endl
+       << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl
+       << endl
+       << "References:" << endl
+       << "  Wen and Stephens (http://arxiv.org/abs/1111.1210)" << endl;
+}
+
+/** \brief Display version and license information on stdout.
+ */
+void version (char ** argv)
+{
+  cout << argv[0] << " 0.1" << endl
+       << endl
+       << "Copyright (C) 2011 T. Flutre." << endl
+       << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
+       << "This is free software; see the source for copying conditions.  There is NO" << endl
+       << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
+       << endl
+       << "Written by T. Flutre." << endl;
+}
+
+/** \brief Parse the command-line arguments and check the values of the 
+ *  compulsory ones.
+*/
+void
+parse_args (
+  int argc,
+  char ** argv,
+  string & inDir,
+  string & gridFile,
+  string & outFile,
+  string & ftrsFile,
+  string & snpsFile,
+  string & snpIdx,
+  bool & saveSumStats,
+  bool & calcAllConfigs,
+  int & verbose)
+{
+  int c = 0;
+  while (1)
+  {
+    static struct option long_options[] =
+      {
+	{"help", no_argument, 0, 'h'},
+	{"version", no_argument, 0, 'V'},
+	{"verbose", required_argument, 0, 'v'},
+	{"input", required_argument, 0, 'i'},
+	{"grid", required_argument, 0, 'g'},
+	{"output", required_argument, 0, 'o'},
+	{"ftr", required_argument, 0, 'f'},
+	{"snp", required_argument, 0, 's'},
+	{"index", required_argument, 0, 'x'},
+	{"beta", no_argument, 0, 'b'},
+	{"config",no_argument, 0, 'c'},
+	{0, 0, 0, 0}
+      };
+    int option_index = 0;
+    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:bc",
+		     long_options, &option_index);
+    if (c == -1)
+      break;
+    switch (c)
+    {
+    case 0:
+      if (long_options[option_index].flag != 0)
+	break;
+      printf ("option %s", long_options[option_index].name);
+      if (optarg)
+	printf (" with arg %s", optarg);
+      printf ("\n");
+      break;
+    case 'h':
+      help (argv);
+      exit (0);
+    case 'V':
+      version (argv);
+      exit (0);
+    case 'v':
+      verbose = atoi(optarg);
+      break;
+    case 'i':
+      inDir = optarg;
+      break;
+    case 'g':
+      gridFile = optarg;
+      break;
+    case 'o':
+      outFile = optarg;
+      break;
+    case 'f':
+      ftrsFile = optarg;
+      break;
+    case 's':
+      snpsFile = optarg;
+      break;
+    case 'x':
+      snpIdx = optarg;
+      break;
+    case 'b':
+      saveSumStats = true;
+      break;
+    case 'c':
+      calcAllConfigs = true;
+      break;
+    case '?':
+      break;
+    default:
+      abort ();
+    }
+  }
+  if (inDir.empty())
+  {
+    fprintf (stderr, "ERROR: missing input directory with summary statistics (-i).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (gridFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing grid file (-g).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (gridFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", gridFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (outFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing output file (-o).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (snpIdx.empty())
+    snpIdx = "id+coord";
+}
+
 int main (int argc, char ** argv)
 {
   string inDir, gridFile, outFile, ftrsFile, snpsFile, snpIdx;
@@ -1094,3 +1095,5 @@ int main (int argc, char ** argv)
   
   return 0;
 }
+
+#endif
