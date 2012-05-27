@@ -63,6 +63,22 @@ vector<string> split (const string & s, char delim)
   return split (s, delim, tokens);
 }
 
+/** \brief Split a string with several delimiters.
+ */
+vector<string> & split (const string & s, const char * delim,
+			 vector<string> & tokens)
+{
+  tokens.clear();
+  char * pch;
+  pch = strtok ((char *) s.c_str(), delim);
+  while (pch != NULL)
+  {
+    tokens.push_back (string(pch));
+    pch = strtok (NULL, delim);
+  }
+  return tokens;
+}
+
 /** \brief Return a string with the elapsed time in d, h, m and s.
  *  \note http://stackoverflow.com/a/2419597/597069
  */
@@ -455,4 +471,14 @@ size_t getSeed (void)
   timeval t1;
   gettimeofday (&t1, NULL);
   return ((size_t) t1.tv_usec * t1.tv_sec);
+}
+
+void openFile (const string & pathToFile, ifstream & fileStream)
+{
+  fileStream.open (pathToFile.c_str());
+  if (! fileStream.is_open())
+  {
+    cerr << "ERROR: can't open file " << pathToFile << endl;
+    exit (1);
+  }
 }

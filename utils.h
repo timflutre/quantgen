@@ -24,11 +24,15 @@
 
 #include <vector>
 #include <string>
+#include <fstream>
 using namespace std;
 
 vector<string> & split (const string & s, char delim, vector<string> & tokens);
 
 vector<string> split (const string & s, char delim);
+
+vector<string> & split (const string & s, const char * delim,
+			vector<string> & tokens);
 
 string elapsedTime (time_t startRawTime, time_t endRawTime);
 
@@ -59,5 +63,7 @@ bool isDirectory(const char path[]);
 int removeDir(string path);
 
 size_t getSeed (void);
+
+void openFile (const string & pathToFile, ifstream & fileStream);
 
 #endif
