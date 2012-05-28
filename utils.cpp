@@ -478,7 +478,17 @@ void openFile (const string & pathToFile, ifstream & fileStream)
   fileStream.open (pathToFile.c_str());
   if (! fileStream.is_open())
   {
-    cerr << "ERROR: can't open file " << pathToFile << endl;
+    cerr << "ERROR: can't open file " << pathToFile << " to read" << endl;
+    exit (1);
+  }
+}
+
+void openFile (const string & pathToFile, ofstream & fileStream)
+{
+  fileStream.open (pathToFile.c_str());
+  if (! fileStream.is_open())
+  {
+    cerr << "ERROR: can't open file " << pathToFile << " to write" << endl;
     exit (1);
   }
 }

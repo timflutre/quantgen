@@ -66,4 +66,6 @@ size_t getSeed (void);
 
 void openFile (const string & pathToFile, ifstream & fileStream);
 
+void openFile (const string & pathToFile, ofstream & fileStream);
+
 #endif
