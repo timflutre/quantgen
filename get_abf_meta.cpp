@@ -1,7 +1,7 @@
 /** \file get_abf_meta.cpp
   *
   *  `get_abf_meta' performs Bayesian meta-analysis of eQTL studies.
-  *  Copyright (C) 2011  T. Flutre
+  *  Copyright (C) 2011,2012  T. Flutre
   *
   *  This program is free software: you can redistribute it and/or modify
   *  it under the terms of the GNU General Public License as published by
@@ -68,17 +68,10 @@ indexInputFiles (
   for (subgroup = 0; subgroup < vInFiles.size(); ++subgroup)
   {
     ifstream inStream;
-    inStream.open (vInFiles[subgroup].c_str());
-    if (! inStream.good())
-    {
-      cerr << "ERROR: can't open file " << vInFiles[subgroup] << endl;
-      exit (1);
-    }
+    openFile (vInFiles[subgroup], inStream);
     if (verbose > 0)
-    {
-      cout << "s" << subgroup+1 << " " << vInFiles[subgroup] << " ...";
-      fflush (stdout);
-    }
+      cout << "s" << subgroup+1 << " " << vInFiles[subgroup] << " ..."
+	   << flush;
     
     // check first line is proper header
     getline (inStream, line);
@@ -162,16 +155,11 @@ indexInputFiles (
     }
     inStream.close ();
     if (verbose > 0)
-    {
       cout << " (" << line_id << " lines)" << endl;
-      fflush (stdout);
-    }
   }
   
   if (verbose > 0)
-  {
     cout << "nb of pairs feature-SNP: " << mPairs2Positions.size() << endl;
-  }
 }
 
 /** \brief Load the file with the grid values.
@@ -182,19 +170,12 @@ loadGrid (
   const int & verbose)
 {
   if (verbose > 0)
-  {
-    cout << "load grid ..." << endl;
-  }
+    cout << "load grid ..." << endl << flush;
   vector< vector<double> > grid;
   ifstream gridStream;
   vector<string> tokens;
   string line;
-  gridStream.open (gridFile.c_str());
-  if (! gridStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << gridFile << endl;
-    exit (1);
-  }
+  openFile (gridFile, gridStream);
   while (gridStream.good())
   {
     getline (gridStream, line);
@@ -216,19 +197,16 @@ loadGrid (
   }
   gridStream.close();
   if (verbose > 0)
-  {
     cout << "grid size: " << grid.size() << endl;
-  }
   return grid;
 }
 
 void
 writeOutputHeader (
   ofstream & outStream,
-  const bool & calcAllConfigs,
-  gsl_combination * c,
-  const size_t & nbSubgroups,
-  const bool & saveSumStats)
+  const string & calcAllConfigs,
+  gsl_combination * comb,
+  const size_t & nbSubgroups)
 {
   size_t i, j;
   outStream << "ftr"
@@ -240,14 +218,17 @@ writeOutputHeader (
 	    << " l10abf.fix"
 	    << " l10abf.maxh";
   
-  if (calcAllConfigs)
+  if (! calcAllConfigs.empty())
   {
-    outStream << " l10abf.meta.avg.all.c"
-	      << " l10abf.meta.avg.subset.c";
-    for(i=1; i<nbSubgroups; ++i)
+    outStream << " l10abf.meta.avg.subset.c";
+    if (calcAllConfigs.compare("all") == 0)
+      outStream << " l10abf.meta.avg.all.c";
+    for(i = 1; i < nbSubgroups; ++i)
     {
-      c = gsl_combination_calloc (nbSubgroups, i);
-      if (c == NULL)
+      if (i > 1 && calcAllConfigs.compare("subset") == 0)
+	break;
+      comb = gsl_combination_calloc (nbSubgroups, i);
+      if (comb == NULL)
       {
 	cerr << "ERROR: can't allocate memory for the combination" << endl;
 	exit (1);
@@ -255,20 +236,14 @@ writeOutputHeader (
       while (true)
       {
 	outStream << " l10abf.meta.c";
-	for (j=0; j<c->k; ++j)
-	  outStream << gsl_combination_get (c, j) + 1;
-	if (gsl_combination_next (c) != GSL_SUCCESS)
+	for (j = 0; j < comb->k; ++j)
+	  outStream << gsl_combination_get (comb, j) + 1;
+	if (gsl_combination_next (comb) != GSL_SUCCESS)
 	  break;
       }
-      gsl_combination_free (c);
+      gsl_combination_free (comb);
     }
   }
-  
-  if (saveSumStats)
-    for (i = 0; i < nbSubgroups; ++i)
-      outStream << " betahat.s" << i+1
-		<< " sebetahat.s" << i+1
-		<< " sigmahat.s" << i+1;
   
   outStream << endl;
 }
@@ -310,7 +285,7 @@ getSummaryStatsForPair (
       if (verbose > 0)
 	cout << "subgroup " << subgroup+1
 	     << ": skip because pair not present in this subgroup"
-	     << endl;
+	     << endl << flush;
     }
     
     else
@@ -501,89 +476,92 @@ void
 computeAbfMetaOfAllConfigsForPairOverGrid (
   map<string, double> & mAllConfigsAbfs,
   const size_t & nbSubgroupsUsed,
-  gsl_combination * c,
+  const string & calcAllConfigs,
+  gsl_combination * comb,
   const vector< vector<double> > & mAllSumStatsCorr,
   const vector< vector<double> > & grid)
 {
   size_t i, j, gridIdx;
   vector< vector<double> > mSomeSumStatsCorr;
-  double l10_abf_metas_c[grid.size()], weights[grid.size()];
+  double l10_abf_metas_c[grid.size()];
+  vector<double> vWeights (grid.size(), 1.0 / (double) grid.size());
+  stringstream ssConfig;
   
   mAllConfigsAbfs.clear();
   
-  for(i=1; i<nbSubgroupsUsed; ++i)
+  for(i = 1; i < nbSubgroupsUsed; ++i)
   {
-    c = gsl_combination_calloc (nbSubgroupsUsed, i);
-    if (c == NULL)
+    if (i > 1 && calcAllConfigs.compare("subset") == 0)
+      break;
+    comb = gsl_combination_calloc (nbSubgroupsUsed, i);
+    if (comb == NULL)
     {
       cerr << "ERROR: can't allocate memory for the combination" << endl;
       exit (1);
     }
-    
     while (true)
     {
-      stringstream ss; // will contain the identifier of the configuration
+      ssConfig.str("");
       mSomeSumStatsCorr.clear();
-      for (j=0; j<c->k; ++j)
+      for (j = 0; j < comb->k; ++j)
       {
-	ss << gsl_combination_get (c, j) + 1;
+	ssConfig << gsl_combination_get (comb, j) + 1;
 	mSomeSumStatsCorr.push_back (mAllSumStatsCorr[
-				       gsl_combination_get (c, j)]);
+				       gsl_combination_get (comb, j)]);
       }
-      
       for (gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
-      {
 	l10_abf_metas_c[gridIdx] = getAbfFromStdSumStats (mSomeSumStatsCorr,
 							  grid[gridIdx][0],
 							  grid[gridIdx][1],
 							  0);
-	weights[gridIdx] = 1.0 / (double) grid.size();
-      }
-      
-      mAllConfigsAbfs.insert (make_pair(ss.str(),
+      mAllConfigsAbfs.insert (make_pair(ssConfig.str(),
 					log10_weighted_sum (l10_abf_metas_c,
-							    weights,
+							    &(vWeights[0]),
 							    grid.size())));
-      if (gsl_combination_next (c) != GSL_SUCCESS)
+      if (gsl_combination_next (comb) != GSL_SUCCESS)
 	break;
     }
-    
-    gsl_combination_free (c);
+    gsl_combination_free (comb);
   }
 }
 
 void
 computeAveragesAbfMetaOverConfigs (
   map<string, double> & mAllConfigsAbfs,
-  const double & l10_abf_meta)
+  const double & l10_abf_meta,
+  const string & calcAllConfigs)
 {
   vector<double> vL10Abfs, vWeights;
   
   // compute the average ABF over all configurations
   for (map<string, double>::iterator it = mAllConfigsAbfs.begin();
-       it != mAllConfigsAbfs.end();
-       ++it)
+       it != mAllConfigsAbfs.end(); ++it)
     vL10Abfs.push_back (it->second);
   vL10Abfs.push_back (l10_abf_meta);
   vWeights.assign (vL10Abfs.size(), 1.0 / (double) vL10Abfs.size());
-  mAllConfigsAbfs["avg.all"] = log10_weighted_sum (&vL10Abfs[0],
-						   &vWeights[0],
-						   vL10Abfs.size());
   
-  // compute the average ABF over the consistent configuration
-  // and each one-subgroup-eQTL configuration
-  vL10Abfs.clear();
-  vWeights.clear();
-  for (map<string, double>::iterator it = mAllConfigsAbfs.begin();
-       it != mAllConfigsAbfs.end();
-       ++it)
-    if (it->first.length() == 1)
-      vL10Abfs.push_back (it->second);
-  vL10Abfs.push_back (l10_abf_meta);
-  vWeights.assign (vL10Abfs.size(), 1.0 / (double) vL10Abfs.size());
-  mAllConfigsAbfs["avg.subset"] = log10_weighted_sum (&vL10Abfs[0],
-						      &vWeights[0],
-						      vL10Abfs.size());
+  if (calcAllConfigs.compare("subset") == 0)
+    mAllConfigsAbfs["subset"] = log10_weighted_sum (&vL10Abfs[0],
+						    &vWeights[0],
+						    vL10Abfs.size());
+  else
+  {
+    mAllConfigsAbfs["all"] = log10_weighted_sum (&vL10Abfs[0],
+						 &vWeights[0],
+						 vL10Abfs.size());
+    
+    vL10Abfs.clear();
+    vWeights.clear();
+    for (map<string, double>::iterator it = mAllConfigsAbfs.begin();
+	 it != mAllConfigsAbfs.end(); ++it)
+      if (it->first.length() == 1)
+	vL10Abfs.push_back (it->second);
+    vL10Abfs.push_back (l10_abf_meta);
+    vWeights.assign (vL10Abfs.size(), 1.0 / (double) vL10Abfs.size());
+    mAllConfigsAbfs["subset"] = log10_weighted_sum (&vL10Abfs[0],
+						    &vWeights[0],
+						    vL10Abfs.size());
+  }
 }
 
 /** \brief Compute the log10 of the three approximate Bayes factors for 
@@ -599,15 +577,16 @@ computeAbfsForPairOverGrid (
   size_t & nbSubgroupsUsed,
   size_t & nbSamplesUsed,
   const size_t & nbSubgroups,
-  const bool & calcAllConfigs,
-  gsl_combination * c,
+  const string & calcAllConfigs,
+  gsl_combination * comb,
   map<string, double> & mAllConfigsAbfs,
   const int & verbose)
 {
   size_t subgroup = 0, gridIdx = 0;
   vector< vector<double> > mAllSumStatsCorr;
   double l10_abf_metas[grid.size()], l10_abf_fixs[grid.size()], 
-    l10_abf_maxhs[grid.size()], weights[grid.size()];
+    l10_abf_maxhs[grid.size()];
+  vector<double> vWeights (grid.size(), 1.0 / (double) grid.size());
   
   // apply small sample size correction for the summary stats of each study,
   // and keep the one being defined
@@ -642,29 +621,39 @@ computeAbfsForPairOverGrid (
 						    + grid[gridIdx][1],
 						    0,
 						    verbose-1);
-    weights[gridIdx] = 1.0 / (double) grid.size();
   }
   
   // calculate the 3 weighted ABFs
-  l10_abf_meta = log10_weighted_sum (l10_abf_metas, weights, grid.size());
-  l10_abf_fix = log10_weighted_sum (l10_abf_fixs, weights, grid.size());
-  l10_abf_maxh = log10_weighted_sum (l10_abf_maxhs, weights, grid.size());
+  l10_abf_meta = log10_weighted_sum (l10_abf_metas, &(vWeights[0]),
+				     grid.size());
+  l10_abf_fix = log10_weighted_sum (l10_abf_fixs, &(vWeights[0]),
+				    grid.size());
+  l10_abf_maxh = log10_weighted_sum (l10_abf_maxhs, &(vWeights[0]),
+				     grid.size());
   if (verbose > 0)
     printf("subgroups=%zu samples=%zu l10_abf_meta=%e l10_abf_fix=%e l10_abf_maxh=%e\n",
 	   nbSubgroupsUsed, nbSamplesUsed, l10_abf_meta, l10_abf_fix,
 	   l10_abf_maxh);
   
-  if (calcAllConfigs)
+  if (! calcAllConfigs.empty())
   {
     computeAbfMetaOfAllConfigsForPairOverGrid (mAllConfigsAbfs,
 					       nbSubgroupsUsed,
-					       c,
+					       calcAllConfigs,
+					       comb,
 					       mAllSumStatsCorr,
 					       grid);
-    computeAveragesAbfMetaOverConfigs (mAllConfigsAbfs, l10_abf_meta);
+    computeAveragesAbfMetaOverConfigs (mAllConfigsAbfs, l10_abf_meta,
+				       calcAllConfigs);
     if (verbose > 0)
-      printf ("configs=%zu avg.all=%f avg.subset=%f\n", mAllConfigsAbfs.size(),
-	      mAllConfigsAbfs["avg.all"], mAllConfigsAbfs["avg.subset"]);
+    {
+      if (calcAllConfigs.compare("subset") == 0)
+	printf ("configs=%zu avg.subset=%f\n", mAllConfigsAbfs.size(),
+		mAllConfigsAbfs["subset"]);
+      else
+	printf ("configs=%zu avg.subset=%f avg.all=%f\n", mAllConfigsAbfs.size(),
+		mAllConfigsAbfs["subset"], mAllConfigsAbfs["all"]);
+    }
   }
 }
 
@@ -679,15 +668,13 @@ writeOutputResultsForPair (
   const double & l10_abf_fix,
   const double & l10_abf_maxh,
   const size_t & nbSubgroups,
-  const bool & calcAllConfigs,
-  gsl_combination * c,
-  const map<string, double> & mAllConfigsAbfs,
-  const bool & saveSumStats,
-  const map<size_t, vector<double> > & mAllSumStats)
+  const string & calcAllConfigs,
+  gsl_combination * comb,
+  const map<string, double> & mAllConfigsAbfs)
 {
-  size_t subgroup, i, j;
+  size_t i, j;
   vector<string> tokens;
-  stringstream ss;
+  stringstream ssConfig;
   map<string, double>::const_iterator it;
   
   split (pairId, '|', tokens);
@@ -705,42 +692,37 @@ writeOutputResultsForPair (
 	    << " " << l10_abf_meta
 	    << " " << l10_abf_fix
 	    << " " << l10_abf_maxh;
-  
-  if (calcAllConfigs)
+  if (! calcAllConfigs.empty())
   {
-    outStream << " " << mAllConfigsAbfs.find("avg.all")->second
-	      << " " << mAllConfigsAbfs.find("avg.subset")->second;
-    for(i=1; i<nbSubgroups; ++i)
+    outStream << " " << mAllConfigsAbfs.find("subset")->second;
+    if (calcAllConfigs.compare("all") == 0)
+      outStream << " " << mAllConfigsAbfs.find("all")->second;
+    for(i = 1; i < nbSubgroups; ++i)
     {
-      c = gsl_combination_calloc (nbSubgroups, i);
-      if (c == NULL)
+      if (i > 1 && calcAllConfigs.compare("subset") == 0)
+	break;
+      comb = gsl_combination_calloc (nbSubgroups, i);
+      if (comb == NULL)
       {
 	cerr << "ERROR: can't allocate memory for the combination" << endl;
 	exit (1);
       }
       while (true)
       {
-	ss.str("");
-	for (j=0; j<c->k; ++j)
-	  ss << gsl_combination_get (c, j) + 1;
-	it = mAllConfigsAbfs.find(ss.str());
+	ssConfig.str("");
+	for (j = 0; j < comb->k; ++j)
+	  ssConfig << gsl_combination_get (comb, j) + 1;
+	it = mAllConfigsAbfs.find(ssConfig.str());
 	if (it != mAllConfigsAbfs.end())
 	  outStream << " " << it->second;
 	else
 	  outStream << " " << numeric_limits<double>::quiet_NaN();
-	if (gsl_combination_next (c) != GSL_SUCCESS)
+	if (gsl_combination_next (comb) != GSL_SUCCESS)
 	  break;
       }
-      gsl_combination_free (c);
+      gsl_combination_free (comb);
     }
-    
   }
-  
-  if (saveSumStats)
-    for (subgroup = 0; subgroup < nbSubgroups; ++subgroup)
-      outStream << " " << mAllSumStats.find(subgroup)->second[1]  // betahat
-		<< " " << mAllSumStats.find(subgroup)->second[2]  // sebetahat
-		<< " " << mAllSumStats.find(subgroup)->second[3]; // sigmahat
   
   outStream << endl;
 }
@@ -755,32 +737,25 @@ computeAndWriteAbfsForAllPairs (
   const vector< vector<double> > & grid,
   const string & outFile,
   const string & snpIdx,
-  const bool & saveSumStats,
-  const bool & calcAllConfigs,
+  const string & calcAllConfigs,
   const int & verbose)
 {
   size_t subgroup = 0, i = 0, nbPairs = 0, nbSubgroups = vInFiles.size(),
     nbSubgroupsUsed = 0, nbSamplesUsed = 0;
-  vector<ifstream *> vPtInStreams;
-  map<string, vector<size_t> >::const_iterator it_mP2P;
   string pairId;
-  vector<string> tokens;
   vector<size_t> vPositions;
   map<size_t, vector<double> > mAllSumStats;  // 1 vector of doubles per subgroup
   double l10_abf_meta = 0, l10_abf_fix = 0, l10_abf_maxh = 0;
-  ofstream outStream;
   vector<size_t> vNbSubgroups2Occurrences (nbSubgroups+1, 0);
   vector<size_t> vCounters = getCounters (mPairs2Positions.size(), 5);
-  gsl_combination * c = NULL;
+  gsl_combination * comb = NULL;
   map<string, double> mAllConfigsAbfs;
   
   if (verbose > 0)
-  {
-    cout << "compute the approximate Bayes factors ..." << endl;
-    fflush (stdout);
-  }
+    cout << "compute the approximate Bayes factors ..." << endl << flush;
   
   // open the input files once for all
+  vector<ifstream *> vPtInStreams;
   for (subgroup = 0; subgroup < nbSubgroups; ++subgroup)
   {
     ifstream * pt_inStream = new ifstream;
@@ -794,17 +769,13 @@ computeAndWriteAbfsForAllPairs (
   }
   
   // prepare the output file
-  outStream.open (outFile.c_str());
-  if (! outStream.good())
-  {
-    cerr << "ERROR: can't open file '" << outFile << "' for writing." << endl;
-    exit (1);
-  }
-  writeOutputHeader (outStream, calcAllConfigs, c, nbSubgroups, saveSumStats);
+  ofstream outStream;
+  openFile (outFile, outStream);
+  writeOutputHeader (outStream, calcAllConfigs, comb, nbSubgroups);
   
   // for each pair feature-SNP
-  for (it_mP2P = mPairs2Positions.begin();
-       it_mP2P != mPairs2Positions.end();
+  for (map<string, vector<size_t> >::const_iterator it_mP2P = 
+	 mPairs2Positions.begin(); it_mP2P != mPairs2Positions.end();
        ++it_mP2P)
   {
     ++nbPairs;
@@ -813,7 +784,7 @@ computeAndWriteAbfsForAllPairs (
     pairId = it_mP2P->first;
     vPositions = it_mP2P->second;
     if (verbose > 1)
-      cout << "#" << nbPairs << " " << pairId << endl;
+      cout << "#" << nbPairs << " " << pairId << endl << flush;
     
     // retrieve its summary statistics
     getSummaryStatsForPair (pairId, snpIdx, vPositions, vPtInStreams,
@@ -825,14 +796,14 @@ computeAndWriteAbfsForAllPairs (
     computeAbfsForPairOverGrid (grid, mAllSumStats, l10_abf_meta,
 				l10_abf_fix, l10_abf_maxh,
 				nbSubgroupsUsed, nbSamplesUsed,
-				nbSubgroups, calcAllConfigs, c,
+				nbSubgroups, calcAllConfigs, comb,
 				mAllConfigsAbfs, verbose-1);
     
     // write the results
     writeOutputResultsForPair (outStream, pairId, snpIdx, nbSubgroupsUsed,
 			       nbSamplesUsed, l10_abf_meta, l10_abf_fix,
-			       l10_abf_maxh, nbSubgroups, calcAllConfigs, c,
-			       mAllConfigsAbfs, saveSumStats, mAllSumStats);
+			       l10_abf_maxh, nbSubgroups, calcAllConfigs,
+			       comb, mAllConfigsAbfs);
   }
   
   // close all files
@@ -899,11 +870,12 @@ void help (char ** argv)
        << "  -s, --snp\tfile with a list of SNP identifiers to analyze" << endl
        << "  -x, --index\twhich SNP info to use to index pairs feature-SNP" << endl
        << "\t\tdefault=id+coord, but can be only 'id' or 'coord'" << endl
-       << "  -b, --beta\tsave the summary statistics of each subgroup in the output file" << endl
-       << "  -c, --config\tcalculate the BF 'meta' for each configuration" << endl
+       << "  -c, --config\tcalculate the ABF 'meta' for different configurations" << endl
        << "\t\tthe total number of configurations is 2^nb.subgroups" << endl
-       << "\t\t2 average BFs are reported (over all configs, or only subgroup-" << endl
-       << "\t\tconsistent and each single-subgroup-specific)" << endl
+       << "\t\tby default ABF meta, ABF fix and ABF maxh are reported" << endl
+       << "\t\t'subset' returns the ABF averaged over the consistent" << endl
+       << "\t\tand each single-subgroup-specific configurations" << endl
+       << "\t\t'all' returns the ABF averaged over all configurations" << endl
        << endl
        << "Examples:" << endl
        << "  " << argv[0] << " -i <input> -g <grid> -o <output>" << endl
@@ -939,8 +911,7 @@ parse_args (
   string & ftrsFile,
   string & snpsFile,
   string & snpIdx,
-  bool & saveSumStats,
-  bool & calcAllConfigs,
+  string & calcAllConfigs,
   int & verbose)
 {
   int c = 0;
@@ -957,12 +928,11 @@ parse_args (
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
 	{"index", required_argument, 0, 'x'},
-	{"beta", no_argument, 0, 'b'},
-	{"config",no_argument, 0, 'c'},
+	{"config", required_argument, 0, 'c'},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:bc",
+    c = getopt_long (argc, argv, "hVv:i:g:o:f:s:x:c:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -1003,11 +973,8 @@ parse_args (
     case 'x':
       snpIdx = optarg;
       break;
-    case 'b':
-      saveSumStats = true;
-      break;
     case 'c':
-      calcAllConfigs = true;
+      calcAllConfigs = optarg;
       break;
     case '?':
       break;
@@ -1039,24 +1006,34 @@ parse_args (
     help (argv);
     exit (1);
   }
+  ofstream outStream;
+  openFile (outFile, outStream);
+  outStream.close();
   if (snpIdx.empty())
     snpIdx = "id+coord";
+  if (! calcAllConfigs.empty() && calcAllConfigs.compare("subset") != 0
+      && calcAllConfigs.compare("all") != 0)
+  {
+    fprintf (stderr, "ERROR: option -c should be 'subset' or 'all).\n\n");
+    help (argv);
+    exit (1);
+  }
 }
 
 int main (int argc, char ** argv)
 {
-  string inDir, gridFile, outFile, ftrsFile, snpsFile, snpIdx;
-  bool saveSumStats = false, calcAllConfigs = false;
+  string inDir, gridFile, outFile, ftrsFile, snpsFile, snpIdx,
+    calcAllConfigs;
   int verbose = 1;
   parse_args (argc, argv, inDir, gridFile, outFile,
-	      ftrsFile, snpsFile, snpIdx, saveSumStats, calcAllConfigs,
-	      verbose);
+	      ftrsFile, snpsFile, snpIdx, calcAllConfigs, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
   {
     time (&startRawTime);
-    cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")" << endl;
+    cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
+	 << endl << flush;
   }
   
   vector<string> vInFiles;
@@ -1081,7 +1058,6 @@ int main (int argc, char ** argv)
 				  grid,
 				  outFile,
 				  snpIdx,
-				  saveSumStats,
 				  calcAllConfigs,
 				  verbose);
   
