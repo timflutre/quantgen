@@ -442,7 +442,7 @@ indexSnps (
   size_t totNbSamples, nbSamples;
   
   if (verbose > 0)
-    cout << "index SNPs in genotype file ..." << endl;
+    cout << "index SNPs in genotype file ..." << endl << flush;
   
   // read header line and record sample names with their column indices
   genoStream.clear ();
@@ -595,7 +595,7 @@ ols (
   else
   {
     if (verbose > 0)
-      cout << "genotypes are not variable enough" << endl;
+      cout << "genotypes are not variable enough" << endl << flush;
     *betahat = 0;
     *sebetahat = numeric_limits<double>::infinity();
     *sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
@@ -728,11 +728,8 @@ computePermutationPvaluesAtFeatureLevel (
   vector<double> resPerm;
   
   if (verbose > 0)
-  {
-    printf ("perform %zu permutations on the phenotypes (minBetaPval=%f) ...\n",
-	    nbPermutations, minBetaPval);
-    fflush (stdout);
-  }
+    cout << "perform " << nbPermutations << " permutations on the phenotypes"
+	 << " (minBetaPval=" << minBetaPval << ") ..." << endl << flush;
   
   perm = gsl_permutation_calloc (iFtrStats.y_init.size());
   if (perm == 0)
@@ -857,11 +854,9 @@ computePermutationPvaluesAtFeatureLevelParallel (
   vector<gsl_permutation *> vPerms; // for the indices of the phenotypes vector
   
   if (verbose > 0)
-  {
-    printf ("perform %zu permutations on the phenotypes (%d threads) ...\n",
-	    nbPermutations, nbThreads);
-    fflush (stdout);
-  }
+    cout << "perform " << nbPermutations << " permutations on the phenotypes"
+	 << " (minBetaPval=" << minBetaPval << ", "
+	 << nbThreads << " threads) ..." << endl << flush;
   
   for (t=0; t<nbThreads; ++t)
   {
@@ -1164,7 +1159,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
   const int & nbThreads,
   const vector<size_t> & vPermIndices,
   const bool & trickPerm,
-  const int & seed,
+  const size_t & seed,
   const int & verbose)
 {
   FtrStats iFtrStats;
@@ -1238,7 +1233,8 @@ computeAndWriteSummaryStatsFtrPerFtr (
     if (nbPermutations > 0)
     {
       cout << nbPermutations << " permutation"
-	   << (nbPermutations > 1 ? "s" : "");
+	   << (nbPermutations > 1 ? "s" : "")
+	   << ", seed=" << seed;
       if (trickPerm)
 	cout << ", with trick";
       else
@@ -1248,8 +1244,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
 	     << (nbThreads > 1 ? "s" : "");
       cout << ")";
     }
-    cout << " ..." << endl;
-    fflush (stdout);
+    cout << " ..." << endl << flush;
   }
   
   // read header line of the phenotype file
@@ -1348,12 +1343,10 @@ computeAndWriteSummaryStatsFtrPerFtr (
       continue;
     
     if (verbose > 1)
-    {
-      printf ("analyzing feature %s (%s, %zu cis SNPs) ...\n",
-	      iFtrStats.name.c_str(), iFtrStats.chr.c_str(),
-	      iFtrStats.vSnpStats.size());
-      fflush (stdout);
-    }
+      cout << "analyzing feature " << iFtrStats.name
+	   << " (" << iFtrStats.chr << ", "
+	   << iFtrStats.vSnpStats.size() << " cis SNPs) ..."
+	   << endl << flush;
     ++nbAnalyzedFtrs;
     
     // loop over SNPs in cis
@@ -1512,7 +1505,7 @@ parse_args (
   string & anchor,
   size_t & lenCis,
   bool & trickPerm,
-  int & seed,
+  size_t & seed,
   int & verbose)
 {
   int c = 0;
@@ -1576,7 +1569,7 @@ parse_args (
       }
       if (strcmp(long_options[option_index].name, "seed") == 0)
       {
-	seed = atoi(optarg);
+	seed = atol(optarg);
 	break;
       }
     case 'h':
@@ -1703,9 +1696,8 @@ parse_args (
     nbThreads = min(nbThreads, omp_get_max_threads());
     omp_set_num_threads (nbThreads);
   }
-  if (nbPermutations > 0)
-    if (seed < 0)
-      seed = (int) getSeed();
+  if (nbPermutations > 0 && seed == string::npos)
+    seed = getSeed();
 }
 
 int main (int argc, char ** argv)
@@ -1714,9 +1706,9 @@ int main (int argc, char ** argv)
     ftrsFile, snpsFile, samplesFile, chrToKeep = "", permFile,
     anchor = "TSS+TES";
   double minMaf = 0.0;
-  size_t nbPermutations = 0, lenCis = 100000;
+  size_t nbPermutations = 0, seed = string::npos, lenCis = 100000;
   bool needQnorm = false, calcSpearman = false, trickPerm = false;
-  int verbose = 1, nbThreads = 1, seed = -1;
+  int verbose = 1, nbThreads = 1;
   
   parse_args (argc, argv, genoFile, phenoFile, outFile, ftrCoordsFile,
 	      linksFile, chrToKeep, ftrsFile, snpsFile, samplesFile,
@@ -1728,7 +1720,7 @@ int main (int argc, char ** argv)
   {
     time (&startRawTime);
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
-	 << endl;
+	 << endl << flush;
   }
   
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsFile, verbose);
