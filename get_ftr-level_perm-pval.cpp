@@ -17,7 +17,7 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  *  g++ -Wall -O3 -fopenmp utils.cpp get_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_ftr-level_perm-pval
- *  help2man -o .man ./get_ftr-level_perm-pval
+ *  help2man -o get_ftr-level_perm-pval.man ./get_ftr-level_perm-pval
  *  groff -mandoc get_ftr-level_perm-pval.man > get_ftr-level_perm-pval.ps
 */
 
@@ -26,11 +26,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <getopt.h>
-#include <sys/stat.h>  // for mkdir
-#include <sys/types.h> // for mkdir
-#include <unistd.h>    // for basename
 
 #include <iostream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <map>
@@ -44,6 +42,7 @@ using namespace std;
 
 #include "utils.h"
 #include "get_summary_stats.cpp"
+#include "get_abf_meta.cpp"
 
 /** \brief Display the help on stdout.
 */
@@ -64,16 +63,12 @@ void help (char ** argv)
        << "\t\tsamples in columns should be in same order as in phenotype file" << endl
        << "  -p, --pheno\trelative path to directory with one phenotypes file per subgroup" << endl
        << "\t\trow 1 for sample names, column 1 for feature names" << endl
+       << "\t\teach subgroup should have the same set of features" << endl
        << "      --fcoord\tBED file with the features coordinates" << endl
        << "\t\tfeatures should be in same order than in phenotypes files" << endl
-       << "  -l, --links\tfile with links between genes and SNPs" << endl
-       << "\t\tcustom format: feature<space/tab>SNP|coord" << endl
-       << "\t\tfeatures should be in same order than in phenotypes files" << endl
-       << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
+       << "\t\tfield delimiters are tabs" << endl
        << "      --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
-       << "  -f, --ftr\tfile with a list of features to analyze" << endl
-       << "\t\tone feature name per line" << endl
        << "      --truth\tfile with the ABFs on the original dataset" << endl
        << "\t\toutput from get_abf_meta" << endl
        << "      --abf\twhich ABF to use as the test statistic for the permutations" << endl
@@ -84,12 +79,14 @@ void help (char ** argv)
        << "      --trick\tstop after the tenth permutation for which the test statistic" << endl
        << "\t\tis better than or equal to the true value, and sample from a" << endl
        << "\t\tuniform between 11/(nbPermSoFar+2) and 11/(nbPermSoFar+1)" << endl
-       << "  -e, --extr\textract from --geno only the SNPs in cis of the features in --pheno" << endl
-       << "\t\tto speed up, tmp files are removed" << endl
+       << "  -f, --ftr\tfile with a list of features to analyze" << endl
+       << "\t\tone feature name per line" << endl
+       << "  -l, --links\tfile with links between genes and SNPs" << endl
+       << "\t\tcustom format: feature<space/tab>SNP|coord" << endl
+       << "\t\tfeatures should be in same order than in phenotype file" << endl
+       << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
        << "      --seed\tseed for the random number generator" << endl
        << "\t\tby default, the RNG is initialized via microseconds from epoch" << endl
-       << "  -t, --thread\tnumber of threads (default=1)" << endl
-       << "\t\tused for SNPs in cis of the same feature (get_summary_stats)" << endl
        << endl;
 }
 
@@ -117,17 +114,15 @@ parse_args (
   string & genoFile,
   string & phenoDir,
   string & ftrCoordsFile,
-  string & linksFile,
   string & gridFile,
-  string & ftrFile,
   string & truthFile,
   string & whichAbf,
   string & outFile,
   size_t & nbPermutations,
   bool & trickPerm,
-  bool & extractSnps,
-  int & seed,
-  int & nbThreads,
+  string & ftrsToKeepFile,
+  string & linksFile,
+  size_t & seed,
   int & verbose)
 {
   int c = 0;
@@ -141,21 +136,19 @@ parse_args (
 	{"geno", required_argument, 0, 'g'},
 	{"pheno", required_argument, 0, 'p'},
 	{"fcoord", required_argument, 0, 0},
-	{"links", required_argument, 0, 'l'},
 	{"grid", required_argument, 0, 0},
-	{"ftr", required_argument, 0, 'f'},
 	{"truth", required_argument, 0, 0},
 	{"abf", required_argument, 0, 0},
 	{"out", required_argument, 0, 'o'},
 	{"perm", required_argument, 0, 0},
 	{"trick", no_argument, 0, 0},
-	{"extr", no_argument, 0, 'e'},
+	{"ftr", required_argument, 0, 'f'},
+	{"links", required_argument, 0, 'l'},
 	{"seed", required_argument, 0, 0},
-	{"thread", required_argument, 0, 't'},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:l:f:o:et:",
+    c = getopt_long (argc, argv, "hVv:g:p:o:f:l:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -196,7 +189,7 @@ parse_args (
       }
       if (strcmp(long_options[option_index].name, "seed") == 0)
       {
-	seed = atoi(optarg);
+	seed = atol(optarg);
 	break;
       }
     case 'h':
@@ -214,20 +207,14 @@ parse_args (
     case 'p':
       phenoDir = optarg;
       break;
-    case 'l':
-      linksFile = optarg;
-      break;
-    case 'f':
-      ftrFile = optarg;
-      break;
     case 'o':
       outFile = optarg;
       break;
-    case 'e':
-      extractSnps = true;
+    case 'f':
+      ftrsToKeepFile = optarg;
       break;
-    case 't':
-      nbThreads = atoi(optarg);
+    case 'l':
+      linksFile = optarg;
       break;
     case '?':
       printf ("\n"); help (argv);
@@ -273,18 +260,6 @@ parse_args (
     help (argv);
     exit (1);
   }
-  if (linksFile.empty())
-  {
-    fprintf (stderr, "ERROR: missing links file (-l).\n\n");
-    help (argv);
-    exit (1);
-  }
-  if (! doesFileExist (linksFile))
-  {
-    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", linksFile.c_str());
-    help (argv);
-    exit (1);
-  }
   if (truthFile.empty())
   {
     fprintf (stderr, "ERROR: missing truth file (--truth).\n\n");
@@ -303,78 +278,374 @@ parse_args (
     help (argv);
     exit (1);
   }
+  ofstream outStream;
+  openFile (outFile, outStream);
+  outStream.close();
+  if (whichAbf.compare("abf.meta") == 0 && whichAbf.compare("abf.fix") == 0
+      && whichAbf.compare("abf.meta.avg.subset") == 0
+      && whichAbf.compare("abf.meta.avg.all") == 0)
+  {
+    fprintf (stderr, "ERROR: --abf should be abf.meta, abf.fix, abf.meta.avg.subset or abf.meta.avg.all.\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (linksFile.empty())
+  {
+    fprintf (stderr, "ERROR: missing links file (-l).\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (! doesFileExist (linksFile))
+  {
+    fprintf (stderr, "ERROR: can't find file '%s'.\n\n", linksFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (seed == string::npos)
+    seed = getSeed ();
 }
 
-vector<string>
-getListAllInputFeatures (
+struct Snp
+{
+  string name; // eg. rs2205177
+  string chr; // eg. chr21
+  size_t coord; // 1-based coordinate
+  vector<double> vGenos; // genotypes of samples
+  vector<bool> vIsNa; // missing values
+  double maf; // minor allele frequency
+};
+
+struct Feature
+{
+  string name; // eg. ENSG00000182816
+  string chr; // eg. chr21
+  size_t start; // 1-based coordinate
+  size_t end; // idem
+  int bin; // UCSC binning system
+  vector< vector<double> > vvPhenos; // phenotypes of samples per subgroup
+  vector< vector<bool> > vvIsNa; // missing values per subgroup
+  vector <Snp *> vCisSnps;
+  double maxL10TrueAbf; // max log10(ABF) over SNPs on non-permuted data
+  double permPval; // permutation P-value of the joint analysis
+};
+
+void
+Snp_init (
+  Snp & iSnp,
+  const string & name,
+  const size_t & nbSubgroups,
+  const size_t & nbSamples)
+{
+  iSnp.name = name;
+  iSnp.vGenos.assign (nbSamples, 0.0);
+  iSnp.vIsNa.assign (nbSamples, false);
+}
+
+void
+Feature_init (
+  Feature & iFtr,
+  const string & name,
+  const size_t & nbSubgroups,
+  const size_t & nbSamples)
+{
+  iFtr.name = name;
+  for (size_t s = 0; s < nbSubgroups; ++s)
+  {
+    iFtr.vvPhenos.push_back (vector<double> (nbSamples, 0.0));
+    iFtr.vvIsNa.push_back (vector<bool> (nbSamples, false));
+  }
+  iFtr.maxL10TrueAbf = 0.0;
+  iFtr.permPval = 1.0;
+}
+
+void loadFeaturesFromPhenoFiles(
+  map<string, Feature> & mFeatures,
+  vector<string> & vSamples,
   const vector<string> & vPhenoFiles,
+  const vector<string> & vFtrsToKeep,
   const int & verbose)
 {
-  vector<string> vFtrsToKeep, tokens;
-  string line;
-  ifstream phenoStream;
-  
   if (verbose > 0)
-  {
-    cout << "retrieve list of features ..." << endl;
-    fflush (stdout);
-  }
+    cout << "load phenotype values from each subgroup ..." << endl << flush;
   
-  for (vector<string>::const_iterator it = vPhenoFiles.begin();
-       it != vPhenoFiles.end(); ++it)
+  ifstream phenoStream;
+  string line;
+  vector<string> tokens;
+  
+  for (size_t s = 0; s < vPhenoFiles.size(); ++s)
   {
-    phenoStream.open(it->c_str());
-    if (! phenoStream.is_open())
+    openFile (vPhenoFiles[s], phenoStream);
+    
+    // check header line
+    getline (phenoStream, line);
+    if (line.empty())
     {
-      cerr << "ERROR: can't open file " << *it << endl;
+      cerr << "ERROR: file " << vPhenoFiles[s] << " is empty" << endl;
       exit (1);
     }
-    getline (phenoStream, line); // skip header
+    if (vSamples.empty())
+      split (line, " \t", vSamples);
+    else
+    {
+      split (line, " \t", tokens);
+      if (tokens.size() != vSamples.size())
+      {
+	cerr << "ERROR: all phenotype files don't have same number of samples"
+	     << endl;
+	exit (1);
+      }
+      for (size_t i = 0; i < vSamples.size(); ++i)
+	if (tokens[i].compare(vSamples[i]) != 0)
+	{
+	  cerr << "ERROR: all phenotype files don't have the same samples"
+	       << endl << "or they are not in the same order" << endl;
+	  exit (1);
+	}
+    }
+    if (verbose > 0 && s == 0)
+      cout << "nb of samples: " << vSamples.size() << endl << flush;
+    
+    // load phenotype values
     while (true)
     {
       getline (phenoStream, line);
       if (line.empty())
 	break;
-      split (line, ' ', tokens);
-      if (find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
+      split (line, " \t", tokens);
+      if (! vFtrsToKeep.empty()
+	  && find (vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
 	  == vFtrsToKeep.end())
-	vFtrsToKeep.push_back (tokens[0]);
+	continue;
+      
+      if (mFeatures.find(tokens[0]) == mFeatures.end())
+      {
+	if (s != 0)
+	{
+	  cerr << "ERROR: all phenotype files don't have the same features"
+	       << endl;
+	  exit (1);
+	}
+	Feature iFtr;
+	Feature_init (iFtr, tokens[0], vPhenoFiles.size(), vSamples.size());
+	for (size_t i = 1; i < tokens.size(); ++i)
+	{
+	  if (tokens[i].compare("NA") == 0)
+	    iFtr.vvIsNa[s][i-1] = true;
+	  iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
+	}
+	mFeatures.insert (make_pair (tokens[0], iFtr));
+      }
+      else
+      {
+	for (size_t i = 1; i < tokens.size() ; ++i)
+	{
+	  if (tokens[i].compare("NA") == 0)
+	    mFeatures[tokens[0]].vvIsNa[s][i-1] = true;
+	  mFeatures[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
+	}
+      }
     }
+    
     phenoStream.close();
   }
   
-  if (verbose > 0)
+  if (mFeatures.size() == 0)
   {
-    cout << "nb of features: " << vFtrsToKeep.size() << endl;
-    fflush (stdout);
-  }
-  
-  return vFtrsToKeep;
-}
-
-map<string, double>
-getTrueAbfForEachFtr (
-  const string & truthFile,
-  const string & whichAbf,
-  const vector<string> & vFtrsToKeep,
-  const int & verbose)
-{
-  map<string, double> mFtr2TrueL10Abf;
-  
-  ifstream truthStream;
-  truthStream.open(truthFile.c_str());
-  if (! truthStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << truthFile << endl;
+    cerr << "ERROR: no feature to analyze" << endl;
     exit (1);
   }
   if (verbose > 0)
+    cout << "nb of features: " << mFeatures.size() << endl;
+}
+
+void
+loadFtrCoordsFromBedFile (
+  map<string, Feature> & mFeatures,
+  const string & ftrCoordsFile,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "load feature coordinates ..." << endl << flush;
+  
+  ifstream ftrCoordsStream;
+  openFile (ftrCoordsFile, ftrCoordsStream);
+  
+  string line;
+  vector<string> tokens;
+  size_t countFtrs = 0;
+  while (true)
   {
-    cout <<"retrieve true ABFs from file " << truthFile << " ..." << endl;
-    fflush (stdout);
+    getline (ftrCoordsStream, line);
+    if (line.empty())
+      break;
+    split (line, " \t", tokens);
+    if (mFeatures.find(tokens[3]) == mFeatures.end())
+      continue;
+    ++countFtrs;
+    mFeatures[tokens[3]].chr = tokens[0];
+    mFeatures[tokens[3]].start = atol (tokens[1].c_str()) + 1;
+    mFeatures[tokens[3]].end = atol (tokens[2].c_str());
   }
   
-  // check first line is proper header
+  ftrCoordsStream.close();
+  
+  if (countFtrs < mFeatures.size())
+  {
+    cerr << "ERROR: " << mFeatures.size() - countFtrs
+	 << " feature coordinates are missing" << endl;
+    exit (1);
+  }
+}
+
+void
+loadLinksFtrCisSnpsFromFile (
+  map<string, Feature> & mFeatures,
+  map<string, Snp> & mSnps,
+  const string & linksFile,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "load links features - SNPs in cis ..." << endl << flush;
+  
+  ifstream linksStream;
+  openFile (linksFile, linksStream);
+  
+  string line;
+  vector<string> tokens, tokens2;
+  size_t countLines = 0;
+  while (true)
+  {
+    getline (linksStream, line);
+    if (line.empty())
+      break;
+    ++countLines;
+    split (line, " \t", tokens);
+    if (mFeatures.find(tokens[0]) == mFeatures.end())
+      continue;
+    split (tokens[1], '|', tokens2); // SNPid|SNPcoord
+    if (mSnps.find(tokens2[0]) == mSnps.end())
+    {
+      Snp iSnp;
+      Snp_init (iSnp, tokens2[0], mFeatures[tokens[0]].vvPhenos.size(),
+		mFeatures[tokens[0]].vvPhenos[0].size());
+      mSnps.insert (make_pair (iSnp.name, iSnp));
+    }
+    mFeatures[tokens[0]].vCisSnps.push_back (&(mSnps[tokens2[0]]));
+  }
+  
+  linksStream.close();
+  
+  map<string, Feature>::iterator it = mFeatures.begin();
+  while (it != mFeatures.end())
+  {
+    if (it->second.vCisSnps.size() == 0)
+      mFeatures.erase (it++);
+    else++it;
+  }
+  
+  if (verbose > 0)
+    cout << mSnps.size() << " SNPs in cis of " << mFeatures.size () << " features" << endl;
+}
+
+void
+loadGenoSnpsFromFile (
+  map<string, Snp> & mSnps,
+  const string & genoFile,
+  const vector<string> & vSamples,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "load genotype values ..." << endl << flush;
+  
+  ifstream genoStream;
+  openFile (genoFile, genoStream);
+  
+  // check header line
+  string line;
+  vector<string> tokens;
+  getline (genoStream, line);
+  if (line.empty())
+  {
+    cerr << "ERROR: file " << genoFile << " is empty" << endl;
+    exit (1);
+  }
+  split (line, " \t", tokens);
+  if (tokens.size() -5 != vSamples.size())
+  {
+    cerr << "ERROR: different number of samples between genotypes ("
+	 << (tokens.size() - 5) << ") and phenotypes (" << vSamples.size()
+	 << ")" << endl;
+    exit (1);
+  }
+  for (size_t i = 0; i < vSamples.size(); ++i)
+    if (tokens[5+i].compare(vSamples[i]) != 0)
+    {
+      cerr << "ERROR: different samples between genotype and phenotype files"
+	   << endl << "or they are not in the same order" << endl;
+      exit (1);
+    }
+  
+  // load genotype values
+  size_t countSnps = 0;
+  double maf, AA, AB, BB;
+  while (true)
+  {
+    getline (genoStream, line);
+    if (line.empty())
+      break;
+    split (line, " \t", tokens);
+    if (mSnps.find(tokens[1]) == mSnps.end())
+      continue;
+    ++countSnps;
+    mSnps[tokens[1]].chr = tokens[0];
+    mSnps[tokens[1]].coord = atol (tokens[2].c_str());
+    maf = 0;
+    for (size_t i = 0; i < vSamples.size(); ++i)
+    {
+      AA = atof(tokens[5+3*i].c_str());
+      AB = atof(tokens[5+3*i+1].c_str());
+      BB = atof(tokens[5+3*i+2].c_str());
+      if (AA == 0 && AB == 0 && BB == 0)
+	mSnps[tokens[1]].vIsNa[i] = true;
+      else
+      {
+	mSnps[tokens[1]].vGenos[i] = 0 * AA + 1 * AB + 2 * BB;
+	maf += mSnps[tokens[1]].vGenos[i];
+      }
+    }
+    maf /= 2 * (vSamples.size()
+		- count (mSnps[tokens[1]].vIsNa.begin(),
+			 mSnps[tokens[1]].vIsNa.end(),
+			 true));
+    mSnps[tokens[1]].maf = maf <= 0.5 ? maf : (1 - maf);
+  }
+  
+  genoStream.close();
+  
+  for (map<string, Snp>::iterator it = mSnps.begin();
+       it != mSnps.end(); ++it)
+    if (it->second.chr.empty())
+    {
+      cerr << "ERROR: SNP " << it->first << " has no genotype" << endl;
+      exit (1);
+    }
+}
+
+void
+getAbfsFromTruthFile (
+  map<string, Feature> & mFeatures,
+  const string & truthFile,
+  const string & whichAbf,
+  const map<string, Snp> & mSnps,
+  const int & verbose)
+{  
+  if (verbose > 0)
+    cout << "load true ABFs ..." << endl << flush;
+  
+  ifstream truthStream;
+  openFile (truthFile, truthStream);
+  
+  // check header line
   string line;
   getline (truthStream, line);
   if (line.empty())
@@ -384,7 +655,7 @@ getTrueAbfForEachFtr (
   }
   
   vector<string> tokens;
-  split (line, ' ', tokens);
+  split (line, " \t", tokens);
   if ((whichAbf.compare("abf.meta") == 0
        || whichAbf.compare("abf.fix") == 0)
       && tokens.size() < 7)
@@ -393,8 +664,8 @@ getTrueAbfForEachFtr (
 	 << " 7 columns in his header" << endl;
     exit (1);
   }
-  if ((whichAbf.compare("abf.meta.avg.all") == 0
-       || whichAbf.compare("abf.meta.avg.subset") == 0)
+  if ((whichAbf.compare("abf.meta.avg.subset") == 0
+       || whichAbf.compare("abf.meta.avg.all") == 0)
       && tokens.size() < 10)
   {
     cerr << "ERROR: file " << truthFile << " should have at least"
@@ -415,491 +686,239 @@ getTrueAbfForEachFtr (
 	 << "ftr snp coord nb.subgroups nb.samples l10abf.meta l10abf.fix l10abf.maxh" << endl;
     exit (1);
   }
-  if ((whichAbf.compare("abf.meta.avg.all") == 0
-       || whichAbf.compare("abf.meta.avg.subset") == 0)
-      && (tokens[8].compare("l10abf.meta.avg.all.c") != 0
-	  || tokens[9].compare("l10abf.meta.avg.subset.c") != 0))
+  if ((whichAbf.compare("abf.meta.avg.subset") == 0
+       || whichAbf.compare("abf.meta.avg.all") == 0)
+      && (tokens[8].compare("l10abf.meta.avg.subset.c") != 0
+	  || tokens[9].compare("l10abf.meta.avg.all.c") != 0))
   {
     cerr << "ERROR: header line of file " << truthFile
 	 << " should start like this:" << endl
-	 << "ftr snp coord nb.subgroups nb.samples l10abf.meta l10abf.fix l10abf.maxh l10abf.meta.avg.all.c l10abf.meta.avg.subset.c" << endl;
+	 << "ftr snp coord nb.subgroups nb.samples l10abf.meta l10abf.fix l10abf.maxh l10abf.meta.avg.subset.c l10abf.meta.avg.all.c" << endl;
     exit (1);
   }
   
-  while (truthStream.good())
+  while (true)
   {
     getline (truthStream, line);
     if (line.empty())
       break;
-    split (line, ' ', tokens);
-    if (find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
-	!= vFtrsToKeep.end())
-    {
-      if (mFtr2TrueL10Abf.find(tokens[0]) == mFtr2TrueL10Abf.end())
-	mFtr2TrueL10Abf.insert (make_pair (tokens[0], -1));
-      if (whichAbf.compare("abf.meta") == 0
-	  && atof(tokens[5].c_str()) > mFtr2TrueL10Abf[tokens[0]])
-	mFtr2TrueL10Abf[tokens[0]] = atof(tokens[5].c_str());
-      else if (whichAbf.compare("abf.fix") == 0
-	       && atof(tokens[6].c_str()) > mFtr2TrueL10Abf[tokens[0]])
-	mFtr2TrueL10Abf[tokens[0]] = atof(tokens[6].c_str());
-      else if (whichAbf.compare("abf.meta.avg.all") == 0
-	       && atof(tokens[8].c_str()) > mFtr2TrueL10Abf[tokens[0]])
-	mFtr2TrueL10Abf[tokens[0]] = atof(tokens[8].c_str());
-      else if (whichAbf.compare("abf.meta.avg.subset") == 0
-	       && atof(tokens[9].c_str()) > mFtr2TrueL10Abf[tokens[0]])
-	mFtr2TrueL10Abf[tokens[0]] = atof(tokens[9].c_str());
-    }
+    split (line, " \t", tokens);
+    if (mFeatures.find(tokens[0]) == mFeatures.end())
+      continue;
+    if (mSnps.find(tokens[1]) == mSnps.end())
+      continue;
+    if (whichAbf.compare("abf.meta") == 0
+	&& atof(tokens[5].c_str()) > mFeatures[tokens[0]].maxL10TrueAbf)
+      mFeatures[tokens[0]].maxL10TrueAbf = atof(tokens[5].c_str());
+    else if (whichAbf.compare("abf.fix") == 0
+	     && atof(tokens[6].c_str()) > mFeatures[tokens[0]].maxL10TrueAbf)
+      mFeatures[tokens[0]].maxL10TrueAbf = atof(tokens[6].c_str());
+    else if (whichAbf.compare("abf.meta.avg.subset") == 0
+	     && atof(tokens[8].c_str()) > mFeatures[tokens[0]].maxL10TrueAbf)
+      mFeatures[tokens[0]].maxL10TrueAbf = atof(tokens[8].c_str());
+    else if (whichAbf.compare("abf.meta.avg.all") == 0
+	     && atof(tokens[9].c_str()) > mFeatures[tokens[0]].maxL10TrueAbf)
+      mFeatures[tokens[0]].maxL10TrueAbf = atof(tokens[9].c_str());
   }
   
   truthStream.close();
   
-  if (mFtr2TrueL10Abf.size() == 0)
-  {
-    cerr << "ERROR: can't retrieve any true ABFs" << endl;
-    exit (1);
-  }
-  
-  if (verbose > 0)
-  {
-    cout << "nb of ABFs: " << mFtr2TrueL10Abf.size() << endl;
-    fflush (stdout);
-  }
-  
-  return mFtr2TrueL10Abf;
-}
-
-size_t
-getNbSamples (
-  const string & genoFile,
-  const int & verbose)
-{
-  size_t nbSamples = 0;
-  
-  ifstream genoStream;
-  genoStream.open(genoFile.c_str());
-  if (! genoStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << genoFile << endl;
-    exit (1);
-  }
-  
-  string line;
-  getline (genoStream, line);
-  if (line.empty())
-  {
-    cerr << "ERROR: file " << genoFile << " is empty" << endl;
-    exit (1);
-  }
-  
-  nbSamples = count (line.begin(), line.end(), ' ') - 4;
-  if (verbose > 0)
-  {
-    cout << "nb of samples: " << nbSamples << endl;
-    fflush (stdout);
-  }
-  
-  return nbSamples;
-}
-
-void
-extractLinks (
-  const string & linksFile,
-  const vector<string> & vFtrsToKeep,
-  const string & studyId,
-  string & tmpLinksFile,
-  vector<string> & vCisSnps)
-{
-  ifstream linksStream;
-  linksStream.open(linksFile.c_str());
-  if (! linksStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << linksFile << endl;
-    exit (1);
-  }
-  
-  stringstream ssTmpLinksFile;
-  ssTmpLinksFile << "tmp2_" << studyId << "_links.txt";
-  tmpLinksFile = ssTmpLinksFile.str();
-  ofstream tmpLinksStream;
-  tmpLinksStream.open(tmpLinksFile.c_str());
-  if (! tmpLinksStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << tmpLinksFile << endl;
-    exit (1);
-  }
-  
-  string line, snpCoord;
-  vector<string> tokens, tokens2;
-  while (true)
-  {
-    getline (linksStream, line);
-    if (line.empty())
-      break;
-    if (line.find ('\t') != string::npos)
-      split (line, '\t', tokens);
-    else
-      split (line, ' ', tokens);
-    if (find(vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
-	!= vFtrsToKeep.end())
+  for (map<string, Feature>::iterator it = mFeatures.begin();
+       it != mFeatures.end(); ++it)
+    if (it->second.maxL10TrueAbf == -1)
     {
-      tmpLinksStream << line << endl;
-      split (tokens[1], '|', tokens2);
-      vCisSnps.push_back (tokens2[0]);
+      cerr << "ERROR: feature " << it->first << " has no true ABF" << endl;
+      exit (1);
     }
-  }
-  
-  tmpLinksStream.close();
-  linksStream.close();
 }
 
 void
-extractGeno (
-  const string & genoFile,
-  const vector<string> & vFtrsToKeep,
-  const string & studyId,
-  string & tmpGenoFile,
-  const vector<string> & vCisSnps)
-{
-  ifstream genoStream;
-  genoStream.open(genoFile.c_str());
-  if (! genoStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << genoFile << endl;
-    exit (1);
-  }
-
-  stringstream ssTmpGenoFile;
-  ssTmpGenoFile << "tmp2_" << studyId << "_geno.impute";
-  tmpGenoFile = ssTmpGenoFile.str();
-  ofstream tmpGenoStream;
-  tmpGenoStream.open(tmpGenoFile.c_str());
-  if (! tmpGenoStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << tmpGenoFile << endl;
-    exit (1);
-  }
-  
-  // copy header
-  string line;
-  getline (genoStream, line);
-  tmpGenoStream << line << endl;
-  
-  vector<string> tokens;
-  while (true)
-  {
-    getline (genoStream, line);
-    if (line.empty())
-      break;
-    split (line, ' ', tokens);
-    if (find(vCisSnps.begin(), vCisSnps.end(), tokens[1])
-	!= vCisSnps.end())
-      tmpGenoStream << line << endl;
-  }
-  
-  tmpGenoStream.close();
-  genoStream.close();
-}
-
-void
-extractCisSnps (
-  const string & genoFile,
-  const string & linksFile,
-  const vector<string> & vFtrsToKeep,
-  const string & studyId,
-  string & tmpGenoFile,
-  string & tmpLinksFile,
-  const int & verbose)
-{
-  if (verbose > 0)
-  {
-    cout << "extract SNPs ..." << endl;
-    fflush (stdout);
-  }
-  
-  vector<string> vCisSnps;
-  extractLinks (linksFile, vFtrsToKeep, studyId, tmpLinksFile, vCisSnps);
-  extractGeno (genoFile, vFtrsToKeep, studyId, tmpGenoFile, vCisSnps);
-  
-  if (verbose > 0)
-  {
-    cout << "nb of SNPs: " << vCisSnps.size() << endl;
-    fflush (stdout);
-  }
-}
-
-/** \brief Shuffle the identifiers of the samples and return them.
- */
-vector<size_t>
-getNewPermutation (
-  gsl_rng * rng,
+getSummaryStatsForAllSubgroups (
+  vector< vector<double> > & vvAllSumStatsCorr,
+  const Feature & iFtr,
+  const Snp & iSnp,
+  const size_t & nbSubgroups,
+  const size_t & nbSamples,
   gsl_permutation * perm)
 {
-  gsl_ran_shuffle (rng, perm->data, perm->size, sizeof(size_t));
-  vector<size_t> vPermIndices (perm->data, perm->data + perm->size);
-  return vPermIndices;
-}
-
-/** \brief Retrieve the keys of mFtr2MaxPermAbf into a vector.
-*/
-void
-getRemainingFeatures (
-  const map<string, double> & mFtr2MaxPermAbf,
-  vector<string> & vRemainingFtrs)
-{
-  vRemainingFtrs.clear();
-  for (map<string, double>::const_iterator it = mFtr2MaxPermAbf.begin();
-       it != mFtr2MaxPermAbf.end(); ++it)
-    vRemainingFtrs.push_back (it->first);
-}
-
-/** \brief Launch "get_summary_stats" on each subgroup.
- */
-void
-getSumStatsInEachSubgroup (
-  const string & studyId,
-  const size_t & permId,
-  const vector<size_t> & vPermIndices,
-  const string & genoFile,
-  const vector<string> & vPhenoFiles,
-  const string & ftrCoordsFile,
-  const string & linksFile,
-  const vector<string> & vFtrsToKeep,
-  string & sumStatsDir,
-  const int & verbose)
-{
-  stringstream ssSumStatsDir;
-  ssSumStatsDir << "tmp2_" << studyId << "_perm" << permId << "_sumstats";
-  sumStatsDir = ssSumStatsDir.str();
-  if (removeDir (sumStatsDir) != 0)
+  vvAllSumStatsCorr.clear ();
+  vector<double> g, y, vSumStats;
+  double betaPval, R2;
+  for (size_t s = 0; s < nbSubgroups; ++s)
   {
-    cerr << "ERROR: can't remove directory " << sumStatsDir << endl;
-    exit (1);
-  }
-  if (mkdir (sumStatsDir.c_str(), 0755) != 0)
-  {
-    cerr << "ERROR: can't create directory " << sumStatsDir << endl;
-    fprintf (stderr, "errno=%i %s\n", errno, strerror(errno));
-    exit (1);
-  }
-  
-  vector<string> vSnpsToKeep, vSamplesToSkip;
-  for (vector<string>::const_iterator it = vPhenoFiles.begin();
-       it != vPhenoFiles.end(); ++it)
-  {
-    stringstream ssPathToOutFile;
-    ssPathToOutFile << sumStatsDir << "/" << basename(it->c_str())
-		    << "_sumstats";
-    computeAndWriteSummaryStatsFtrPerFtr (genoFile,
-					  *it,
-					  ssPathToOutFile.str(),
-					  ftrCoordsFile,
-					  linksFile,
-					  "",
-					  0,
-					  vFtrsToKeep,
-					  vSnpsToKeep,
-					  vSamplesToSkip,
-					  "",
-					  false,
-					  0.0,
-					  0,
-					  false,
-					  0,
-					  vPermIndices,
-					  false,
-					  0,
-					  verbose);
+    g.clear();
+    y.clear();
+    vSumStats.assign (4, 0);
+    for (size_t i = 0; i < nbSamples; ++i)
+      if (! iFtr.vvIsNa[s][i] && ! iSnp.vIsNa[i])
+      {
+	g.push_back (iSnp.vGenos[i]);
+	y.push_back (iFtr.vvPhenos[s][gsl_permutation_get (perm, i)]);
+      }
+    vSumStats[0] = g.size(); // n
+    ols (iFtr.name, iSnp.name, g, y, &(vSumStats[1]), &(vSumStats[2]),
+	 &(vSumStats[3]), &betaPval, &R2, 0);
+    vvAllSumStatsCorr.push_back (vector<double> ());
+    correctSummaryStats (vvAllSumStatsCorr[s], vSumStats, 0);
   }
 }
 
-/** \brief Launch "get_abf_meta" using the outputs from "get_summary_stats".
- */
 void
-getAbfs (
-  const string & studyId,
-  const size_t & permId,
-  string & abfsFile,
-  const string & sumStatsDir,
-  const string & gridFile,
+getWeightedAbf (
+  const vector< vector<double> > & grid,
   const string & whichAbf,
-  string & stdoutFile,
-  const int & verbose)
+  const vector< vector<double> > & vvAllSumStatsCorr,
+  const vector<double> & vWeights,
+  double & l10Abf)
 {
-  stringstream ssStdoutFile;
-  if (stdoutFile.empty())
+  double l10Abfs[grid.size()];
+  for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
   {
-    ssStdoutFile << "tmp2_" << studyId << "_perm" << permId << "_stdout.txt";
-    stdoutFile = ssStdoutFile.str();
-    if (doesFileExist (stdoutFile))
-      remove (stdoutFile.c_str());
+    if (whichAbf.compare("abf.meta") == 0)
+      l10Abfs[gridIdx] = getAbfFromStdSumStats (vvAllSumStatsCorr,
+						grid[gridIdx][0],
+						grid[gridIdx][1],
+						0);
+    else if (whichAbf.compare("abf.fix") == 0)
+      l10Abfs[gridIdx] = getAbfFromStdSumStats (vvAllSumStatsCorr,
+						0,
+						grid[gridIdx][0]
+						+ grid[gridIdx][1],
+						0);
   }
-  
-  stringstream ssAbfFile, ssCmd;
-  ssAbfFile << "tmp2_" << studyId << "_perm" << permId << "_abfs.txt";
-  abfsFile = ssAbfFile.str();
-  ssCmd << "get_abf_meta"
-	<< " -i " << sumStatsDir
-	<< " -g " << gridFile
-	<< " -o " << abfsFile;
-  if (whichAbf.find("avg") != string::npos)
-    ssCmd << " -c";
-  ssCmd << " >> " << stdoutFile
-	<< " 2>> " << stdoutFile;
-  if (verbose > 0)
-    cout << "launch: " << ssCmd.str() << endl;
-  if (system (ssCmd.str().c_str()) != 0)
-  {
-    cerr << "ERROR: get_abf_meta failed" << endl;
-    cerr << ssCmd.str() << endl;
-    exit (1);
-  }
+  l10Abf = log10_weighted_sum (l10Abfs, &(vWeights[0]), grid.size());
 }
 
-/** \brief Parse the output from "get_abf_meta" to find the maximum ABF across
- *  SNPs for each feature.
- */
 void
-getMaxAbfAcrossSnps (
-  const string & abfsFile,
+getAbfOverConfigs (
+  const vector< vector<double> > & grid,
   const string & whichAbf,
-  map<string, double> & mFtr2MaxPermAbf)
+  const vector< vector<double> > & vvAllSumStatsCorr,
+  gsl_combination * comb,
+  map<string, double> & mAllConfigsAbfs,
+  const vector<double> & vWeightsGrid,
+  double & l10Abf)
 {
-  for (map<string, double>::iterator it = mFtr2MaxPermAbf.begin();
-       it != mFtr2MaxPermAbf.end(); ++it)
-    it->second = -1.0;
+  size_t nbSubgroups = vvAllSumStatsCorr.size();
+  stringstream ssConfig;
+  vector< vector<double> > vvSomeSumStatsCorr;
+  double l10Abfs[grid.size()];
   
-  ifstream abfStream;
-  abfStream.open (abfsFile.c_str());
-  if (! abfStream.is_open())
+  mAllConfigsAbfs.clear();
+  
+  // config "consistent"
+  for(size_t s = 0; s < nbSubgroups; ++s)
+    ssConfig << (s+1);
+  getWeightedAbf (grid, "abf.meta", vvAllSumStatsCorr, vWeightsGrid,
+		  mAllConfigsAbfs[ssConfig.str()]);
+  
+  // configs "single-specific"
+  ssConfig.clear();
+  comb = gsl_combination_calloc (nbSubgroups, 1);
+  if (comb == NULL)
   {
-    cerr << "ERROR: can't open file " << abfsFile << endl;
+    cerr << "ERROR: can't allocate memory for the combination" << endl;
     exit (1);
   }
-  
-  string line;
-  getline (abfStream, line); // skip header
-  if (line.empty())
+  while (true)
   {
-    cerr << "ERROR: file " << abfsFile << " is empty" << endl;
-    exit (1);
-  }
-  
-  vector<string> tokens = split (line, ' ');
-  while (abfStream.good())
-  {
-    getline (abfStream, line);
-    if (line.empty())
+    vvSomeSumStatsCorr.clear();
+    for (size_t i = 0; i < comb->k; ++i)
+    {
+      ssConfig << gsl_combination_get (comb, i) + 1;
+      vvSomeSumStatsCorr.push_back (vvAllSumStatsCorr[
+				      gsl_combination_get (comb, i)]);
+    }
+    for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
+      l10Abfs[gridIdx] = getAbfFromStdSumStats (vvSomeSumStatsCorr,
+						grid[gridIdx][0],
+						grid[gridIdx][1],
+						0);
+    mAllConfigsAbfs.insert (make_pair(ssConfig.str(),
+				      log10_weighted_sum (l10Abfs,
+							  &(vWeightsGrid[0]),
+							  grid.size())));
+    if (gsl_combination_next (comb) != GSL_SUCCESS)
       break;
-    split (line, ' ', tokens);
-    if (whichAbf.compare("abf.meta") == 0
-	&& atof(tokens[5].c_str()) > mFtr2MaxPermAbf[tokens[0]])
-      mFtr2MaxPermAbf[tokens[0]] = atof(tokens[5].c_str());
-    else if (whichAbf.compare("abf.fix") == 0
-	     && atof(tokens[6].c_str()) > mFtr2MaxPermAbf[tokens[0]])
-      mFtr2MaxPermAbf[tokens[0]] = atof(tokens[6].c_str());
-    else if (whichAbf.compare("abf.meta.avg.all") == 0
-	     && atof(tokens[8].c_str()) > mFtr2MaxPermAbf[tokens[0]])
-      mFtr2MaxPermAbf[tokens[0]] = atof(tokens[8].c_str());
-    else if (whichAbf.compare("abf.meta.avg.subset") == 0
-	     && atof(tokens[9].c_str()) > mFtr2MaxPermAbf[tokens[0]])
-      mFtr2MaxPermAbf[tokens[0]] = atof(tokens[9].c_str());
   }
+  gsl_combination_free (comb);
   
-  abfStream.close();
-}
+  // all other configs
+  if (whichAbf.compare("abf.meta.avg.all") == 0)
+  {
+    for (size_t s = 2; s < nbSubgroups; ++s)
+    {
+      ssConfig.clear();
+      comb = gsl_combination_calloc (nbSubgroups, s);
+      if (comb == NULL)
+      {
+	cerr << "ERROR: can't allocate memory for the combination" << endl;
+	exit (1);
+      }
+      while (true)
+      {
+	vvSomeSumStatsCorr.clear();
+	for (size_t i = 0; i < comb->k; ++i)
+	{
+	  ssConfig << gsl_combination_get (comb, i) + 1;
+	  vvSomeSumStatsCorr.push_back (vvAllSumStatsCorr[
+					  gsl_combination_get (comb, i)]);
+	}
+	for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
+	  l10Abfs[gridIdx] = getAbfFromStdSumStats (vvSomeSumStatsCorr,
+						    grid[gridIdx][0],
+						    grid[gridIdx][1],
+						    0);
+	mAllConfigsAbfs.insert (make_pair(ssConfig.str(),
+					  log10_weighted_sum (l10Abfs,
+							      &(vWeightsGrid[0]),
+							      grid.size())));
+	if (gsl_combination_next (comb) != GSL_SUCCESS)
+	  break;
+      }
+      gsl_combination_free (comb);
+    }
+  }
 
-/** \brief Remove temporary files and directory.
- */
-void
-cleanPermutationTmp (
-  const string & sumStatsDir,
-  const string & abfsFile,
-  const string & stdoutFile)
-{
-  if (removeDir (sumStatsDir) != 0)
-  {
-    cerr << "ERROR: can't remove directory " << sumStatsDir << endl;
-    exit (1);
-  }
-  if (remove (abfsFile.c_str()) != 0)
-  {
-    cerr << "ERROR: can't remove file " << abfsFile << endl;
-    exit (1);
-  }
-  if (remove (stdoutFile.c_str()) != 0)
-  {
-    cerr << "ERROR: can't remove file " << stdoutFile << endl;
-    exit (1);
-  }
-}
-
-/** \brief http://stackoverflow.com/a/263958/597069
- */
-void
-updateFtrsToAnalyzeAndCalcPermPval (
-  const map<string, double> & mFtr2TrueL10Abf,
-  const size_t & nbPermsSoFar,
-  map<string, double> & mFtr2MaxPermAbf,
-  map<string, vector<double> > & mFtr2PermPval,
-  const bool & trick)
-{
-  string ftr;
-  double maxTrueL10Abf, maxPermL10Abf;
-  map<string, double>::iterator it = mFtr2MaxPermAbf.begin();
-  while (it != mFtr2MaxPermAbf.end())
-  {
-    ftr = it->first;
-    mFtr2PermPval[ftr][0] = nbPermsSoFar;
-    maxPermL10Abf = it->second;
-    maxTrueL10Abf = mFtr2TrueL10Abf.find(ftr)->second;
-    if (maxPermL10Abf >= maxTrueL10Abf)
-      ++(mFtr2PermPval[ftr][1]);
-    if (trick && mFtr2PermPval[ftr][1] == 10)
-      mFtr2MaxPermAbf.erase (it++); // note the post increment
-    else
-      ++it;
-  }
+  // average over all configs
+  vector<double> vL10Abfs,
+    vWeightsConfig (mAllConfigsAbfs.size(),
+		    1.0 / ((double) mAllConfigsAbfs.size()));
+  for (map<string, double>::iterator it = mAllConfigsAbfs.begin();
+       it != mAllConfigsAbfs.end(); ++it)
+    vL10Abfs.push_back (it->second);
+  l10Abf = log10_weighted_sum (&vL10Abfs[0], &(vWeightsConfig[0]),
+			       vL10Abfs.size());
 }
 
 void
 computeJointAnalysisPermPvaluesFtrPerFtr (
-  const string & genoFile,
-  const vector<string> & vPhenoFiles,
-  const string & ftrCoordsFile,
-  const string & linksFile,
-  const string & gridFile,
-  const string & ftrFile,
-  const vector<string> & vFtrsToKeep,
-  const map<string, double> & mFtr2TrueL10Abf,
+  map<string, Feature> & mFeatures,
+  map<string, Snp> & mSnps,
+  const vector< vector<double> > & grid,
   const string & whichAbf,
-  const string & outFile,
   const size_t & nbPermutations,
   const bool & trickPerm,
-  const bool & extractSnps,
-  const int & seed,
-  const int & nbThreads,
+  const size_t & seed,
+  const size_t & nbSubgroups,
+  const size_t & nbSamples,
   const int & verbose)
 {
   if (verbose > 0)
-  {
-    cout << "compute joint-analysis permutation P-values"
-	 << " (" << vFtrsToKeep.size()
-	 << " feature" << (vFtrsToKeep.size() > 1 ? "s" : "");
-    if (trickPerm)
-      cout << ", with trick";
-    cout << ") ..." << endl;
-    fflush (stdout);
-  }
+    cout << "compute feature-level permutation P-values"
+	 << " for the joint analysis ("
+         << "seed=" << seed
+         << (trickPerm ? ", with trick)" : ", without trick)")
+         << " ..." << endl << flush;
   
-  ofstream outStream;
-  outStream.open(outFile.c_str());
-  if (! outStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << outFile << endl;
-    exit (1);
-  }
-  outStream << "ftr jointPermPval" << endl;
+  Feature iFtr;
+  Snp iSnp;
+  size_t permId;
+  vector<double> y, g, vSumStats, vWeights (grid.size(),
+					    1.0 / (double) grid.size());
+  double l10Abf, maxL10Abf;
+  vector< vector<double> > vvAllSumStatsCorr;
+  vector<size_t> vCounters = getCounters (mFeatures.size(), 5);
   
   gsl_rng_env_setup();
   gsl_rng * rng = gsl_rng_alloc (gsl_rng_default);
@@ -908,105 +927,104 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
     cerr << "ERROR: can't allocate memory for the RNG" << endl;
     exit (1);
   }
-  if (seed < 0)
-    gsl_rng_set (rng, getSeed());
-  else
-    gsl_rng_set (rng, seed);
+  gsl_rng_set (rng, seed);
   
-  gsl_permutation * perm = gsl_permutation_calloc (getNbSamples (genoFile,
-								 verbose));
+  gsl_permutation * perm = gsl_permutation_calloc (nbSamples);
   if (perm == NULL)
   {
     cerr << "ERROR: can't allocate memory for the permutation" << endl;
     exit (1);
   }
   
-  map<string, double> mFtr2MaxPermAbf;
-  map<string, vector<double> > mFtr2PermPval;
-  for (vector<string>::const_iterator it = vFtrsToKeep.begin();
-       it != vFtrsToKeep.end(); ++it)
+  gsl_combination * comb = NULL;
+  map<string, double> mAllConfigsAbfs;
+  
+  size_t countFtrs = 0;
+  for (map<string, Feature>::iterator itF = mFeatures.begin();
+       itF != mFeatures.end(); ++itF)
   {
-    mFtr2MaxPermAbf.insert (make_pair (*it, -1.0));
+    iFtr = itF->second;
+    ++countFtrs;
+    if (verbose > 0)
+      printCounter (countFtrs, vCounters);
+    if (verbose > 1)
+      cout << setfill('0') << setw((int)floor(log10(mFeatures.size()))+1)
+	   << countFtrs << "/" << mFeatures.size() << " " << iFtr.name
+	   << " (" << iFtr.vCisSnps.size() << " cis SNPs)" << endl << flush;
     
-    // 0: nb performed permutations, 1: nb with perm ABF >= true ABF
-    vector<double> vStats (2, 0);
-    mFtr2PermPval.insert (make_pair (*it, vStats));
-  }
-  
-  stringstream ssStudyId;
-  ssStudyId << getSeed() << "-" << getpid();
-  string tmpLinksFile, tmpGenoFile;
-  if (extractSnps)
-    extractCisSnps (genoFile, linksFile, vFtrsToKeep, ssStudyId.str(),
-		    tmpGenoFile, tmpLinksFile, verbose);
-  
-  string sumStatsDir, stdoutFile, abfsFile;
-  vector<string> vRemainingFtrs;
-  for (size_t permId = 1; permId <= nbPermutations; ++permId)
-  {
-    vector<size_t> vPermIndices = getNewPermutation (rng, perm);
-    getRemainingFeatures (mFtr2MaxPermAbf, vRemainingFtrs);
-    getSumStatsInEachSubgroup (ssStudyId.str(), permId, vPermIndices,
-    			       (extractSnps ? tmpGenoFile : genoFile),
-    			       vPhenoFiles, ftrCoordsFile,
-    			       (extractSnps ? tmpLinksFile : linksFile),
-    			       vRemainingFtrs, sumStatsDir, verbose-1);
-    getAbfs (ssStudyId.str(), permId, abfsFile, sumStatsDir, gridFile,
-	     whichAbf, stdoutFile, verbose-1);
-    getMaxAbfAcrossSnps (abfsFile, whichAbf, mFtr2MaxPermAbf);
-    cleanPermutationTmp (sumStatsDir, abfsFile, stdoutFile);
-    updateFtrsToAnalyzeAndCalcPermPval (mFtr2TrueL10Abf, permId,
-					mFtr2MaxPermAbf, mFtr2PermPval,
-					trickPerm);
-    if (mFtr2MaxPermAbf.size() == 0)
-      break;
-  }
-  
-  for (map<string, vector<double> >::iterator it = mFtr2PermPval.begin();
-       it != mFtr2PermPval.end(); ++it)
-  {
-    outStream << it->first << " ";
-    if (! trickPerm || it->second[0] == nbPermutations)
-      outStream << ((it->second[1] + 1) /
-		    ((double) nbPermutations + 1));
+    for (permId = 0; permId < nbPermutations; ++permId)
+    {
+      gsl_ran_shuffle (rng, perm->data, perm->size, sizeof(size_t));
+      maxL10Abf = 0;
+      if (verbose > 1 && (permId+1) % 1000 == 0)
+	cout << setfill('0') << setw((int)floor(log10(nbPermutations))+1)
+	     << (permId+1) << "/" << nbPermutations << "\r" << flush;
+      
+      for (vector<Snp *>::iterator itS = iFtr.vCisSnps.begin();
+	   itS != iFtr.vCisSnps.end(); ++itS)
+      {
+	iSnp = *(*itS);
+	
+	getSummaryStatsForAllSubgroups (vvAllSumStatsCorr, iFtr, iSnp,
+					nbSubgroups, nbSamples, perm);
+	
+	if (whichAbf.find("avg") == string::npos)
+	  getWeightedAbf (grid, whichAbf, vvAllSumStatsCorr, vWeights, l10Abf);
+	else
+	  getAbfOverConfigs (grid, whichAbf, vvAllSumStatsCorr, comb,
+			     mAllConfigsAbfs, vWeights, l10Abf);
+	if (l10Abf > maxL10Abf)
+	  maxL10Abf = l10Abf;
+      }
+      if (maxL10Abf >= iFtr.maxL10TrueAbf)
+	++iFtr.permPval;
+      if (trickPerm && iFtr.permPval == 11)
+	break;
+    }
+    
+    if (permId == nbPermutations)
+      itF->second.permPval /= ((double) (nbPermutations + 1));
     else
-      outStream << gsl_ran_flat (rng,
-				 (11 / ((double) (it->second[0] + 2))),
-				 (11 / ((double) (it->second[0] + 1))));
-    outStream << endl;
+      itF->second.permPval = gsl_ran_flat (rng, 
+					   (11 / ((double) (permId+1 + 2))),
+					   (11 / ((double) (permId+1 + 1))));
   }
-  outStream.close();
-  if (verbose > 0)
-    cout << "results written in " << outFile << endl;
   
   gsl_permutation_free (perm);
   gsl_rng_free (rng);
-  if (extractSnps)
-  {
-    if (remove (tmpGenoFile.c_str()) != 0)
-    {
-      cerr << "ERROR: can't remove file " << tmpGenoFile << endl;
-      exit (1);
-    }
-    if (remove (tmpLinksFile.c_str()) != 0)
-    {
-      cerr << "ERROR: can't remove file " << tmpLinksFile << endl;
-      exit (1);
-    }
-  }
+}
+
+void
+writeResults (
+  const map<string, Feature> & mFeatures,
+  const string & outFile,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "write results in " << outFile << " .." << endl << flush;
+  
+  ofstream outStream;
+  openFile (outFile, outStream);
+  outStream << "ftr jointPermPval" << endl;
+  
+  for (map<string, Feature>::const_iterator it = mFeatures.begin();
+       it != mFeatures.end(); ++it)
+    outStream << it->first << " " << it->second.permPval << endl;
+  
+  outStream.close();
 }
 
 int main (int argc, char ** argv)
 {
-  string genoFile, phenoDir, ftrCoordsFile, linksFile, gridFile, ftrFile,
-    truthFile, whichAbf = "abf.meta", outFile;
-  size_t nbPermutations = 10000;
-  bool trickPerm = false, extractSnps = false;
-  int verbose = 1, seed = -1, nbThreads = 1;
+  string genoFile, phenoDir, ftrCoordsFile, gridFile, truthFile,
+    whichAbf = "abf.meta", outFile, ftrsToKeepFile, linksFile;
+  size_t nbPermutations = 10000, seed = string::npos;
+  bool trickPerm = false;
+  int verbose = 1;
   
-  parse_args (argc, argv, genoFile, phenoDir, ftrCoordsFile, linksFile,
-	      gridFile, ftrFile, truthFile, whichAbf, outFile, nbPermutations,
-	      trickPerm, extractSnps, seed, nbThreads, verbose);
+  parse_args (argc, argv, genoFile, phenoDir, ftrCoordsFile, gridFile,
+	      truthFile, whichAbf, outFile, nbPermutations, trickPerm,
+	      ftrsToKeepFile, linksFile, seed, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1017,32 +1035,28 @@ int main (int argc, char ** argv)
   }
   
   vector<string> vPhenoFiles = scanInputDirectory (phenoDir, verbose);
-  vector<string> vFtrsToKeep;
-  if (! ftrFile.empty())
-    vFtrsToKeep = loadOneColumnFile (ftrFile, verbose);
-  else
-    vFtrsToKeep = getListAllInputFeatures (vPhenoFiles, verbose);
-  map<string, double> mFtr2TrueL10Abf = getTrueAbfForEachFtr (truthFile,
-							      whichAbf,
-							      vFtrsToKeep,
-							      verbose);
-  
-  computeJointAnalysisPermPvaluesFtrPerFtr (genoFile,
-					    vPhenoFiles,
-					    ftrCoordsFile,
-					    linksFile,
-					    gridFile,
-					    ftrFile,
-					    vFtrsToKeep,
-					    mFtr2TrueL10Abf,
-					    whichAbf,
-					    outFile,
-					    nbPermutations,
-					    trickPerm,
-					    extractSnps,
+  vector<string> vFtrsToKeep = loadOneColumnFile (ftrsToKeepFile, verbose);
+  map<string, Feature> mFeatures;
+  vector<string> vSamples;
+  loadFeaturesFromPhenoFiles (mFeatures, vSamples, vPhenoFiles, vFtrsToKeep,
+			      verbose);
+  loadFtrCoordsFromBedFile (mFeatures, ftrCoordsFile, verbose);
+  map<string, Snp> mSnps;
+  loadLinksFtrCisSnpsFromFile (mFeatures, mSnps, linksFile, verbose);
+  loadGenoSnpsFromFile (mSnps, genoFile, vSamples, verbose);
+  getAbfsFromTruthFile (mFeatures, truthFile, whichAbf, mSnps, verbose);
+  vector< vector<double> > grid = loadGrid (gridFile, verbose);
+  computeJointAnalysisPermPvaluesFtrPerFtr (mFeatures,
+  					    mSnps,
+  					    grid,
+  					    whichAbf,
+  					    nbPermutations,
+  					    trickPerm,
 					    seed,
-					    nbThreads,
-					    verbose);
+					    vPhenoFiles.size(),
+					    vSamples.size(),
+  					    verbose);
+  writeResults (mFeatures, outFile, verbose);
   
   if (verbose > 0)
   {
