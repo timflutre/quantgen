@@ -1232,7 +1232,7 @@ computeAndWriteSummaryStatsFtrPerFtr (
     cout << "look for association between each pair feature-SNP";
     if (nbPermutations > 0)
     {
-      cout << nbPermutations << " permutation"
+      cout << " (" << nbPermutations << " permutation"
 	   << (nbPermutations > 1 ? "s" : "")
 	   << ", seed=" << seed;
       if (trickPerm)
