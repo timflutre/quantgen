@@ -74,19 +74,24 @@ void help (char ** argv)
        << "      --abf\twhich ABF to use as the test statistic for the permutations" << endl
        << "\t\tdefault=abf.meta/abf.fix/abf.meta.avg.all/abf.meta.avg.subset" << endl
        << "  -o, --out\tfile that will contain the permutation P-values" << endl
-       << "      --perm\tnumber of phenotype permutations at each feature" << endl
+       << "  -P, --perm\tnumber of phenotype permutations at each feature" << endl
        << "\t\tdefault=10000" << endl
-       << "      --trick\tstop after the tenth permutation for which the test statistic" << endl
-       << "\t\tis better than or equal to the true value, and sample from a" << endl
-       << "\t\tuniform between 11/(nbPermSoFar+2) and 11/(nbPermSoFar+1)" << endl
+       << "      --seed\tseed for the two random number generators" << endl
+       << "\t\tone RNG is used for the permutations and another for the trick" << endl
+       << "\t\tby default, both are initialized via microseconds from epoch" << endl
+       << "      --trick\tapply trick to speed-up permutations" << endl
+       << "\t\tstop after the tenth permutation for which the test statistic" << endl
+       << "\t\tis better than or equal to the true value, and sample from" << endl
+       << "\t\ta uniform between 11/(nbPermsSoFar+2) and 11/(nbPermsSoFar+1)" << endl
+       << "\t\tif '1', the permutations really stops" << endl
+       << "\t\tif '2', all permutations are done but the test statistics are not computed" << endl
+       << "\t\tallow to compare different test statistics on the same permutations" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
        << "  -l, --links\tfile with links between genes and SNPs" << endl
        << "\t\tcustom format: feature<space/tab>SNP|coord" << endl
        << "\t\tfeatures should be in same order than in phenotype file" << endl
        << "\t\tuseful to focus on genetic variants in cis (use windowBed)" << endl
-       << "      --seed\tseed for the random number generator" << endl
-       << "\t\tby default, the RNG is initialized via microseconds from epoch" << endl
        << endl;
 }
 
@@ -119,10 +124,10 @@ parse_args (
   string & whichAbf,
   string & outFile,
   size_t & nbPermutations,
-  bool & trickPerm,
+  size_t & seed,
+  int & trick,
   string & ftrsToKeepFile,
   string & linksFile,
-  size_t & seed,
   int & verbose)
 {
   int c = 0;
@@ -140,15 +145,15 @@ parse_args (
 	{"truth", required_argument, 0, 0},
 	{"abf", required_argument, 0, 0},
 	{"out", required_argument, 0, 'o'},
-	{"perm", required_argument, 0, 0},
-	{"trick", no_argument, 0, 0},
+	{"perm", required_argument, 0, 'P'},
+	{"seed", required_argument, 0, 0},
+	{"trick", required_argument, 0, 0},
 	{"ftr", required_argument, 0, 'f'},
 	{"links", required_argument, 0, 'l'},
-	{"seed", required_argument, 0, 0},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:o:f:l:",
+    c = getopt_long (argc, argv, "hVv:g:p:o:P:f:l:",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -177,19 +182,14 @@ parse_args (
 	whichAbf = optarg;
 	break;
       }
-      if (strcmp(long_options[option_index].name, "perm") == 0)
+      if (strcmp(long_options[option_index].name, "seed") == 0)
       {
-	nbPermutations = atol(optarg);
+	seed = atol (optarg);
 	break;
       }
       if (strcmp(long_options[option_index].name, "trick") == 0)
       {
-	trickPerm = true;
-	break;
-      }
-      if (strcmp(long_options[option_index].name, "seed") == 0)
-      {
-	seed = atol(optarg);
+	trick = atoi (optarg);
 	break;
       }
     case 'h':
@@ -199,7 +199,7 @@ parse_args (
       version (argv);
       exit (0);
     case 'v':
-      verbose = atoi(optarg);
+      verbose = atoi (optarg);
       break;
     case 'g':
       genoFile = optarg;
@@ -209,6 +209,9 @@ parse_args (
       break;
     case 'o':
       outFile = optarg;
+      break;
+    case 'P':
+      nbPermutations = atol (optarg);
       break;
     case 'f':
       ftrsToKeepFile = optarg;
@@ -286,6 +289,12 @@ parse_args (
       && whichAbf.compare("abf.meta.avg.all") == 0)
   {
     fprintf (stderr, "ERROR: --abf should be abf.meta, abf.fix, abf.meta.avg.subset or abf.meta.avg.all.\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (trick != 0 && trick != 1 && trick != 2)
+  {
+    fprintf (stderr, "ERROR: unrecognized trick %d (--trick).\n\n", trick);
     help (argv);
     exit (1);
   }
@@ -898,18 +907,19 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
   const vector< vector<double> > & grid,
   const string & whichAbf,
   const size_t & nbPermutations,
-  const bool & trickPerm,
   const size_t & seed,
+  const int & trick,
   const size_t & nbSubgroups,
   const size_t & nbSamples,
   const int & verbose)
 {
   if (verbose > 0)
     cout << "compute feature-level permutation P-values"
-	 << " for the joint analysis ("
-         << "seed=" << seed
-         << (trickPerm ? ", with trick)" : ", without trick)")
-         << " ..." << endl << flush;
+	 << " for the joint analysis ..." << endl
+	 << "testStat=" << whichAbf
+         << " seed=" << seed
+	 << " trick=" << trick
+	 << endl << flush;
   
   Feature iFtr;
   Snp iSnp;
@@ -921,13 +931,24 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
   vector<size_t> vCounters = getCounters (mFeatures.size(), 5);
   
   gsl_rng_env_setup();
-  gsl_rng * rng = gsl_rng_alloc (gsl_rng_default);
-  if (rng == NULL)
+  gsl_rng * rngPerm = gsl_rng_alloc (gsl_rng_default);
+  if (rngPerm == NULL)
   {
     cerr << "ERROR: can't allocate memory for the RNG" << endl;
     exit (1);
   }
-  gsl_rng_set (rng, seed);
+  gsl_rng_set (rngPerm, seed);
+  gsl_rng * rngTrick = NULL;
+  if (trick != 0)
+  {
+    rngTrick = gsl_rng_alloc (gsl_rng_default);
+    if (rngTrick == NULL)
+    {
+      cerr << "ERROR: can't allocate memory for the RNG" << endl;
+      exit (1);
+    }
+    gsl_rng_set (rngTrick, seed);
+  }
   
   gsl_permutation * perm = gsl_permutation_calloc (nbSamples);
   if (perm == NULL)
@@ -952,11 +973,16 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
 	   << countFtrs << "/" << mFeatures.size() << " " << iFtr.name
 	   << " (" << iFtr.vCisSnps.size() << " cis SNPs)" << endl << flush;
     
+    bool shuffleOnly = false;
+    size_t nbPermsSoFar = 0;
     for (permId = 0; permId < nbPermutations; ++permId)
     {
-      gsl_ran_shuffle (rng, perm->data, perm->size, sizeof(size_t));
+      gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
+      if (shuffleOnly)
+	continue;
+      ++nbPermsSoFar;
       maxL10Abf = 0;
-      if (verbose > 1 && (permId+1) % 1000 == 0)
+      if (verbose > 1 && (permId+1) % 500 == 0)
 	cout << setfill('0') << setw((int)floor(log10(nbPermutations))+1)
 	     << (permId+1) << "/" << nbPermutations << "\r" << flush;
       
@@ -978,20 +1004,27 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
       }
       if (maxL10Abf >= iFtr.maxL10TrueAbf)
 	++iFtr.permPval;
-      if (trickPerm && iFtr.permPval == 11)
-	break;
+      if (trick != 0 && iFtr.permPval == 11)
+      {
+	if (trick == 1)
+	  break;
+	else if (trick == 2)
+	  shuffleOnly = true;
+      }
     }
     
     if (permId == nbPermutations)
-      itF->second.permPval /= ((double) (nbPermutations + 1));
+      itF->second.permPval /= ((double) (nbPermsSoFar + 1));
     else
-      itF->second.permPval = gsl_ran_flat (rng, 
-					   (11 / ((double) (permId+1 + 2))),
-					   (11 / ((double) (permId+1 + 1))));
+      itF->second.permPval = gsl_ran_flat (rngTrick,
+					   (11 / ((double) (nbPermsSoFar + 2))),
+					   (11 / ((double) (nbPermsSoFar + 1))));
   }
   
   gsl_permutation_free (perm);
-  gsl_rng_free (rng);
+  gsl_rng_free (rngPerm);
+  if (trick != 0)
+    gsl_rng_free (rngTrick);
 }
 
 void
@@ -1019,12 +1052,11 @@ int main (int argc, char ** argv)
   string genoFile, phenoDir, ftrCoordsFile, gridFile, truthFile,
     whichAbf = "abf.meta", outFile, ftrsToKeepFile, linksFile;
   size_t nbPermutations = 10000, seed = string::npos;
-  bool trickPerm = false;
-  int verbose = 1;
+  int verbose = 1, trick = 0;
   
   parse_args (argc, argv, genoFile, phenoDir, ftrCoordsFile, gridFile,
-	      truthFile, whichAbf, outFile, nbPermutations, trickPerm,
-	      ftrsToKeepFile, linksFile, seed, verbose);
+	      truthFile, whichAbf, outFile, nbPermutations, seed,
+	      trick, ftrsToKeepFile, linksFile, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1051,8 +1083,8 @@ int main (int argc, char ** argv)
   					    grid,
   					    whichAbf,
   					    nbPermutations,
-  					    trickPerm,
 					    seed,
+					    trick,
 					    vPhenoFiles.size(),
 					    vSamples.size(),
   					    verbose);
