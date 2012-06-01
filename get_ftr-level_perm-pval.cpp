@@ -336,6 +336,7 @@ struct Feature
   vector <Snp *> vCisSnps;
   double maxL10TrueAbf; // max log10(ABF) over SNPs on non-permuted data
   double permPval; // permutation P-value of the joint analysis
+  size_t nbPermsSoFar;
 };
 
 void
@@ -365,6 +366,7 @@ Feature_init (
   }
   iFtr.maxL10TrueAbf = 0.0;
   iFtr.permPval = 1.0;
+  iFtr.nbPermsSoFar = 0;
 }
 
 void loadFeaturesFromPhenoFiles(
@@ -974,13 +976,12 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
 	   << " (" << iFtr.vCisSnps.size() << " cis SNPs)" << endl << flush;
     
     bool shuffleOnly = false;
-    size_t nbPermsSoFar = 0;
     for (permId = 0; permId < nbPermutations; ++permId)
     {
       gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
       if (shuffleOnly)
 	continue;
-      ++nbPermsSoFar;
+      ++itF->second.nbPermsSoFar;
       maxL10Abf = 0;
       if (verbose > 1 && (permId+1) % 500 == 0)
 	cout << setfill('0') << setw((int)floor(log10(nbPermutations))+1)
@@ -1013,12 +1014,12 @@ computeJointAnalysisPermPvaluesFtrPerFtr (
       }
     }
     
-    if (permId == nbPermutations)
-      itF->second.permPval /= ((double) (nbPermsSoFar + 1));
+    if (itF->second.nbPermsSoFar == nbPermutations)
+      itF->second.permPval /= ((double) (nbPermutations + 1));
     else
       itF->second.permPval = gsl_ran_flat (rngTrick,
-					   (11 / ((double) (nbPermsSoFar + 2))),
-					   (11 / ((double) (nbPermsSoFar + 1))));
+					   (11 / ((double) (itF->second.nbPermsSoFar + 2))),
+					   (11 / ((double) (itF->second.nbPermsSoFar + 1))));
   }
   
   gsl_permutation_free (perm);
@@ -1031,18 +1032,32 @@ void
 writeResults (
   const map<string, Feature> & mFeatures,
   const string & outFile,
+  const int & trick,
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results in " << outFile << " .." << endl << flush;
+    cout << "write results in " << outFile << " ..." << endl << flush;
   
   ofstream outStream;
   openFile (outFile, outStream);
-  outStream << "ftr jointPermPval" << endl;
+  outStream << "ftr jointPermPval";
+  if (trick != 0)
+    outStream << " nbPermsSoFar";
+  outStream << endl << flush;
   
   for (map<string, Feature>::const_iterator it = mFeatures.begin();
        it != mFeatures.end(); ++it)
-    outStream << it->first << " " << it->second.permPval << endl;
+  {
+    if (! outStream.good())
+    {
+      cerr << "ERROR: problem while writing output file" << endl;
+      exit (1);
+    }
+    outStream << it->first << " " << it->second.permPval;
+    if (trick != 0)
+      outStream << " " << it->second.nbPermsSoFar;
+    outStream << endl << flush;
+  }
   
   outStream.close();
 }
@@ -1088,7 +1103,7 @@ int main (int argc, char ** argv)
 					    vPhenoFiles.size(),
 					    vSamples.size(),
   					    verbose);
-  writeResults (mFeatures, outFile, verbose);
+  writeResults (mFeatures, outFile, trick, verbose);
   
   if (verbose > 0)
   {
