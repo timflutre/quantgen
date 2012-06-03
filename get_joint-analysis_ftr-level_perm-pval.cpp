@@ -1,6 +1,6 @@
-/** \file get_ftr-level_perm-pval.cpp
+/** \file get_joint-analysis_ftr-level_perm-pval.cpp
  *
- *  `get_ftr-level_perm-pval' computes feature-level permutation P-values.
+ *  `get_joint-analysis_ftr-level_perm-pval' computes feature-level permutation P-values.
  *  Copyright (C) 2012 Timothee Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -16,9 +16,9 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -O3 -fopenmp utils.cpp get_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_ftr-level_perm-pval
- *  help2man -o get_ftr-level_perm-pval.man ./get_ftr-level_perm-pval
- *  groff -mandoc get_ftr-level_perm-pval.man > get_ftr-level_perm-pval.ps
+ *  g++ -Wall -O3 -fopenmp utils.cpp get_joint-analysis_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_joint-analysis_ftr-level_perm-pval
+ *  help2man -o get_joint-analysis_ftr-level_perm-pval.man ./get_joint-analysis_ftr-level_perm-pval
+ *  groff -mandoc get_joint-analysis_ftr-level_perm-pval.man > get_joint-analysis_ftr-level_perm-pval.ps
 */
 
 #include <cmath>
