@@ -64,6 +64,7 @@ void help (char ** argv)
        << "  -p, --pheno\trelative path to directory with one phenotypes file per subgroup" << endl
        << "\t\trow 1 for sample names, column 1 for feature names" << endl
        << "\t\teach subgroup should have the same set of features" << endl
+       << "\t\tcan also be a single file (ie. ABFs for a single subgroup)" << endl
        << "      --fcoord\tBED file with the features coordinates" << endl
        << "\t\tfeatures should be in same order than in phenotypes files" << endl
        << "\t\tfield delimiters are tabs" << endl
@@ -1081,7 +1082,11 @@ int main (int argc, char ** argv)
 	 << endl;
   }
   
-  vector<string> vPhenoFiles = scanInputDirectory (phenoDir, verbose);
+  vector<string> vPhenoFiles;
+  if (isDirectory(phenoDir.c_str()))
+    vPhenoFiles = scanInputDirectory (phenoDir, verbose);
+  else
+    vPhenoFiles.push_back (phenoDir);
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsToKeepFile, verbose);
   map<string, Feature> mFeatures;
   vector<string> vSamples;
