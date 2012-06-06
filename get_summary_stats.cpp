@@ -118,10 +118,7 @@ FtrStats_init (
     if (linePheno.empty())
       break;
     
-    if (linePheno.find('\t') != string::npos)
-      split (linePheno, '\t', tokensPheno);
-    else
-      split (linePheno, ' ', tokensPheno);
+    split (linePheno, " \t", tokensPheno);
     if (tokensPheno.size()-1 != vIdxSamplesToSkip.size())
     {
       cerr << "ERROR: different number of samples for feature "
@@ -140,10 +137,7 @@ FtrStats_init (
       if (lineFtrCoords.empty())
 	break;
       
-      if (lineFtrCoords.find('\t') != string::npos)
-	split (lineFtrCoords, '\t', tokensFtrCoords);
-      else
-	split (lineFtrCoords, ' ', tokensFtrCoords);
+      split (lineFtrCoords, " \t", tokensFtrCoords);
       if (tokensPheno[0].compare(tokensFtrCoords[3]) == 0)
 	break;
     }
@@ -205,10 +199,7 @@ FtrStats_getCisSnps (
     getline (linksStream, line);
     if (line.empty()) // end of file
       break;
-    if (line.find('\t') != string::npos)
-      split (line, '\t', tokens);
-    else
-      split (line, ' ', tokens);
+    split (line, " \t", tokens);
     if (tokens.size() != 2)
     {
       cerr << line << endl;
@@ -256,10 +247,7 @@ FtrStats_getCisSnps (
     getline (genoStream, line);
     if (line.empty()) // end of file
       break;
-    if (line.find('\t') != string::npos)
-      split (line, '\t', tokens);
-    else
-      split (line, ' ', tokens);
+    split (line, " \t", tokens);
     if (mSnpNameCoord2Pos.find(tokens[1]) == mSnpNameCoord2Pos.end())
       continue; // SNP to skip (see indexSnps)
     if (tokens[0].compare(iFtrStats.chr) != 0)
@@ -351,10 +339,7 @@ SnpStats_init (
     cerr << "ERROR: empty genotype line for SNP " << iSnpStats.name << endl;
     exit (1);
   }
-  if (line.find('\t') != string::npos)
-    split (line, '\t', tokens);
-  else
-    split (line, ' ', tokens);
+  split (line, " \t", tokens);
   if (iSnpStats.name.compare(tokens[1]) != 0)
   {
     cerr << "ERROR: wrong genotype line for SNP " << iSnpStats.name << endl;
@@ -449,10 +434,7 @@ indexSnps (
   genoStream.clear ();
   genoStream.seekg (0, ios::beg);
   getline (genoStream, line);
-  if (line.find('\t') != string::npos)
-    split (line, '\t', tokens);
-  else
-    split (line, ' ', tokens);
+  split (line, " \t", tokens);
   totNbSamples = tokens.size() - 5;
   if (verbose > 0)
     printf ("total number of samples: %zu\n", totNbSamples);
@@ -478,10 +460,7 @@ indexSnps (
     getline (genoStream, line);
     if (line.empty())
       break;
-    if (line.find('\t') != string::npos)
-      split (line, '\t', tokens);
-    else
-      split (line, ' ', tokens);
+    split (line, " \t", tokens);
     
     if (tokens.size() != 5+3*totNbSamples)
     {
@@ -1277,10 +1256,9 @@ computeAndWriteSummaryStatsFtrPerFtr (
   
   // read header line of the phenotype file
   getline (phenoStream, linePheno);
-  if (linePheno.find('\t') != string::npos)
-    split (linePheno, '\t', tokens);
-  else
-    split (linePheno, ' ', tokens);
+  split (linePheno, " \t", tokens);
+  if (tokens[0].compare("Id") == 0)
+    tokens.erase (tokens.begin());
   if (tokens.size() != vSamples.size())
   {
     cerr << "ERROR: different number of samples between genotype"
@@ -1423,6 +1401,7 @@ void help (char ** argv)
        << "  -p, --pheno\tfile with phenotypes" << endl
        << "\t\trow 1 for sample names, column 1 for feature names" << endl
        << "\t\tdelimiter=<space/tab>" << endl
+       << "\t\tthe first word on row 1 can be 'Id', followed by sample names" << endl
        << "  -o, --output\tfile that will contain the summary stats" << endl
        << "      --fcoord\tBED file with the features coordinates" << endl
        << "\t\tfeatures should be in same order than in phenotype file" << endl
