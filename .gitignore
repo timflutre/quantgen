@@ -5,3 +5,4 @@ get_summary_stats
 get_abf_meta
 impute2bimbam
 get_joint-analysis_ftr-level_perm-pval
+get_summary_stats2
