@@ -308,18 +308,38 @@ parseArgs (
     seed = getSeed ();
 }
 
-struct sFtr
+struct Ftr
 {
   string name; // eg. ENSG00000182816
   string chr; // eg. chr21
   size_t start; // 1-based coordinate
   size_t end; // idem
-  vector< vector<double> > vvPhenos; // phenotypes of samples per subgroup
-  vector< vector<bool> > vvIsNa; // missing values per subgroup
+  vector<vector<double> > vvPhenos; // phenotypes of samples per subgroup
+  vector<vector<bool> > vvIsNa; // missing values per subgroup
   double maxL10TrueAbf; // max log10(ABF) over SNPs on non-permuted data
   double permPval; // permutation P-value of the joint analysis
   size_t nbPermsSoFar;
 };
+
+void
+Ftr_init (
+  Ftr & iFtr,
+  const string & name,
+  const size_t & nbSubgroups,
+  const size_t & nbSamplesS1)
+{
+  iFtr.name = name;
+  iFtr.chr.clear();
+  iFtr.start = string::npos;
+  iFtr.end = string::npos;
+  iFtr.vvPhenos.resize (nbSubgroups);
+  iFtr.vvIsNa.resize (nbSubgroups);
+  iFtr.vvPhenos[0] = (vector<double> (nbSamplesS1, 0.0));
+  iFtr.vvIsNa[0] = (vector<bool> (nbSamplesS1, false));
+  iFtr.maxL10TrueAbf = 0.0;
+  iFtr.permPval = 1.0;
+  iFtr.nbPermsSoFar = 0;
+}
 
 void
 loadSamples (
@@ -391,6 +411,11 @@ loadSamples (
     getline (genoStream, line);
     genoStream.close();
     split (line, " \t", tokens);
+    if (tokens[0].compare("chr") != 0)
+    {
+      cerr << "ERROR: file " << vGenoPaths[s] << " requires a header" << endl;
+      exit (1);
+    }
     nbSamplesWithGeno = 0;
     for (size_t i = 5; i < tokens.size(); ++i)
       if (find(vSamples.begin(), vSamples.end(), split (tokens[i], "_", 0))
@@ -403,12 +428,12 @@ loadSamples (
     }
   }
 }
-/*
+
 void
 loadPhenos (
   const vector<string> & vPhenoPaths,
   const vector<string> & vFtrsToKeep,
-  map<string, sFtr> & mFtrs,
+  map<string, Ftr> & mFtrs,
   const int & verbose)
 {
   if (verbose > 0)
@@ -417,66 +442,83 @@ loadPhenos (
   ifstream phenoStream;
   string line;
   vector<string> tokens;
+  size_t nbSamples, nbLines;
   
   for (size_t s = 0; s < vPhenoPaths.size(); ++s)
   {
     openFile (vPhenoPaths[s], phenoStream);
+    getline (phenoStream, line); // header
+    split (line, " \t", tokens);
+    nbSamples = tokens.size() - 1;
+    nbLines = 1;
     while (true)
     {
       getline (phenoStream, line);
       if (line.empty())
 	break;
+      ++nbLines;
       split (line, " \t", tokens);
       if (! vFtrsToKeep.empty()
 	  && find (vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
 	  == vFtrsToKeep.end())
 	continue;
-      
-      if (mFeatures.find(tokens[0]) == mFeatures.end())
+      if (tokens.size() != nbSamples + 1)
       {
-	if (s != 0)
-	{
-	  cerr << "ERROR: all phenotype files don't have the same features"
-	       << endl;
-	  exit (1);
-	}
-	FtrMultiS iFtr;
-	FtrMultiS_init (iFtr, tokens[0], vPhenoPaths.size(), vSamples.size());
-	for (size_t i = 1; i < tokens.size(); ++i)
-	{
-	  if (tokens[i].compare("NA") == 0)
-	    iFtr.vvIsNa[s][i-1] = true;
-	  iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
-	}
-	mFeatures.insert (make_pair (tokens[0], iFtr));
+	cerr << "ERROR: not enough columns on line " << nbLines
+	     << " of file " << vPhenoPaths[s] << endl;
+	exit (1);
+      }
+			
+      if (mFtrs.find(tokens[0]) == mFtrs.end())
+      {
+				Ftr iFtr;
+				Ftr_init (iFtr, tokens[0], vPhenoPaths.size(), nbSamples);
+				for (size_t i = 1; i < tokens.size(); ++i)
+				{
+					if (tokens[i].compare("NA") == 0)
+						iFtr.vvIsNa[s][i-1] = true;
+					iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
+				}
+				mFtrs.insert (make_pair (tokens[0], iFtr));
       }
       else
       {
-	for (size_t i = 1; i < tokens.size() ; ++i)
-	{
-	  if (tokens[i].compare("NA") == 0)
-	    mFeatures[tokens[0]].vvIsNa[s][i-1] = true;
-	  mFeatures[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
-	}
+				mFtrs[tokens[0]].vvPhenos[s] = (vector<double> (nbSamples, 0.0));
+				mFtrs[tokens[0]].vvIsNa[s] = (vector<bool> (nbSamples, false));
+				for (size_t i = 1; i < tokens.size() ; ++i)
+				{
+					if (tokens[i].compare("NA") == 0)
+						mFtrs[tokens[0]].vvIsNa[s][i-1] = true;
+					mFtrs[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
+				}
       }
     }
     
     phenoStream.close();
   }
   
-  if (mFeatures.size() == 0)
+  if (mFtrs.size() == 0)
   {
     cerr << "ERROR: no feature to analyze" << endl;
     exit (1);
   }
   if (verbose > 0)
-    cout << "nb of features: " << mFeatures.size() << endl;
+    cout << "nb of features: " << mFtrs.size() << endl;
+/*	map<string, Ftr>::iterator it = mFtrs.begin();
+	while (it != mFtrs.end())
+	{
+		for (size_t s = 0; s < it->second.vvPhenos.size(); ++s)
+			for (size_t i = 0; i < it->second.vvPhenos[s].size(); ++i)
+				cout << it->first << " " << (s+1) << " " << (i+1) << " "
+						 << it->second.vvPhenos[s][i] << endl;
+		++it;
+		}*/
 }
-
+/*
 void
 loadFtrInfo (
   const string & ftrCoordsFile,
-  map<string, sFtr> mFtrs,
+  map<string, Ftr> mFtrs,
   const int & verbose)
 {
   if (verbose > 0)
@@ -522,24 +564,6 @@ Snp_init (
   iSnp.name = name;
   iSnp.vGenos.assign (nbSamples, 0.0);
   iSnp.vIsNa.assign (nbSamples, false);
-}
-
-void
-FtrMultiS_init (
-  FtrMultiS & iFtr,
-  const string & name,
-  const size_t & nbSubgroups,
-  const size_t & nbSamples)
-{
-  iFtr.name = name;
-  for (size_t s = 0; s < nbSubgroups; ++s)
-  {
-    iFtr.vvPhenos.push_back (vector<double> (nbSamples, 0.0));
-    iFtr.vvIsNa.push_back (vector<bool> (nbSamples, false));
-  }
-  iFtr.maxL10TrueAbf = 0.0;
-  iFtr.permPval = 1.0;
-  iFtr.nbPermsSoFar = 0;
 }
 
 void
@@ -1222,10 +1246,10 @@ run (
   vector<string> vSamples;
   vector<vector<size_t> > vvSampleIdxs;
   loadSamples (vGenoPaths, vPhenoPaths, vSamples, vvSampleIdxs, verbose);
-/*  
-  map<string, sFtr> mFtrs;
+  
+  map<string, Ftr> mFtrs;
   loadPhenos (vPhenoPaths, vFtrsToKeep, mFtrs, verbose);
-  loadFtrInfo (ftrCoordsFile, mFtrs, verbose);
+/*  loadFtrInfo (ftrCoordsFile, mFtrs, verbose);
   
   map<string, sSnp> mSnps;
   loadSnpInfoAndGenos (vGenoPaths, mSnps, verbose);
