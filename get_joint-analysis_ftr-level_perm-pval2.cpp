@@ -514,7 +514,7 @@ loadPhenos (
 		++it;
 		}*/
 }
-/*
+
 void
 loadFtrInfo (
   const string & ftrCoordsFile,
@@ -536,24 +536,24 @@ loadFtrInfo (
     if (line.empty())
       break;
     split (line, " \t", tokens);
-    if (mFeatures.find(tokens[3]) == mFeatures.end())
+    if (mFtrs.find(tokens[3]) == mFtrs.end())
       continue;
     ++countFtrs;
-    mFeatures[tokens[3]].chr = tokens[0];
-    mFeatures[tokens[3]].start = atol (tokens[1].c_str()) + 1;
-    mFeatures[tokens[3]].end = atol (tokens[2].c_str());
+    mFtrs[tokens[3]].chr = tokens[0];
+    mFtrs[tokens[3]].start = atol (tokens[1].c_str()) + 1;
+    mFtrs[tokens[3]].end = atol (tokens[2].c_str());
   }
   
   ftrCoordsStream.close();
   
-  if (countFtrs < mFeatures.size())
+  if (countFtrs < mFtrs.size())
   {
-    cerr << "ERROR: " << mFeatures.size() - countFtrs
+    cerr << "ERROR: " << mFtrs.size() - countFtrs
 	 << " feature coordinates are missing" << endl;
     exit (1);
   }
 }
-
+/*
 void
 Snp_init (
   Snp & iSnp,
@@ -1249,8 +1249,8 @@ run (
   
   map<string, Ftr> mFtrs;
   loadPhenos (vPhenoPaths, vFtrsToKeep, mFtrs, verbose);
-/*  loadFtrInfo (ftrCoordsFile, mFtrs, verbose);
-  
+  loadFtrInfo (ftrCoordsFile, mFtrs, verbose);
+/*  
   map<string, sSnp> mSnps;
   loadSnpInfoAndGenos (vGenoPaths, mSnps, verbose);
   
