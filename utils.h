@@ -34,17 +34,29 @@ vector<string> split (const string & s, char delim);
 vector<string> & split (const string & s, const char * delim,
 			vector<string> & tokens);
 
-string elapsedTime (time_t startRawTime, time_t endRawTime);
+vector<string> split (const string & s, const char * delim);
 
-string time2string (time_t inTime);
+string split (const string & s, const char * delim, const size_t & idx);
 
-vector<string> loadOneColumnFile (string inFile, int verbose);
+string elapsedTime (const time_t & startRawTime, const time_t & endRawTime);
 
-vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose);
+string time2string (const time_t & inTime);
 
-vector<size_t> getCounters (size_t nbIterations, size_t nbSteps);
+void openFile (const string & pathToFile, ifstream & fileStream);
 
-void printCounter (size_t currentIter, vector<size_t> vCounters);
+void openFile (const string & pathToFile, ofstream & fileStream);
+
+vector<string> loadOneColumnFile (const string & inFile,
+				  const int & verbose);
+
+vector<size_t> loadOneColumnFileAsNumbers (const string & inFile,
+					   const int & verbose);
+
+vector<size_t> getCounters (const size_t & nbIterations,
+			    const size_t & nbSteps);
+
+void printCounter (const size_t & currentIter,
+		   const vector<size_t> & vCounters);
 
 template <class T> inline string toString (const T & t);
 
@@ -54,18 +66,14 @@ void replaceAll (string & str, const string & from, const string & to);
 
 double round (double x);
 
-bool doesFileExist (const string filename);
+bool doesFileExist (const string & filename);
 
 vector<string> scanInputDirectory (const string & inDir, const int & verbose);
 
-bool isDirectory(const char path[]);
+bool isDirectory (const char path[]);
 
-int removeDir(string path);
+int removeDir (string path);
 
 size_t getSeed (void);
-
-void openFile (const string & pathToFile, ifstream & fileStream);
-
-void openFile (const string & pathToFile, ofstream & fileStream);
 
 #endif

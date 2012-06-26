@@ -17,6 +17,7 @@
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <cerrno>
@@ -27,6 +28,7 @@
 #include <sstream>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 using namespace std;
 
 #include "utils.h"
@@ -40,10 +42,14 @@ using namespace std;
 #define debug_print(fmt, ...)						\
   do { if (DEBUG_TEST) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
-/** \brief Split a string.
+/** \brief Split a string with one delimiter.
  *  \note http://stackoverflow.com/questions/236129/how-to-split-a-string-in-c/236803#236803
  */
-vector<string> & split (const string & s, char delim, vector<string> & tokens)
+vector<string> &
+split (
+  const string & s,
+  char delim,
+  vector<string> & tokens)
 {
   tokens.clear();
   stringstream ss(s);
@@ -54,10 +60,12 @@ vector<string> & split (const string & s, char delim, vector<string> & tokens)
   return tokens;
 }
 
-/** \brief Split a string.
- *  \note http://stackoverflow.com/questions/236129/how-to-split-a-string-in-c/236803#236803
+/** \brief Split a string with one delimiter.
  */
-vector<string> split (const string & s, char delim)
+vector<string>
+split (
+  const string & s,
+  char delim)
 {
   vector<string> tokens;
   return split (s, delim, tokens);
@@ -65,8 +73,11 @@ vector<string> split (const string & s, char delim)
 
 /** \brief Split a string with several delimiters.
  */
-vector<string> & split (const string & s, const char * delim,
-			 vector<string> & tokens)
+vector<string> &
+split (
+  const string & s,
+  const char * delim,
+  vector<string> & tokens)
 {
   tokens.clear();
   char * pch;
@@ -79,10 +90,46 @@ vector<string> & split (const string & s, const char * delim,
   return tokens;
 }
 
+/** \brief Split a string with several delimiters.
+ */
+vector<string>
+split (
+  const string & s,
+  const char * delim)
+{
+  vector<string> tokens;
+  char * pch;
+  pch = strtok ((char *) s.c_str(), delim);
+  while (pch != NULL)
+  {
+    tokens.push_back (string(pch));
+    pch = strtok (NULL, delim);
+  }
+  return tokens;
+}
+
+string
+split (
+  const string & s,
+  const char * delim,
+  const size_t & idx)
+{
+  vector<string> tokens = split (s, delim);
+  if (tokens.size() < idx)
+  {
+    cerr << "ERROR: not enough tokens after splitting string" << endl;
+    exit (1);
+  }
+  return (tokens[idx]);
+}
+
 /** \brief Return a string with the elapsed time in d, h, m and s.
  *  \note http://stackoverflow.com/a/2419597/597069
  */
-string elapsedTime (time_t startRawTime, time_t endRawTime)
+string
+elapsedTime (
+  const time_t & startRawTime,
+  const time_t & endRawTime)
 {
   char str[128];
   double elapsed = difftime (endRawTime, startRawTime); // in sec
@@ -94,7 +141,9 @@ string elapsedTime (time_t startRawTime, time_t endRawTime)
 
 /** \brief Return a string with the given date-time, without end-of-line.
  */
-string time2string (time_t inTime)
+string
+time2string (
+  const time_t & inTime)
 {
   char * ptr = ctime (&inTime);
   char buffer[126];
@@ -103,9 +152,38 @@ string time2string (time_t inTime)
   return string(buffer);
 }
 
+void
+openFile (
+  const string & pathToFile,
+  ifstream & fileStream)
+{
+  fileStream.open (pathToFile.c_str());
+  if (! fileStream.is_open())
+  {
+    cerr << "ERROR: can't open file " << pathToFile << " to read" << endl;
+    exit (1);
+  }
+}
+
+void
+openFile (
+  const string & pathToFile,
+  ofstream & fileStream)
+{
+  fileStream.open (pathToFile.c_str());
+  if (! fileStream.is_open())
+  {
+    cerr << "ERROR: can't open file " << pathToFile << " to write" << endl;
+    exit (1);
+  }
+}
+
 /** \brief Load a one-column file.
  */
-vector<string> loadOneColumnFile (string inFile, int verbose)
+vector<string>
+loadOneColumnFile (
+  const string & inFile,
+  const int & verbose)
 {
   vector<string> vItems;
   
@@ -117,12 +195,7 @@ vector<string> loadOneColumnFile (string inFile, int verbose)
   vector<string> tokens;
   size_t line_id = 0;
   
-  stream.open(inFile.c_str());
-  if (! stream.good())
-  {
-    cerr << "ERROR: can't open file " << inFile << endl;
-    exit (1);
-  }
+  openFile (inFile, stream);
   if (verbose > 0)
   {
     cout <<"load file " << inFile << " ..." << endl;
@@ -161,7 +234,10 @@ vector<string> loadOneColumnFile (string inFile, int verbose)
 
 /** \brief Load a one-column file into a vector of size_t.
  */
-vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose)
+vector<size_t>
+loadOneColumnFileAsNumbers (
+  const string & inFile,
+  const int & verbose)
 {
   vector<size_t> vItems;
   
@@ -173,12 +249,7 @@ vector<size_t> loadOneColumnFileAsNumbers (string inFile, int verbose)
   vector<string> tokens;
   size_t line_id = 0;
   
-  stream.open(inFile.c_str());
-  if (! stream.good())
-  {
-    cerr << "ERROR: can't open file " << inFile << endl;
-    exit (1);
-  }
+  openFile (inFile, stream);
   if (verbose > 0)
   {
     cout <<"load file " << inFile << " ..." << endl;
@@ -226,7 +297,10 @@ static int dummy_selector (const struct dirent * dir_entry)
 /** \brief Return a vector with the iterations corresponding to nbSteps.
  *  \note Useful with verbose to print at which iteration a loop is.
  */
-vector<size_t> getCounters (size_t nbIterations, size_t nbSteps = 5)
+vector<size_t>
+getCounters (
+  const size_t & nbIterations,
+  const size_t & nbSteps = 5)
 {
   vector<size_t> vCounters;
   size_t step = (size_t) floor (nbIterations / nbSteps);
@@ -239,7 +313,10 @@ vector<size_t> getCounters (size_t nbIterations, size_t nbSteps = 5)
 /** \brief Print the nb of iterations already complete in percentage of
  *  the total loop size.
  */
-void printCounter (size_t currentIter, vector<size_t> vCounters)
+void
+printCounter (
+  const size_t & currentIter,
+  const vector<size_t> & vCounters)
 {
   size_t i = 0;
   while (i < vCounters.size())
@@ -267,7 +344,9 @@ inline string toString (const T & t)
 
 /** \brief Copy a string into another.
  */
-string copyString (const string input)
+string
+copyString (
+  const string & input)
 {
   string output;
   for (string::const_iterator it = input.begin();
@@ -282,7 +361,11 @@ string copyString (const string input)
 /** \brief Replace part of a string with another string.
  *  \note http://stackoverflow.com/a/3418285/597069
  */
-void replaceAll (string & str, const string & from, const string & to)
+void
+replaceAll (
+  string & str,
+  const string & from,
+  const string & to)
 {
   size_t start_pos = 0;
   while((start_pos = str.find(from, start_pos)) != string::npos)
@@ -295,14 +378,18 @@ void replaceAll (string & str, const string & from, const string & to)
 /** \brief Round the given value.
  *  \note http://stackoverflow.com/a/485549/597069
  */
-double round (double x)
+double
+round (
+  double x)
 {
   return (x > 0.0) ? floor(x + 0.5) : ceil(x - 0.5);
 }
 
 /** Return true if file exists.
  */
-bool doesFileExist (const string filename)
+bool
+doesFileExist (
+  const string & filename)
 {
   bool fexists = false;
   struct stat buffer;
@@ -367,7 +454,9 @@ scanInputDirectory (
 
 /** \brief Return true if the given path is a directory.
  */
-bool isDirectory(const char path[])
+bool
+isDirectory (
+  const char path[])
 {
   bool res = false;
   if (strlen (path) > 0)
@@ -390,7 +479,9 @@ bool isDirectory(const char path[])
  *  \note Don't do anything if the supplied path is empty
  *  or if the directory doesn't exist.
  */
-int removeDir(string path)
+int
+removeDir(
+  string path)
 {
   if (path.empty())
     return 0;
@@ -466,29 +557,11 @@ int removeDir(string path)
 /** \brief Return a seed based on microseconds since epoch.
  *  \note http://www.guyrutenberg.com/2007/09/03/seeding-srand/
  */
-size_t getSeed (void)
+size_t
+getSeed (
+  void)
 {
   timeval t1;
   gettimeofday (&t1, NULL);
   return ((size_t) t1.tv_usec * t1.tv_sec);
-}
-
-void openFile (const string & pathToFile, ifstream & fileStream)
-{
-  fileStream.open (pathToFile.c_str());
-  if (! fileStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << pathToFile << " to read" << endl;
-    exit (1);
-  }
-}
-
-void openFile (const string & pathToFile, ofstream & fileStream)
-{
-  fileStream.open (pathToFile.c_str());
-  if (! fileStream.is_open())
-  {
-    cerr << "ERROR: can't open file " << pathToFile << " to write" << endl;
-    exit (1);
-  }
 }
