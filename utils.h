@@ -1,6 +1,6 @@
 /** \file utils.h
  *
- *  `utils.cpp' gathers functions useful for any programs.
+ *  `utils.cpp' gathers functions useful for any program (requires the GSL).
  *  Copyright (C) 2012  T. Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -26,6 +26,9 @@
 #include <string>
 #include <fstream>
 using namespace std;
+
+#include <gsl/gsl_sort.h>
+#include <gsl/gsl_cdf.h>
 
 vector<string> & split (const string & s, char delim, vector<string> & tokens);
 
@@ -75,5 +78,10 @@ bool isDirectory (const char path[]);
 int removeDir (string path);
 
 size_t getSeed (void);
+
+void qqnorm (double * ptData, const size_t & n);
+
+double log10_weighted_sum (const double * vec, const double * weights,
+			   const size_t size);
 
 #endif

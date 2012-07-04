@@ -565,3 +565,46 @@ getSeed (
   gettimeofday (&t1, NULL);
   return ((size_t) t1.tv_usec * t1.tv_sec);
 }
+
+/** \brief Quantile-normalize an input vector to a standard normal.
+ *  \note Missing values should be removed beforehand.
+ *  \note code inspired from "qqnorm" in GNU R.
+*/
+void qqnorm (double * ptData, const size_t & n)
+{
+  size_t * order = (size_t*) calloc (n, sizeof(size_t));
+  if (order == NULL)
+  {
+    cerr << "ERROR: can't allocate memory for order in qqnorm" << endl;
+    exit (1);
+  }
+  gsl_sort_index (order, ptData, 1, n);
+  
+  double q, a = (n <= 10 ? 0.375 : 0.5);
+  for (size_t i=0; i<n; ++i)
+  {
+    q = (i+1 - a) / (n + 1 - 2 * a);
+    ptData[order[i]] = gsl_cdf_ugaussian_Pinv (q);
+  }
+  
+  free (order);
+}
+
+/** \brief Return log_{10}(\sum_i w_i 10^vec_i)
+ */
+double
+log10_weighted_sum (
+  const double * vec,
+  const double * weights,
+  const size_t size)
+{
+  size_t i = 0;
+  double max = vec[0];
+  for (i = 0; i < size; i++)
+    if (vec[i] > max)
+      max = vec[i];
+  double sum = 0;
+  for (i = 0; i < size; i++)
+    sum += weights[i] * pow(10, vec[i] - max);
+  return max + log10(sum);
+}
