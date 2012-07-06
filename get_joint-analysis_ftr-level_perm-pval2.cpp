@@ -542,7 +542,7 @@ ResFtrSnp_init (
   const size_t & nbSubgroups)
 {
   iResFtrSnp.snp = snpName;
-  iResFtrSnp.vNs.assign (nbSubgroups, string::npos);
+  iResFtrSnp.vNs.assign (nbSubgroups, 0);
   iResFtrSnp.vBetahats.assign (nbSubgroups, 0.0);
   iResFtrSnp.vSebetahats.assign (nbSubgroups, 0.0);
   iResFtrSnp.vSigmahats.assign (nbSubgroups, 0.0);
@@ -558,93 +558,105 @@ ResFtrSnp_getSstatsOneSbgrp (
   const size_t & s,
   const bool & needQnorm)
 {
-  vector<double> y, g;
-  for (size_t i = 0; i < iFtr.vvPhenos[s].size(); ++i)
-    if (! iFtr.vvIsNa[s][i] && ! iSnp.vvIsNa[0][i])
-    {
-      y.push_back (iFtr.vvPhenos[s][i]);
-      g.push_back (iSnp.vvGenos[0][i]);
-    }
-  if (needQnorm)
-    qqnorm (&y[0], y.size());
-  
-  iResFtrSnp.vNs[s] = y.size();
-  
-  ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
-       iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
-       iResFtrSnp.vPves[s]);
+  // some features can be present only in a subset of the subgroups
+  if (iFtr.vvPhenos.size() > 0)
+  {
+    vector<double> y, g;
+    for (size_t i = 0; i < iFtr.vvPhenos[s].size(); ++i)
+      if (! iFtr.vvIsNa[s][i] && ! iSnp.vvIsNa[0][i])
+      {
+	y.push_back (iFtr.vvPhenos[s][i]);
+	g.push_back (iSnp.vvGenos[0][i]);
+      }
+    if (needQnorm)
+      qqnorm (&y[0], y.size());
+    
+    iResFtrSnp.vNs[s] = y.size();
+    
+    if (iResFtrSnp.vNs[s] > 1)
+      ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
+	   iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
+	   iResFtrSnp.vPves[s]);
+  }
 }
 
 void
 ResFtrSnp_corrSmallSampleSize (
   ResFtrSnp & iResFtrSnp)
 {
-  for (size_t s = 0; s < iResFtrSnp.vBetahats.size(); ++s)
+  for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
   {
-    double n = iResFtrSnp.vNs[s],
-      bhat = iResFtrSnp.vBetahats[s] / iResFtrSnp.vSigmahats[s],
-      sebhat = iResFtrSnp.vSebetahats[s] / iResFtrSnp.vSigmahats[s],
-      t = gsl_cdf_gaussian_Pinv (gsl_cdf_tdist_P (-fabs(bhat/sebhat),
-						  n-2), 1.0),
-      sigmahat = 0;
-    vector<double> vStdSstatsCorr;
-    if (fabs(t) > 1e-8)
+    if (iResFtrSnp.vNs[s] > 1)
     {
-      sigmahat = fabs (iResFtrSnp.vBetahats[s]) / (fabs (t) * sebhat);
-      bhat = iResFtrSnp.vBetahats[s] / sigmahat;
-      sebhat = bhat / t;
+      double n = iResFtrSnp.vNs[s],
+	bhat = iResFtrSnp.vBetahats[s] / iResFtrSnp.vSigmahats[s],
+	sebhat = iResFtrSnp.vSebetahats[s] / iResFtrSnp.vSigmahats[s],
+	t = gsl_cdf_gaussian_Pinv (gsl_cdf_tdist_P (-fabs(bhat/sebhat),
+						    n-2), 1.0),
+	sigmahat = 0;
+      vector<double> vStdSstatsCorr;
+      if (fabs(t) > 1e-8)
+      {
+	sigmahat = fabs (iResFtrSnp.vBetahats[s]) / (fabs (t) * sebhat);
+	bhat = iResFtrSnp.vBetahats[s] / sigmahat;
+	sebhat = bhat / t;
+      }
+      else
+      {
+	sigmahat = numeric_limits<double>::quiet_NaN();
+	bhat = 0;
+	sebhat = numeric_limits<double>::infinity();
+      }
+      vStdSstatsCorr.push_back (bhat);
+      vStdSstatsCorr.push_back (sebhat);
+      vStdSstatsCorr.push_back (t);
+      iResFtrSnp.vvStdSstatsCorr.push_back (vStdSstatsCorr);
     }
     else
-    {
-      sigmahat = numeric_limits<double>::quiet_NaN();
-      bhat = 0;
-      sebhat = numeric_limits<double>::infinity();
-    }
-    vStdSstatsCorr.push_back (bhat);
-    vStdSstatsCorr.push_back (sebhat);
-    vStdSstatsCorr.push_back (t);
-    iResFtrSnp.vvStdSstatsCorr.push_back (vStdSstatsCorr);
+      iResFtrSnp.vvStdSstatsCorr.push_back (vector<double> (3, 0.0));
   }
 }
 
 double
 getAbfFromStdSumStats (
-  const vector< vector<double> > & stdSumStats,
+  const vector<size_t> & vNs,
+  const vector<vector<double> > & vvStdSstatsCorr,
   const double & phi2,
   const double & oma2)
 {
-  double lABF_all = 0;
-  size_t subgroup = 0;
-  double bhat = 0, varbhat = 0, t = 0, bbarhat_num = 0, bbarhat_denom = 0,
-    varbbarhat = 0;
-  vector<double> lABF_single_s;
+  double l10AbfAll = 0, bhat = 0, varbhat = 0, t = 0, bbarhat_num = 0,
+    bbarhat_denom = 0, varbbarhat = 0;
+  vector<double> l10AbfsSingleSbgrp;
 #ifdef DEBUG
   printf ("phi2=%f oma2=%f\n", phi2, oma2);
 #endif
   
-  for (subgroup = 0; subgroup < stdSumStats.size(); ++subgroup)
+  for (size_t s = 0; s < vNs.size(); ++s)
   {
-    bhat = stdSumStats[subgroup][0];
-    varbhat = pow (stdSumStats[subgroup][1], 2);
-    t = stdSumStats[subgroup][2];
-    double lABF_single;
-    if (fabs(t) < 1e-8)
+    if (vNs[s] > 1)
     {
-      lABF_single = 0;
-    }
-    else
-    {
-      bbarhat_num += bhat / (varbhat + phi2);
-      bbarhat_denom += 1 / (varbhat + phi2);
-      varbbarhat += 1 / (varbhat + phi2);
-      lABF_single = 0.5 * log10(varbhat)
-	- 0.5 * log10(varbhat + phi2)
-	+ (0.5 * pow(t,2) * phi2 / (varbhat + phi2)) / log(10);
-  }
-  lABF_single_s.push_back (lABF_single);
+      bhat = vvStdSstatsCorr[s][0];
+      varbhat = pow (vvStdSstatsCorr[s][1], 2);
+      t = vvStdSstatsCorr[s][2];
+      double lABF_single;
+      if (fabs(t) < 1e-8)
+      {
+	lABF_single = 0;
+      }
+      else
+      {
+	bbarhat_num += bhat / (varbhat + phi2);
+	bbarhat_denom += 1 / (varbhat + phi2);
+	varbbarhat += 1 / (varbhat + phi2);
+	lABF_single = 0.5 * log10(varbhat)
+	  - 0.5 * log10(varbhat + phi2)
+	  + (0.5 * pow(t,2) * phi2 / (varbhat + phi2)) / log(10);
+      }
+      l10AbfsSingleSbgrp.push_back (lABF_single);
 #ifdef DEBUG
-  printf ("lABF_single_s[%ld]=%e\n", subgroup+1, lABF_single_s[subgroup]);
+      printf ("l10AbfsSingleSbgrp[%ld]=%e\n", s+1, l10AbfsSingleSbgrp[s]);
 #endif
+    }
   }
   
   double bbarhat = (bbarhat_denom != 0) ?
@@ -663,14 +675,114 @@ getAbfFromStdSumStats (
 	  bbarhat, varbbarhat, T2, lABF_bbar);
 #endif
   
-  lABF_all = lABF_bbar;
-  for (subgroup = 0; subgroup < lABF_single_s.size(); ++subgroup)
-    lABF_all += lABF_single_s[subgroup];
+  l10AbfAll = lABF_bbar;
+  for (size_t i = 0; i < l10AbfsSingleSbgrp.size(); ++i)
+    l10AbfAll += l10AbfsSingleSbgrp[i];
 #ifdef DEBUG
-  printf ("lABF_all=%e\n", lABF_all);
+  printf ("l10AbfAll=%e\n", l10AbfAll);
 #endif
   
-  return lABF_all;
+  return l10AbfAll;
+}
+
+void
+ResFtrSnp_calcAbfsDefault (
+  ResFtrSnp & iResFtrSnp,
+  const vector< vector<double> > & grid)
+{
+  vector<double> l10AbfsConst (grid.size(), 0.0),
+    l10AbfsFix (grid.size(), 0.0), l10AbfsMaxh (grid.size(), 0.0);
+  for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
+  {
+    l10AbfsConst[gridIdx] = (getAbfFromStdSumStats (
+			       iResFtrSnp.vNs,
+			       iResFtrSnp.vvStdSstatsCorr,
+			       grid[gridIdx][0],
+			       grid[gridIdx][1]));
+    l10AbfsFix[gridIdx] = (getAbfFromStdSumStats (
+			     iResFtrSnp.vNs,
+			     iResFtrSnp.vvStdSstatsCorr,
+			     0,
+			     grid[gridIdx][0]
+			     + grid[gridIdx][1]));
+    l10AbfsMaxh[gridIdx] = (getAbfFromStdSumStats (
+			      iResFtrSnp.vNs,
+			      iResFtrSnp.vvStdSstatsCorr,
+			      grid[gridIdx][0]
+			      + grid[gridIdx][1],
+			      0));
+  }
+  
+  vector<double> vWeights (grid.size(), 1.0 / (double) grid.size());
+  iResFtrSnp.mAbfs.insert (make_pair ("const",
+				      log10_weighted_sum (&(l10AbfsConst[0]),
+							  &(vWeights[0]),
+							  grid.size())));
+  iResFtrSnp.mAbfs.insert (make_pair ("fix",
+				      log10_weighted_sum (&(l10AbfsFix[0]),
+							  &(vWeights[0]),
+							  grid.size())));
+  iResFtrSnp.mAbfs.insert (make_pair ("maxh",
+				      log10_weighted_sum (&(l10AbfsMaxh[0]),
+							  &(vWeights[0]),
+							  grid.size())));
+}
+
+void
+ResFtrSnp_calcAbfsSpecific (
+  ResFtrSnp & iResFtrSnp,
+  const vector< vector<double> > & grid)
+{
+  stringstream ssConfig;
+  vector<size_t> vNs (iResFtrSnp.vNs.size(), 0);
+  vector< vector<double> > vvStdSstatsCorr;
+  vector<double> l10Abfs;
+  vector<double> vWeights (grid.size(), 1.0 / (double) grid.size());
+  
+  for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
+  {
+    ssConfig.str("");
+    for (size_t i = 0; i < iResFtrSnp.vNs.size(); ++i)
+    {
+      if (s == i)
+	ssConfig << "1";
+      else
+	ssConfig << "0";
+    }
+    
+    if (iResFtrSnp.vNs[s] > 1)
+    {
+      vvStdSstatsCorr.clear ();
+      for (size_t i = 0; i < iResFtrSnp.vNs.size(); ++i)
+      {
+	if (s == i)
+	{
+	  vNs[i] = iResFtrSnp.vNs[i];
+	  vvStdSstatsCorr.push_back (iResFtrSnp.vvStdSstatsCorr[i]);
+	}
+	else
+	{
+	  vNs[i] = 0;
+	  vvStdSstatsCorr.push_back (vector<double> (3, 0));
+	}
+      }
+      
+      l10Abfs.assign (grid.size(), 0);
+      for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
+	l10Abfs[gridIdx] = getAbfFromStdSumStats (vNs,
+						  vvStdSstatsCorr,
+						  grid[gridIdx][0],
+						  grid[gridIdx][1]);
+      
+      iResFtrSnp.mAbfs.insert (make_pair(ssConfig.str(),
+					 log10_weighted_sum (&(l10Abfs[0]),
+							     &(vWeights[0]),
+							     grid.size())));
+    }
+    else
+      iResFtrSnp.mAbfs.insert (make_pair(ssConfig.str(),
+					 numeric_limits<double>::quiet_NaN()));
+  }
 }
 
 void
@@ -680,38 +792,9 @@ ResFtrSnp_calcAbfs (
 {
   ResFtrSnp_corrSmallSampleSize (iResFtrSnp);
   
-  vector<double> l10AbfsConst, l10AbfsFix, l10AbfsMaxh;
-  for (size_t gridId = 0; gridId < grid.size(); ++gridId)
-  {
-    l10AbfsConst.push_back (getAbfFromStdSumStats (
-			      iResFtrSnp.vvStdSstatsCorr,
-			      grid[gridId][0],
-			      grid[gridId][1]));
-    l10AbfsFix.push_back (getAbfFromStdSumStats (
-			    iResFtrSnp.vvStdSstatsCorr,
-			    0,
-			    grid[gridId][0]
-			    + grid[gridId][1]));
-    l10AbfsMaxh.push_back (getAbfFromStdSumStats (
-			     iResFtrSnp.vvStdSstatsCorr,
-			     grid[gridId][0]
-			     + grid[gridId][1],
-			     0));
-  }
+  ResFtrSnp_calcAbfsDefault (iResFtrSnp, grid);
   
-  vector<double> vWeights (grid.size(), 1.0 / (double) grid.size());
-  iResFtrSnp.mAbfs.insert (make_pair ("const", log10_weighted_sum (
-					&(l10AbfsConst[0]),
-					&(vWeights[0]),
-					grid.size())));
-  iResFtrSnp.mAbfs.insert (make_pair ("fix", log10_weighted_sum (
-					&(l10AbfsFix[0]),
-					&(vWeights[0]),
-					grid.size())));
-  iResFtrSnp.mAbfs.insert (make_pair ("maxh", log10_weighted_sum (
-					&(l10AbfsMaxh[0]),
-					&(vWeights[0]),
-					grid.size())));
+  ResFtrSnp_calcAbfsSpecific (iResFtrSnp, grid);
 }
 
 void
@@ -871,13 +954,15 @@ loadSamples (
     }
     nbSamplesWithGeno = 0;
     for (size_t i = 5; i < tokens.size(); ++i)
+    {
       if (find(vSamples.begin(), vSamples.end(), split (tokens[i], "_", 0))
 	  != vSamples.end())
 	++nbSamplesWithGeno;
-    if (nbSamplesWithGeno != 3 * vSamples.size())
-    {
-      cerr << "ERROR: samples have phenotypes but no genotypes" << endl;
-      exit (1);
+      else
+      {
+        cerr << "ERROR: sample " << split (tokens[i], "_", 0) << " has genotypes but no phenotype" << endl;
+        exit (1);
+      }
     }
   }
 }
@@ -1166,14 +1251,11 @@ inferAssos (
 bool isNonZero (size_t i) { return (i != 0); };
 
 void
-writeRes (
+writeResSstats (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
-  const map<string, Snp> & mSnps,
-  const size_t & nbSubgroups,
-  const int & verbose)
+  const size_t & nbSubgroups)
 {
-  // 1 file per subgrp with summary stats
   for (size_t s = 0; s < nbSubgroups; ++s)
   {
     stringstream ss;
@@ -1202,30 +1284,77 @@ writeRes (
     
     outStream.close();
   }
-  
-  // 1 file with ABFs
-  stringstream ss;
-  ss << outPrefix << "_abfs.txt";
+}
+
+void
+writeResAbfs (
+  const string & outPrefix,
+  const map<string, Ftr> & mFtrs,
+  const size_t & nbSubgroups)
+{
+  stringstream ssOutFile, ssConfig;
+  ssOutFile << outPrefix << "_abfs.txt";
   ofstream outStream;
-  openFile (ss.str(), outStream);
+  openFile (ssOutFile.str(), outStream);
+  
   outStream << "ftr snp nb.samples nb.subgroups abf.const abf.fix abf.maxh";
+  for (size_t s = 0; s < nbSubgroups; ++s)
+  {
+    outStream << " abf.";
+    for (size_t i = 0; i < nbSubgroups; ++i)
+    {
+      if (s == i)
+	outStream << "1";
+      else
+	outStream << "0";
+    }
+  }
   outStream << endl;
+  
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
     const Ftr * ptF = &(itF->second);
     for (vector<ResFtrSnp>::const_iterator itP = ptF->vResFtrSnps.begin();
 	 itP != ptF->vResFtrSnps.end(); ++itP)
+    {
       outStream << ptF->name
 		<< " " << itP->snp
 		<< " " << accumulate (itP->vNs.begin(), itP->vNs.end(), 0)
 		<< " " << count_if (itP->vNs.begin(), itP->vNs.end(), isNonZero)
 		<< " " << itP->mAbfs.find("const")->second
 		<< " " << itP->mAbfs.find("fix")->second
-		<< " " << itP->mAbfs.find("maxh")->second
-		<< endl;
+		<< " " << itP->mAbfs.find("maxh")->second;
+      for (size_t s = 0; s < nbSubgroups; ++s)
+      {
+	ssConfig.str("");
+	for (size_t i = 0; i < nbSubgroups; ++i)
+	{
+	  if (s == i)
+	    ssConfig << "1";
+	  else
+	    ssConfig << "0";
+	}
+	outStream << " " << itP->mAbfs.find(ssConfig.str())->second;
+      }
+      outStream << endl;
+    }
   }
+  
   outStream.close();
+}
+
+void
+writeRes (
+  const string & outPrefix,
+  const map<string, Ftr> & mFtrs,
+  const map<string, Snp> & mSnps,
+  const size_t & nbSubgroups,
+  const int & verbose)
+{
+  writeResSstats (outPrefix, mFtrs, nbSubgroups);
+  
+  writeResAbfs (outPrefix, mFtrs, nbSubgroups);
 }
 
 /*
