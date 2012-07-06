@@ -81,6 +81,8 @@ size_t getSeed (void);
 
 void qqnorm (double * ptData, const size_t & n);
 
+double log10_weighted_sum (const double * vec, const size_t size);
+
 double log10_weighted_sum (const double * vec, const double * weights,
 			   const size_t size);
 

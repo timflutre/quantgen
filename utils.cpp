@@ -590,6 +590,34 @@ void qqnorm (double * ptData, const size_t & n)
   free (order);
 }
 
+/** \brief Return log_{10}(\sum_i^n 1/n 10^vec_i)
+ */
+double
+log10_weighted_sum (
+  const double * vec,
+  const size_t size)
+{
+  size_t i = 0;
+  double max = vec[0];
+  double * weights = (double*) calloc (size, sizeof(double));
+  if (weights == NULL)
+  {
+    fprintf (stderr, "ERROR: can't allocate memory for weights\n");
+    exit (1);
+  }
+  for (i = 0; i < size; i++)
+  {
+    if (vec[i] > max)
+      max = vec[i];
+    weights[i] = (double) (1 / ((double) size));
+  }
+  double sum = 0;
+  for (i = 0; i < size; i++)
+    sum += weights[i] * pow(10, vec[i] - max);
+  free (weights);
+  return max + log10(sum);
+}
+
 /** \brief Return log_{10}(\sum_i w_i 10^vec_i)
  */
 double
