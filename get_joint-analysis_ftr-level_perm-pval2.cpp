@@ -786,6 +786,88 @@ ResFtrSnp_calcAbfsSpecific (
 }
 
 void
+prepareConfig (
+  stringstream & ssConfig,
+  vector<bool> & vIsEqtlInConfig,
+  gsl_combination * comb)
+{
+  ssConfig.str("");
+  vIsEqtlInConfig.clear();
+  
+  vIsEqtlInConfig.assign (comb->n, false);
+  
+  ssConfig << gsl_combination_get (comb, 0) + 1;
+  vIsEqtlInConfig[gsl_combination_get (comb, 0)] = true;
+  if (comb->k > 1)
+  {
+    for (size_t i = 1; i < comb->k; ++i)
+    {
+      ssConfig << "-" << gsl_combination_get (comb, i) + 1;
+      vIsEqtlInConfig[gsl_combination_get (comb, i)] = true;
+    }
+  }
+}
+
+void
+ResFtrSnp_calcAbfsAllConfigs (
+  ResFtrSnp & iResFtrSnp,
+  const vector<vector<double> > & grid)
+{
+  gsl_combination * comb;
+  stringstream ssConfig;
+  vector<bool> vIsEqtlInConfig; // T,T,F if S=3 and config=1-2
+  vector<size_t> vNs (iResFtrSnp.vNs.size(), 0);
+  vector<vector<double> > vvStdSstatsCorr;
+  vector<double> l10Abfs;
+  
+  for (size_t k = 1; k < iResFtrSnp.vNs.size(); ++k)
+  {
+    comb = gsl_combination_calloc (iResFtrSnp.vNs.size(), k);
+    if (comb == NULL)
+    {
+      cerr << "ERROR: can't allocate memory for the combination" << endl;
+      exit (1);
+    }
+    while (true)
+    {
+      prepareConfig (ssConfig, vIsEqtlInConfig, comb);
+      vvStdSstatsCorr.clear();
+      for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
+      {
+	if (iResFtrSnp.vNs[s] > 1 && vIsEqtlInConfig[s])
+	{
+	  vNs[s] = iResFtrSnp.vNs[s];
+	  vvStdSstatsCorr.push_back (iResFtrSnp.vvStdSstatsCorr[s]);
+	}
+	else
+	{
+	  vNs[s] = 0;
+	  vvStdSstatsCorr.push_back (vector<double> (3, 0));
+	}
+      }
+      if (accumulate (vNs.begin(), vNs.end(), 0) > 0)
+      {
+	l10Abfs.assign (grid.size(), 0);
+	for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
+	  l10Abfs[gridIdx] = getAbfFromStdSumStats (vNs,
+						    vvStdSstatsCorr,
+						    grid[gridIdx][0],
+						    grid[gridIdx][1]);
+	iResFtrSnp.mAbfs.insert (make_pair(ssConfig.str(),
+					   log10_weighted_sum (&(l10Abfs[0]),
+							       grid.size())));
+      }
+      else
+	iResFtrSnp.mAbfs.insert (make_pair(ssConfig.str(),
+					   numeric_limits<double>::quiet_NaN()));
+      if (gsl_combination_next (comb) != GSL_SUCCESS)
+	break;
+    }
+    gsl_combination_free (comb);
+  }
+}
+
+void
 ResFtrSnp_calcAbfs (
   ResFtrSnp & iResFtrSnp,
   const vector< vector<double> > & grid)
@@ -794,7 +876,7 @@ ResFtrSnp_calcAbfs (
   
   ResFtrSnp_calcAbfsDefault (iResFtrSnp, grid);
   
-  ResFtrSnp_calcAbfsSpecific (iResFtrSnp, grid);
+  ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, grid);
 }
 
 void
@@ -987,9 +1069,12 @@ loadPhenos (
     openFile (vPhenoPaths[s], phenoStream);
     getline (phenoStream, line); // header
     split (line, " \t", tokens);
-    nbSamples = tokens.size() - 1;
+    if (tokens[0].compare("Id") == 0)
+      nbSamples = tokens.size() - 1;
+    else
+      nbSamples = tokens.size();
     nbLines = 1;
-		
+    
     while (true)
     {
       getline (phenoStream, line);
@@ -1292,21 +1377,30 @@ writeResAbfs (
   const map<string, Ftr> & mFtrs,
   const size_t & nbSubgroups)
 {
+  gsl_combination * comb;
   stringstream ssOutFile, ssConfig;
   ssOutFile << outPrefix << "_abfs.txt";
   ofstream outStream;
   openFile (ssOutFile.str(), outStream);
   
+  // write header line
   outStream << "ftr snp nb.samples nb.subgroups abf.const abf.fix abf.maxh";
-  for (size_t s = 0; s < nbSubgroups; ++s)
+  for (size_t k = 1; k < nbSubgroups; ++k)
   {
-    outStream << " abf.";
-    for (size_t i = 0; i < nbSubgroups; ++i)
+    comb = gsl_combination_calloc (nbSubgroups, k);
+    if (comb == NULL)
     {
-      if (s == i)
-	outStream << "1";
-      else
-	outStream << "0";
+      cerr << "ERROR: can't allocate memory for the combination" << endl;
+      exit (1);
+    }
+    while (true)
+    {
+      outStream << " abf." << gsl_combination_get (comb, 0) + 1;
+      if (comb->k > 1)
+	for (size_t i = 1; i < k; ++i)
+	  outStream << "-" << gsl_combination_get (comb, i) + 1;
+      if (gsl_combination_next (comb) != GSL_SUCCESS)
+	break;
     }
   }
   outStream << endl;
@@ -1325,17 +1419,25 @@ writeResAbfs (
 		<< " " << itP->mAbfs.find("const")->second
 		<< " " << itP->mAbfs.find("fix")->second
 		<< " " << itP->mAbfs.find("maxh")->second;
-      for (size_t s = 0; s < nbSubgroups; ++s)
+      for (size_t k = 1; k < nbSubgroups; ++k)
       {
-	ssConfig.str("");
-	for (size_t i = 0; i < nbSubgroups; ++i)
+	comb = gsl_combination_calloc (nbSubgroups, k);
+	if (comb == NULL)
 	{
-	  if (s == i)
-	    ssConfig << "1";
-	  else
-	    ssConfig << "0";
+	  cerr << "ERROR: can't allocate memory for the combination" << endl;
+	  exit (1);
 	}
-	outStream << " " << itP->mAbfs.find(ssConfig.str())->second;
+	while (true)
+	{
+	  ssConfig.str("");
+	  ssConfig << gsl_combination_get (comb, 0) + 1;
+	  if (comb->k > 1)
+	    for (size_t i = 1; i < k; ++i)
+	      ssConfig << "-" << gsl_combination_get (comb, i) + 1;
+	  outStream << " " << itP->mAbfs.find(ssConfig.str())->second;
+	  if (gsl_combination_next (comb) != GSL_SUCCESS)
+	    break;
+	}
       }
       outStream << endl;
     }
@@ -1358,108 +1460,6 @@ writeRes (
 }
 
 /*
-  void
-  getAbfOverConfigs (
-  const vector< vector<double> > & grid,
-  const string & whichBf,
-  const vector< vector<double> > & vvAllSumStatsCorr,
-  gsl_combination * comb,
-  map<string, double> & mAllConfigsAbfs,
-  const vector<double> & vWeightsGrid,
-  double & l10Abf)
-  {
-  size_t nbSubgroups = vvAllSumStatsCorr.size();
-  stringstream ssConfig;
-  vector< vector<double> > vvSomeSumStatsCorr;
-  double l10Abfs[grid.size()];
-  
-  mAllConfigsAbfs.clear();
-  
-  // config "consistent"
-  for(size_t s = 0; s < nbSubgroups; ++s)
-  ssConfig << (s+1);
-  getWeightedAbf (grid, "abf.meta", vvAllSumStatsCorr, vWeightsGrid,
-  mAllConfigsAbfs[ssConfig.str()]);
-  
-  // configs "single-specific"
-  ssConfig.clear();
-  comb = gsl_combination_calloc (nbSubgroups, 1);
-  if (comb == NULL)
-  {
-  cerr << "ERROR: can't allocate memory for the combination" << endl;
-  exit (1);
-  }
-  while (true)
-  {
-  vvSomeSumStatsCorr.clear();
-  for (size_t i = 0; i < comb->k; ++i)
-  {
-  ssConfig << gsl_combination_get (comb, i) + 1;
-  vvSomeSumStatsCorr.push_back (vvAllSumStatsCorr[
-  gsl_combination_get (comb, i)]);
-  }
-  for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
-  l10Abfs[gridIdx] = getAbfFromStdSumStats (vvSomeSumStatsCorr,
-  grid[gridIdx][0],
-  grid[gridIdx][1],
-  0);
-  mAllConfigsAbfs.insert (make_pair(ssConfig.str(),
-  log10_weighted_sum (l10Abfs,
-  &(vWeightsGrid[0]),
-  grid.size())));
-  if (gsl_combination_next (comb) != GSL_SUCCESS)
-  break;
-  }
-  gsl_combination_free (comb);
-  
-  // all other configs
-  if (whichBf.compare("abf.meta.avg.all") == 0)
-  {
-  for (size_t s = 2; s < nbSubgroups; ++s)
-  {
-  ssConfig.clear();
-  comb = gsl_combination_calloc (nbSubgroups, s);
-  if (comb == NULL)
-  {
-  cerr << "ERROR: can't allocate memory for the combination" << endl;
-  exit (1);
-  }
-  while (true)
-  {
-  vvSomeSumStatsCorr.clear();
-  for (size_t i = 0; i < comb->k; ++i)
-  {
-  ssConfig << gsl_combination_get (comb, i) + 1;
-  vvSomeSumStatsCorr.push_back (vvAllSumStatsCorr[
-  gsl_combination_get (comb, i)]);
-  }
-  for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
-  l10Abfs[gridIdx] = getAbfFromStdSumStats (vvSomeSumStatsCorr,
-  grid[gridIdx][0],
-  grid[gridIdx][1],
-  0);
-  mAllConfigsAbfs.insert (make_pair(ssConfig.str(),
-  log10_weighted_sum (l10Abfs,
-  &(vWeightsGrid[0]),
-  grid.size())));
-  if (gsl_combination_next (comb) != GSL_SUCCESS)
-  break;
-  }
-  gsl_combination_free (comb);
-  }
-  }
-
-  // average over all configs
-  vector<double> vL10Abfs,
-  vWeightsConfig (mAllConfigsAbfs.size(),
-  1.0 / ((double) mAllConfigsAbfs.size()));
-  for (map<string, double>::iterator it = mAllConfigsAbfs.begin();
-  it != mAllConfigsAbfs.end(); ++it)
-  vL10Abfs.push_back (it->second);
-  l10Abf = log10_weighted_sum (&vL10Abfs[0], &(vWeightsConfig[0]),
-  vL10Abfs.size());
-  }
-
   void
   computeJointAnalysisPermPvaluesFtrPerFtr (
   map<string, FtrMultiS> & mFeatures,
