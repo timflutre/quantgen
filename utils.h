@@ -23,6 +23,7 @@
 #include <ctime>
 
 #include <vector>
+#include <map>
 #include <string>
 #include <fstream>
 using namespace std;
@@ -51,6 +52,9 @@ void openFile (const string & pathToFile, ofstream & fileStream);
 
 vector<string> loadOneColumnFile (const string & inFile,
 				  const int & verbose);
+
+map<string, string> loadTwoColumnFile (const string & inFile,
+				       const int & verbose);
 
 vector<size_t> loadOneColumnFileAsNumbers (const string & inFile,
 					   const int & verbose);

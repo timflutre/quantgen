@@ -232,6 +232,60 @@ loadOneColumnFile (
   return vItems;
 }
 
+/** \brief Load a two-column file.
+ */
+map<string, string>
+loadTwoColumnFile (
+  const string & inFile,
+  const int & verbose)
+{
+  map<string, string> mItems;
+  
+  if (inFile.empty())
+    return mItems;
+  
+  string line;
+  ifstream stream;
+  vector<string> tokens;
+  size_t line_id = 0;
+  
+  openFile (inFile, stream);
+  if (verbose > 0)
+  {
+    cout <<"load file " << inFile << " ..." << endl;
+  }
+  
+  while (stream.good())
+  {
+    getline (stream, line);
+    if (line.empty())
+    {
+      break;
+    }
+    line_id++;
+    split (line, " \t,", tokens);
+    if (tokens.size() != 2)
+    {
+      cerr << "ERROR: file " << inFile << " should have only two columns"
+	   << " at line " << line_id << endl;
+      exit (1);
+    }
+    if (mItems.find(tokens[0]) == mItems.end())
+    {
+      mItems.insert (make_pair (tokens[0], tokens[1]));
+    }
+  }
+  
+  stream.close();
+  
+  if (verbose > 0)
+  {
+    cout << "items loaded: " << mItems.size() << endl;
+  }
+  
+  return mItems;
+}
+
 /** \brief Load a one-column file into a vector of size_t.
  */
 vector<size_t>
