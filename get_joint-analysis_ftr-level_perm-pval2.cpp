@@ -883,8 +883,7 @@ void
 Ftr_init (
   Ftr & iFtr,
   const string & name,
-  const size_t & nbSubgroups,
-  const size_t & nbSamplesS1)
+  const size_t & nbSubgroups)
 {
   iFtr.name = name;
   iFtr.chr.clear();
@@ -892,8 +891,11 @@ Ftr_init (
   iFtr.end = string::npos;
   iFtr.vvPhenos.resize (nbSubgroups);
   iFtr.vvIsNa.resize (nbSubgroups);
-  iFtr.vvPhenos[0] = (vector<double> (nbSamplesS1, 0.0));
-  iFtr.vvIsNa[0] = (vector<bool> (nbSamplesS1, false));
+  for (size_t s = 0; s < nbSubgroups; ++s)
+  {
+    iFtr.vvPhenos[s] = (vector<double> ());
+    iFtr.vvIsNa[s] = (vector<bool> ());
+  }
 }
 
 // assume both features are on the same chromosome
@@ -1092,11 +1094,13 @@ loadPhenos (
 	     << " of file " << vPhenoPaths[s] << endl;
 	exit (1);
       }
-			
+      
       if (mFtrs.find(tokens[0]) == mFtrs.end())
       {
 	Ftr iFtr;
-	Ftr_init (iFtr, tokens[0], vPhenoPaths.size(), nbSamples);
+	Ftr_init (iFtr, tokens[0], vPhenoPaths.size());
+	iFtr.vvIsNa[s].resize (nbSamples, false);
+	iFtr.vvPhenos[s].resize (nbSamples, 0.0);
 	for (size_t i = 1; i < tokens.size(); ++i)
 	{
 	  if (tokens[i].compare("NA") == 0)
@@ -1107,8 +1111,8 @@ loadPhenos (
       }
       else
       {
-	mFtrs[tokens[0]].vvPhenos[s] = (vector<double> (nbSamples, 0.0));
-	mFtrs[tokens[0]].vvIsNa[s] = (vector<bool> (nbSamples, false));
+	mFtrs[tokens[0]].vvIsNa[s].resize (nbSamples, false);
+	mFtrs[tokens[0]].vvPhenos[s].resize (nbSamples, 0.0);
 	for (size_t i = 1; i < tokens.size() ; ++i)
 	{
 	  if (tokens[i].compare("NA") == 0)
@@ -1179,8 +1183,17 @@ loadFtrInfo (
   if (countFtrs < mFtrs.size())
   {
     cerr << "ERROR: " << mFtrs.size() - countFtrs
-	 << " feature coordinates are missing" << endl;
-    exit (1);
+	 << " features have no coordinate, eg. ";
+    map<string, Ftr>::iterator it = mFtrs.begin();
+    while (it != mFtrs.end())
+    {
+      if (it->second.chr.empty())
+      {
+	cerr << it->second.name << endl;
+	exit (1);
+      }
+      ++it;
+    }
   }
   
   // sort the features per chr
@@ -1250,7 +1263,7 @@ loadGenosAndSnpInfo (
 	    maf += iSnp.vvGenos[s][i];
 	  }
 	}
-	maf /= 2 * (nbSamples,
+	maf /= 2 * (nbSamples
 		    - count (iSnp.vvIsNa[s].begin(),
 			     iSnp.vvIsNa[s].end(),
 			     true));
