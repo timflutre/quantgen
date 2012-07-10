@@ -65,10 +65,12 @@ void help (char ** argv)
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (0/default=1/2/3)" << endl
        << "  -g, --geno\tfile with absolute paths to genotype files" << endl
+       << "\t\ttwo columns: subgroup identifier<space/tab>path to file"
        << "\t\tcan be a single line (eg. for multiple tissues)" << endl
-       << "\t\tshould be in IMPUTE format (delimiter: space or tab)" << endl
+       << "\t\teach file should be in IMPUTE format (delimiter: space or tab)" << endl
        << "\t\ta header line with sample names is required" << endl
        << "  -p, --pheno\tfile with absolute paths to phenotype files" << endl
+       << "\t\ttwo columns: subgroup identifier<space/tab>path to file"
        << "\t\tcan be a single line (single subgroup)" << endl
        << "\t\trow 1 for sample names, column 1 for feature names" << endl
        << "\t\tsubgroups can have different features" << endl
@@ -963,8 +965,8 @@ Ftr_inferAssos (
 
 void
 loadSamples (
-  const vector<string> & vGenoPaths,
-  const vector<string> & vPhenoPaths,
+  const map<string, string> & mGenoPaths,
+  const map<string, string> & mPhenoPaths,
   vector<string> & vSamples,
   vector<vector<size_t> > vvSampleIdxs,
   const int & verbose)
@@ -976,12 +978,13 @@ loadSamples (
   vector<vector<string> > vvSamples;
   ifstream phenoStream;
   string line;
-  for (size_t s = 0; s < vPhenoPaths.size(); ++s)
+  for (map<string, string>::const_iterator it = mPhenoPaths.begin();
+       it != mPhenoPaths.end(); ++it)
   {
-    openFile (vPhenoPaths[s], phenoStream);
+    openFile (it->second, phenoStream);
     getline (phenoStream, line);
     phenoStream.close();
-    if (s == 0)
+    if (it == mPhenoPaths.begin())
     {
       split (line, " \t", vSamples);
       if (vSamples[0].compare("Id") == 0)
@@ -1004,9 +1007,14 @@ loadSamples (
   if (verbose > 0)
   {
     cout << "total nb of samples: " << vSamples.size() << endl << flush;
-    for (size_t s = 0; s < vPhenoPaths.size(); ++s)
-      cout << "s" << (s+1) << " (" << vPhenoPaths[s] << "): "
+    size_t s = 0;
+    for (map<string, string>::const_iterator it = mPhenoPaths.begin();
+	 it != mPhenoPaths.end(); ++it)
+    {
+      cout << "s" << (s+1) << " (" << it->first << "): "
 	   << vvSamples[s].size() << " samples" << endl << flush;
+      ++s;
+    }
   }
   
   // determine index of each sample in the global vector
@@ -1025,15 +1033,16 @@ loadSamples (
   ifstream genoStream;
   vector<string> tokens;
   size_t nbSamplesWithGeno;
-  for (size_t s = 0; s < vGenoPaths.size(); ++s)
+  for (map<string, string>::const_iterator it = mGenoPaths.begin();
+       it != mGenoPaths.end(); ++it)
   {
-    openFile (vGenoPaths[s], genoStream);
+    openFile (it->second, genoStream);
     getline (genoStream, line);
     genoStream.close();
     split (line, " \t", tokens);
     if (tokens[0].compare("chr") != 0)
     {
-      cerr << "ERROR: file " << vGenoPaths[s] << " requires a header" << endl;
+      cerr << "ERROR: file " << it->second << " requires a header" << endl;
       exit (1);
     }
     nbSamplesWithGeno = 0;
@@ -1053,7 +1062,7 @@ loadSamples (
 
 void
 loadPhenos (
-  const vector<string> & vPhenoPaths,
+  const map<string, string> & mPhenoPaths,
   const vector<string> & vFtrsToKeep,
   map<string, Ftr> & mFtrs,
   const int & verbose)
@@ -1064,11 +1073,12 @@ loadPhenos (
   ifstream phenoStream;
   string line;
   vector<string> tokens;
-  size_t nbSamples, nbLines;
+  size_t s = 0, nbSamples, nbLines;
   
-  for (size_t s = 0; s < vPhenoPaths.size(); ++s)
+  for (map<string, string>::const_iterator it = mPhenoPaths.begin();
+       it != mPhenoPaths.end(); ++it)
   {
-    openFile (vPhenoPaths[s], phenoStream);
+    openFile (it->second, phenoStream);
     getline (phenoStream, line); // header
     split (line, " \t", tokens);
     if (tokens[0].compare("Id") == 0)
@@ -1091,14 +1101,14 @@ loadPhenos (
       if (tokens.size() != nbSamples + 1)
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
-	     << " of file " << vPhenoPaths[s] << endl;
+	     << " of file " << it->second << endl;
 	exit (1);
       }
       
       if (mFtrs.find(tokens[0]) == mFtrs.end())
       {
 	Ftr iFtr;
-	Ftr_init (iFtr, tokens[0], vPhenoPaths.size());
+	Ftr_init (iFtr, tokens[0], mPhenoPaths.size());
 	iFtr.vvIsNa[s].resize (nbSamples, false);
 	iFtr.vvPhenos[s].resize (nbSamples, 0.0);
 	for (size_t i = 1; i < tokens.size(); ++i)
@@ -1123,6 +1133,7 @@ loadPhenos (
     }
     
     phenoStream.close();
+    ++s;
   }
   
   if (mFtrs.size() == 0)
@@ -1158,7 +1169,6 @@ loadFtrInfo (
   
   string line;
   vector<string> tokens;
-  size_t countFtrs = 0;
   while (true)
   {
     getline (ftrCoordsStream, line);
@@ -1167,7 +1177,6 @@ loadFtrInfo (
     split (line, " \t", tokens);
     if (mFtrs.find(tokens[3]) == mFtrs.end())
       continue;
-    ++countFtrs;
     mFtrs[tokens[3]].chr = tokens[0];
     mFtrs[tokens[3]].start = atol (tokens[1].c_str()) + 1;
     mFtrs[tokens[3]].end = atol (tokens[2].c_str());
@@ -1180,20 +1189,16 @@ loadFtrInfo (
   
   ftrCoordsStream.close();
   
-  if (countFtrs < mFtrs.size())
+  map<string, Ftr>::iterator it = mFtrs.begin();
+  while (it != mFtrs.end())
   {
-    cerr << "ERROR: " << mFtrs.size() - countFtrs
-	 << " features have no coordinate, eg. ";
-    map<string, Ftr>::iterator it = mFtrs.begin();
-    while (it != mFtrs.end())
+    if (it->second.chr.empty())
     {
-      if (it->second.chr.empty())
-      {
-	cerr << it->second.name << endl;
-	exit (1);
-      }
-      ++it;
+      cerr << "ERROR: some features have no coordinate, eg. "
+	   << it->second.name << endl;
+      exit (1);
     }
+    ++it;
   }
   
   // sort the features per chr
@@ -1204,7 +1209,7 @@ loadFtrInfo (
 
 void
 loadGenosAndSnpInfo (
-  const vector<string> & vGenoPaths,
+  const map<string, string> & mGenoPaths,
   const vector<string> & vSnpsToKeep,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps,
@@ -1216,12 +1221,13 @@ loadGenosAndSnpInfo (
   ifstream genoStream;
   string line;
   vector<string> tokens;
-  size_t nbSamples, nbLines;
+  size_t s = 0, nbSamples, nbLines;
   double maf, AA, AB, BB;
   
-  for (size_t s = 0; s < vGenoPaths.size(); ++s)
+  for (map<string, string>::const_iterator it = mGenoPaths.begin();
+       it != mGenoPaths.end(); ++it)
   {
-    openFile (vGenoPaths[s], genoStream);
+    openFile (it->second, genoStream);
     getline (genoStream, line); // header
     split (line, " \t", tokens);
     nbSamples = (size_t) (tokens.size() - 5) / 3;
@@ -1241,14 +1247,14 @@ loadGenosAndSnpInfo (
       if (tokens.size() != (size_t) (3 * nbSamples + 5))
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
-	     << " of file " << vGenoPaths[s] << endl;
+	     << " of file " << it->second << endl;
 	exit (1);
       }
 			
       if (mSnps.find(tokens[1]) == mSnps.end())
       {
 	Snp iSnp;
-	Snp_init (iSnp, tokens[1], vGenoPaths.size(), nbSamples);
+	Snp_init (iSnp, tokens[1], mGenoPaths.size(), nbSamples);
 	maf = 0;
 	for (size_t i = 0; i < nbSamples; ++i)
 	{
@@ -1280,6 +1286,7 @@ loadGenosAndSnpInfo (
     }
     
     genoStream.close();
+    ++s;
   }
   
   for (map<string, Snp>::iterator it = mSnps.begin();
@@ -1617,35 +1624,35 @@ run (
   const bool & needQnorm,
   const int & verbose)
 {
-  vector<string> vGenoPaths = loadOneColumnFile (genoPathsFile, verbose);
-  if (vGenoPaths.size() > 1)
+  map<string, string> mGenoPaths = loadTwoColumnFile (genoPathsFile, verbose);
+  if (mGenoPaths.size() > 1)
   {
     cerr << "ERROR: current version can't handle different genotype files" << endl;
     exit (1);
   }
-  vector<string> vPhenoPaths = loadOneColumnFile (phenoPathsFile, verbose);
+  map<string, string> mPhenoPaths = loadTwoColumnFile (phenoPathsFile, verbose);
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsToKeepFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsToKeepFile, verbose);
   vector<vector<double> > grid = loadGrid (gridFile, verbose);
   
   vector<string> vSamples;
   vector<vector<size_t> > vvSampleIdxs;
-  loadSamples (vGenoPaths, vPhenoPaths, vSamples, vvSampleIdxs, verbose);
+  loadSamples (mGenoPaths, mPhenoPaths, vSamples, vvSampleIdxs, verbose);
   
   map<string, Ftr> mFtrs;
   map<string, vector<Ftr*> > mChr2VecPtFtrs;
-  loadPhenos (vPhenoPaths, vFtrsToKeep, mFtrs, verbose);
+  loadPhenos (mPhenoPaths, vFtrsToKeep, mFtrs, verbose);
   loadFtrInfo (ftrCoordsFile, mFtrs, mChr2VecPtFtrs, verbose);
   
   map<string, Snp> mSnps;
   map<string, vector<Snp*> > mChr2VecPtSnps;
-  loadGenosAndSnpInfo (vGenoPaths, vSnpsToKeep, mSnps, mChr2VecPtSnps,
+  loadGenosAndSnpInfo (mGenoPaths, vSnpsToKeep, mSnps, mChr2VecPtSnps,
 		       verbose);
   
   inferAssos (mFtrs, mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, grid, whichBf,
 	      anchor, lenCis, nbPerms, seed, trick, needQnorm, verbose);
   
-  writeRes (outPrefix, mFtrs, mSnps, vPhenoPaths.size(), verbose);
+  writeRes (outPrefix, mFtrs, mSnps, mPhenoPaths.size(), verbose);
 }
 
 int main (int argc, char ** argv)
