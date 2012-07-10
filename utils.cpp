@@ -209,7 +209,7 @@ loadOneColumnFile (
       break;
     }
     line_id++;
-    split (line, '\t', tokens);
+    split (line, " \t,", tokens);
     if (tokens.size() != 1)
     {
       cerr << "ERROR: file " << inFile << " should have only one column"
@@ -263,7 +263,7 @@ loadOneColumnFileAsNumbers (
       break;
     }
     line_id++;
-    split (line, '\t', tokens);
+    split (line, " \t,", tokens);
     if (tokens.size() != 1)
     {
       cerr << "ERROR: file " << inFile << " should have only one column"
