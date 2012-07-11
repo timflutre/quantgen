@@ -29,6 +29,7 @@
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <iomanip>
 using namespace std;
 
 #include "utils.h"
@@ -383,6 +384,31 @@ printCounter (
     }
     ++i;
   } 
+}
+
+/** \brief Display a progress bar on stdout.
+ *  \note from the GEMMA package by Xiang Zhou
+*/
+void
+progressBar (
+  string msg,
+  double currentIter,
+  double nbIterations)
+{
+  double progress = (100.0 * currentIter / nbIterations);
+  int barsize = (int) (progress / 2.0);
+  char bar[51];
+  
+  cout << msg;
+  for (int i = 0; i < 50; i++)
+  {
+    if (i < barsize)
+      bar[i] = '=';
+    else
+      bar[i] = ' ';
+    cout << bar[i];
+  }
+  cout << setprecision(2) << fixed << progress << "%\r" << flush;
 }
 
 /** \brief Convert int, float, etc into a string.

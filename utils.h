@@ -65,6 +65,8 @@ vector<size_t> getCounters (const size_t & nbIterations,
 void printCounter (const size_t & currentIter,
 		   const vector<size_t> & vCounters);
 
+void progressBar (string msg, double currentIter, double nbIterations);
+
 template <class T> inline string toString (const T & t);
 
 string copyString (const string input);
