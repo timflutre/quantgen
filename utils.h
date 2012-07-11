@@ -92,4 +92,8 @@ double log10_weighted_sum (const double * vec, const size_t size);
 double log10_weighted_sum (const double * vec, const double * weights,
 			   const size_t size);
 
+bool isNonZero (size_t i);
+
+bool isNonNpos (size_t i);
+
 #endif

@@ -716,3 +716,7 @@ log10_weighted_sum (
     sum += weights[i] * pow(10, vec[i] - max);
   return max + log10(sum);
 }
+
+bool isNonZero (size_t i) { return (i != 0); };
+
+bool isNonNpos (size_t i) { return (i != string::npos); };
