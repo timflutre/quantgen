@@ -79,11 +79,14 @@ void help (char ** argv)
        << "\t\tshould be in the BED format (delimiter: tab)" << endl
        << "      --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
-       << "      --abf\twhich ABF to use as the test statistic for the permutations" << endl
-       << "\t\tdefault=abf.const/abf.fix/abf.avg.all/abf.avg.subset" << endl
        << "  -o, --out\tprefix for the output files" << endl
-       << "  -P, --perm\tnumber of permutations" << endl
+       << "      --perm\t which permutations to do" << endl
        << "\t\tthe phenotype labels are permuted" << endl
+       << "\t\t0: no permutation (default)" << endl
+       << "\t\t1: only for the separate analysis" << endl
+       << "\t\t2: only for the joint analysis" << endl
+       << "\t\t3: for both the separate and joint analysis (see --trick 2)" << endl
+       << "      --nperm\tnumber of permutations" << endl
        << "\t\tdefault=10000" << endl
        << "      --seed\tseed for the two random number generators" << endl
        << "\t\tone for the permutations, another for the trick" << endl
@@ -95,6 +98,8 @@ void help (char ** argv)
        << "\t\tif '1', the permutations really stops" << endl
        << "\t\tif '2', all permutations are done but the test statistics are not computed" << endl
        << "\t\tallow to compare different test statistics on the same permutations" << endl
+       << "      --abf\twhich ABF to use as the test statistic for the permutations" << endl
+       << "\t\tdefault=abf.const/abf.fix/abf.avg.all/abf.avg.subset" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
        << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
@@ -132,6 +137,7 @@ parseArgs (
   string & anchor,
   size_t & lenCis,
   string & outPrefix,
+  int & whichPerm,
   size_t & nbPerms,
   size_t & seed,
   int & trick,
@@ -156,7 +162,8 @@ parseArgs (
 	{"anchor", required_argument, 0, 'a'},
 	{"cis", required_argument, 0, 0},
 	{"out", required_argument, 0, 'o'},
-	{"perm", required_argument, 0, 'P'},
+	{"perm", required_argument, 0, 0},
+	{"nperm", required_argument, 0, 0},
 	{"seed", required_argument, 0, 0},
 	{"trick", required_argument, 0, 't'},
 	{"ftr", required_argument, 0, 'f'},
@@ -165,7 +172,7 @@ parseArgs (
 	{0, 0, 0, 0}
       };
     int option_index = 0;
-    c = getopt_long (argc, argv, "hVv:g:p:a:o:P:t:f:s:q",
+    c = getopt_long (argc, argv, "hVv:g:p:a:o:t:f:s:q",
 		     long_options, &option_index);
     if (c == -1)
       break;
@@ -182,6 +189,16 @@ parseArgs (
       if (strcmp(long_options[option_index].name, "grid") == 0)
       {
 	gridFile = optarg;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "perm") == 0)
+      {
+	whichPerm = atoi (optarg);
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "nperm") == 0)
+      {
+	nbPerms = atol (optarg);
 	break;
       }
       if (strcmp(long_options[option_index].name, "abf") == 0)
@@ -219,9 +236,6 @@ parseArgs (
       break;
     case 'o':
       outPrefix = optarg;
-      break;
-    case 'P':
-      nbPerms = atol (optarg);
       break;
     case 't':
       trick = atoi (optarg);
@@ -300,6 +314,12 @@ parseArgs (
   if (outPrefix.empty())
   {
     fprintf (stderr, "ERROR: missing compulsory option -o\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (whichPerm != 0 && whichPerm != 1 && whichPerm != 2)
+  {
+    fprintf (stderr, "ERROR: --perm should be 0, 1 or 2\n\n");
     help (argv);
     exit (1);
   }
@@ -472,7 +492,8 @@ struct Ftr
   vector<Snp*> vPtCisSnps;
   vector<ResFtrSnp> vResFtrSnps;
   double maxL10TrueAbf;
-  double permPval;
+  vector<double> vPermPvalsSep; // P-values in each subgroup
+  double jointPermPval; // P-value of the joint analysis
   size_t nbPermsSoFar;
 };
 
@@ -560,26 +581,22 @@ ResFtrSnp_getSstatsOneSbgrp (
   const size_t & s,
   const bool & needQnorm)
 {
-  // some features can be present only in a subset of the subgroups
-  if (iFtr.vvPhenos.size() > 0)
-  {
-    vector<double> y, g;
-    for (size_t i = 0; i < iFtr.vvPhenos[s].size(); ++i)
-      if (! iFtr.vvIsNa[s][i] && ! iSnp.vvIsNa[0][i])
-      {
-	y.push_back (iFtr.vvPhenos[s][i]);
-	g.push_back (iSnp.vvGenos[0][i]);
-      }
-    if (needQnorm)
-      qqnorm (&y[0], y.size());
-    
-    iResFtrSnp.vNs[s] = y.size();
-    
-    if (iResFtrSnp.vNs[s] > 1)
-      ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
-	   iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
-	   iResFtrSnp.vPves[s]);
-  }
+  vector<double> y, g;
+  for (size_t i = 0; i < iFtr.vvPhenos[s].size(); ++i)
+    if (! iFtr.vvIsNa[s][i] && ! iSnp.vvIsNa[0][i])
+    {
+      y.push_back (iFtr.vvPhenos[s][i]);
+      g.push_back (iSnp.vvGenos[0][i]);
+    }
+  if (needQnorm)
+    qqnorm (&y[0], y.size());
+  
+  iResFtrSnp.vNs[s] = y.size();
+  
+  if (iResFtrSnp.vNs[s] > 1)
+    ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
+	 iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
+	 iResFtrSnp.vPves[s]);
 }
 
 void
@@ -898,6 +915,8 @@ Ftr_init (
     iFtr.vvPhenos[s] = (vector<double> ());
     iFtr.vvIsNa[s] = (vector<bool> ());
   }
+  iFtr.vPermPvalsSep.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
+  iFtr.jointPermPval = numeric_limits<double>::quiet_NaN();
 }
 
 // assume both features are on the same chromosome
@@ -940,10 +959,6 @@ void
 Ftr_inferAssos (
   Ftr & iFtr,
   const vector<vector<double> > & grid,
-  const string & whichBf,
-  const size_t & nbPerms,
-  const size_t & seed,
-  const int & trick,
   const bool & needQnorm,
   const int & verbose)
 {
@@ -955,12 +970,100 @@ Ftr_inferAssos (
     ResFtrSnp iResFtrSnp;
     ResFtrSnp_init (iResFtrSnp, ptSnp->name, nbSubgroups);
     for (size_t s = 0; s < nbSubgroups; ++s)
-      ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr, *ptSnp, s, needQnorm);
+      if (iFtr.vvPhenos[s].size() > 0)
+	ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr, *ptSnp, s, needQnorm);
     ResFtrSnp_calcAbfs (iResFtrSnp, grid);
     iFtr.vResFtrSnps.push_back (iResFtrSnp);
   }
+}
+
+double
+Ftr_getMinTrueBetaPvals (
+  const Ftr & iFtr,
+  const size_t & s)
+{
+  double minTrueBetaPval = 1;
+  for (vector<ResFtrSnp>::const_iterator it = iFtr.vResFtrSnps.begin();
+       it != iFtr.vResFtrSnps.end(); ++it)
+    if (it->vBetaPvals[s] < minTrueBetaPval)
+      minTrueBetaPval = it->vBetaPvals[s];
+  return minTrueBetaPval;
+}
+
+void
+Ftr_makePermsSepOneSubgrp (
+  Ftr & iFtr,
+  const size_t & s,
+  const bool & needQnorm,
+  const size_t & nbPerms,
+  const int & trick,
+  gsl_rng * & rngPerm,
+  gsl_rng * & rngTrick)
+{
+  size_t nbPermsSoFar = 0;
+  bool shuffleOnly = false;
+  double minTrueBetaPval = Ftr_getMinTrueBetaPvals (iFtr, s), minPermBetaPval,
+    permBetaPval, betahat, sebetahat, sigmahat, pve;
+  Snp * ptSnp;
   
-//  Ftr_doPerms ();
+  iFtr.vPermPvalsSep[s] = 1;
+  
+  gsl_permutation * perm = NULL;
+  perm = gsl_permutation_calloc (iFtr.vvPhenos[s].size());
+  if (perm == NULL)
+  {
+    cerr << "ERROR: can't allocate memory for the permutation" << endl;
+    exit (1);
+  }
+  
+  for(size_t permId = 0; permId < nbPerms; ++permId)
+  {
+    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
+    if (shuffleOnly)
+      continue;
+    
+    ++nbPermsSoFar;
+    minPermBetaPval = 1;
+    
+    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
+    {
+      ptSnp = iFtr.vPtCisSnps[snpId];
+      vector<double> y, g;
+      for (size_t i = 0; i < iFtr.vvPhenos[s].size(); ++i)
+      {
+	size_t p = gsl_permutation_get (perm, i);
+	if (! iFtr.vvIsNa[s][i] && ! ptSnp->vvIsNa[0][i])
+	{
+	  y.push_back (iFtr.vvPhenos[s][p]);
+	  g.push_back (ptSnp->vvGenos[0][i]);
+	}
+      }
+      if (needQnorm)
+	qqnorm (&y[0], y.size());
+      if (y.size() > 1)
+	ols (g, y, betahat, sebetahat, sigmahat, permBetaPval,
+	     pve);
+      if (permBetaPval < minPermBetaPval)
+	minPermBetaPval = permBetaPval;
+    }
+    
+    if (minPermBetaPval <= minTrueBetaPval)
+      ++(iFtr.vPermPvalsSep[s]);
+    if (trick != 0 && iFtr.vPermPvalsSep[s] == 11)
+    {
+      if (trick == 1)
+	break;
+      else if (trick == 2)
+	shuffleOnly = true;
+    }
+  }
+  
+  if (nbPermsSoFar == nbPerms)
+    iFtr.vPermPvalsSep[s] /= (nbPerms + 1);
+  else
+    iFtr.vPermPvalsSep[s] = gsl_ran_flat (rngTrick,
+					  (11 / ((double) (nbPermsSoFar + 2))),
+					  (11 / ((double) (nbPermsSoFar + 1))));
 }
 
 void
@@ -1300,7 +1403,10 @@ loadGenosAndSnpInfo (
   // sort the SNPs per chr
   for (map<string, vector<Snp*> >::iterator it = mChr2VecPtSnps.begin();
        it != mChr2VecPtSnps.end(); ++it)
-       sort (it->second.begin(), it->second.end(), Snp_compByCoord);
+    sort (it->second.begin(), it->second.end(), Snp_compByCoord);
+  
+  if (verbose > 0)
+    cout << "nb of SNPs: " << mSnps.size() << endl;
 }
 
 void
@@ -1310,47 +1416,128 @@ inferAssos (
   const map<string, Snp> & mSnps,
   const map<string, vector<Snp*> > & mChr2VecPtSnps,
   const vector<vector<double> > & grid,
-  const string & whichBf,
   const string & anchor,
   const size_t & lenCis,
-  const size_t & nbPerms,
-  const size_t & seed,
-  const int & trick,
   const bool & needQnorm,
   const int & verbose)
 {
   if (verbose > 0)
-  {
     cout << "look for association between each pair feature-SNP ..." << endl
 	 << "anchor=" << anchor << " lenCis=" << lenCis << endl << flush;
-    if (nbPerms > 0)
-    {
-      cout << "permutation"<< (nbPerms > 1 ? "s=" : "=") << nbPerms
-	   << ", seed=" << seed
-	   << ", trick=" << trick
-	   << endl << flush;
-    }
-  }
   
   size_t nbAnalyzedPairs = 0;
   
+  size_t countFtrs = 0;
   for (map<string, Ftr>::iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
+    ++countFtrs;
     Ftr_getCisSnps (itF->second, mChr2VecPtSnps, anchor, lenCis);
     if (itF->second.vPtCisSnps.size() > 0)
     {
+      if (verbose == 1)
+	progressBar ("", countFtrs, mFtrs.size());
       if (verbose > 1)
 	cout << itF->second.name << ": " << itF->second.vPtCisSnps.size()
 	     << " SNPs in cis" << endl << flush;
-      Ftr_inferAssos (itF->second, grid, whichBf, nbPerms, seed, trick,
-		      needQnorm, verbose-1);
+      Ftr_inferAssos (itF->second, grid, needQnorm, verbose-1);
       nbAnalyzedPairs += itF->second.vResFtrSnps.size();
     }
   }
   
   if (verbose > 0)
-    cout << "nb of analyzed feature-SNP pairs: " << nbAnalyzedPairs << endl;
+    cout << endl << "nb of analyzed feature-SNP pairs: " << nbAnalyzedPairs << endl;
+}
+
+void
+makePermsSep (
+  map<string, Ftr> & mFtrs,
+  const map<string, Snp> & mSnps,
+  const size_t & nbSubgroups,
+  const bool & needQnorm,
+  const int & whichPerm,
+  const size_t & nbPerms,
+  const size_t & seed,
+  const int & trick,
+  const int & verbose)
+{
+  gsl_rng * rngPerm = NULL, * rngTrick = NULL;
+  gsl_rng_env_setup();
+  rngPerm = gsl_rng_alloc (gsl_rng_default);
+  if (rngPerm == NULL)
+  {
+    cerr << "ERROR: can't allocate memory for the RNG" << endl;
+    exit (1);
+  }
+  gsl_rng_set (rngPerm, seed);
+  if (trick != 0)
+  {
+    rngTrick = gsl_rng_alloc (gsl_rng_default);
+    if (rngTrick == NULL)
+    {
+      cerr << "ERROR: can't allocate memory for the RNG" << endl;
+      exit (1);
+    }
+    gsl_rng_set (rngTrick, seed);
+  }
+  
+  stringstream ss;
+  for (size_t s = 0; s < nbSubgroups; ++s)
+  {
+    size_t countFtrs = 0;
+    for (map<string, Ftr>::iterator itF = mFtrs.begin();
+	 itF != mFtrs.end(); ++itF)
+    {
+      ++countFtrs;
+      if (verbose == 1)
+      {
+	ss.str("");
+	ss << "s" << (s+1);
+	progressBar (ss.str(), countFtrs, mFtrs.size());
+      }
+      if (itF->second.vvPhenos[s].size() > 0)
+	Ftr_makePermsSepOneSubgrp (itF->second, s, needQnorm, nbPerms, trick,
+				   rngPerm, rngTrick);
+    }
+    if (verbose == 1)
+      cout << endl;
+  }
+  
+  gsl_rng_free (rngPerm);
+  if (trick != 0)
+    gsl_rng_free (rngTrick);
+}
+
+void
+makePerms (
+  map<string, Ftr> & mFtrs,
+  const map<string, Snp> & mSnps,
+  const size_t & nbSubgroups,
+  const vector<vector<double> > & grid,
+  const string & anchor,
+  const size_t & lenCis,
+  const bool & needQnorm,
+  const int & whichPerm,
+  const size_t & nbPerms,
+  const size_t & seed,
+  const int & trick,
+  const string & whichAbf,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "get feature-level P-values by permuting phenotypes ..." << endl
+	 << "permutation"<< (nbPerms > 1 ? "s=" : "=") << nbPerms
+	 << ", seed=" << seed
+	 << ", trick=" << trick
+	 << endl << flush;
+  
+  if (whichPerm == 1 || whichPerm == 3)
+    makePermsSep (mFtrs, mSnps, nbSubgroups, needQnorm, whichPerm, nbPerms,
+		  seed, trick, verbose);
+  if (whichPerm == 2 || whichPerm == 3)
+  {
+//    makePermsJoint ();
+  }
 }
 
 bool isNonZero (size_t i) { return (i != 0); };
@@ -1368,7 +1555,7 @@ writeResSstats (
     ofstream outStream;
     openFile (ss.str(), outStream);
     
-    outStream << "ftr snp betahat sebetahat sigmahat betaPval pve";
+    outStream << "ftr snp betahat sebetahat sigmahat betaPval pve permPval";
     outStream << endl;
     
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
@@ -1384,6 +1571,7 @@ writeResSstats (
 		  << " " << itP->vSigmahats[s]
 		  << " " << itP->vBetaPvals[s]
 		  << " " << itP->vPves[s]
+		  << " " << ptF->vPermPvalsSep[s]
 		  << endl;
     }
     
@@ -1467,16 +1655,41 @@ writeResAbfs (
 }
 
 void
+writeResJointPermPval (
+  const string & outPrefix,
+  const map<string, Ftr> & mFtrs)
+{
+  stringstream ss;
+  ss << outPrefix << "_jointPermPvals.txt";
+  ofstream outStream;
+  openFile (ss.str(), outStream);
+  
+  outStream << "ftr jointPermPval" << endl;
+  
+  for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
+       itF != mFtrs.end(); ++itF)
+    outStream << itF->second.name
+	      << " " << itF->second.jointPermPval
+	      << endl;
+  
+  outStream.close();
+}
+
+void
 writeRes (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
   const map<string, Snp> & mSnps,
   const size_t & nbSubgroups,
+  const int whichPerm,
   const int & verbose)
 {
   writeResSstats (outPrefix, mFtrs, nbSubgroups);
   
   writeResAbfs (outPrefix, mFtrs, nbSubgroups);
+  
+  if (whichPerm != 0)
+    writeResJointPermPval (outPrefix, mFtrs);
 }
 
 /*
@@ -1616,6 +1829,7 @@ run (
   const string & anchor,
   const size_t & lenCis,
   const string & outPrefix,
+  const int & whichPerm,
   const size_t & nbPerms,
   const size_t & seed,
   const int & trick,
@@ -1649,15 +1863,19 @@ run (
   loadGenosAndSnpInfo (mGenoPaths, vSnpsToKeep, mSnps, mChr2VecPtSnps,
 		       verbose);
   
-  inferAssos (mFtrs, mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, grid, whichBf,
-	      anchor, lenCis, nbPerms, seed, trick, needQnorm, verbose);
+  inferAssos (mFtrs, mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, grid, anchor,
+	      lenCis, needQnorm, verbose);
+  if (whichPerm != 0 && nbPerms > 0)
+    makePerms (mFtrs, mSnps, mPhenoPaths.size(), grid, anchor, lenCis,
+	       needQnorm, whichPerm, nbPerms, seed, trick, whichBf,
+	       verbose);
   
-  writeRes (outPrefix, mFtrs, mSnps, mPhenoPaths.size(), verbose);
+  writeRes (outPrefix, mFtrs, mSnps, mPhenoPaths.size(), whichPerm, verbose);
 }
 
 int main (int argc, char ** argv)
 {
-  int verbose = 1, trick = 0;
+  int verbose = 1, trick = 0, whichPerm = 0;
   string genoPathsFile, phenoPathsFile, ftrCoordsFile, gridFile,
     whichBf = "abf.const", anchor = "FSS+FES", outPrefix,
     ftrsToKeepFile, snpsToKeepFile;
@@ -1665,8 +1883,8 @@ int main (int argc, char ** argv)
   bool needQnorm = false;
   
   parseArgs (argc, argv, genoPathsFile, phenoPathsFile, ftrCoordsFile,
-	     gridFile, whichBf, anchor, lenCis, outPrefix, nbPerms, seed,
-	     trick, ftrsToKeepFile, snpsToKeepFile, needQnorm, verbose);
+	     gridFile, whichBf, anchor, lenCis, outPrefix, whichPerm, nbPerms,
+	      seed, trick, ftrsToKeepFile, snpsToKeepFile, needQnorm, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -1677,8 +1895,8 @@ int main (int argc, char ** argv)
   }
   
   run (genoPathsFile, phenoPathsFile, ftrCoordsFile, gridFile, whichBf,
-       anchor, lenCis, outPrefix, nbPerms, seed, trick, ftrsToKeepFile,
-       snpsToKeepFile, needQnorm, verbose);
+       anchor, lenCis, outPrefix, whichPerm, nbPerms, seed, trick,
+       ftrsToKeepFile, snpsToKeepFile, needQnorm, verbose);
   
   if (verbose > 0)
   {
