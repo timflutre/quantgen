@@ -198,17 +198,13 @@ loadOneColumnFile (
   
   openFile (inFile, stream);
   if (verbose > 0)
-  {
     cout <<"load file " << inFile << " ..." << endl;
-  }
   
   while (stream.good())
   {
     getline (stream, line);
     if (line.empty())
-    {
       break;
-    }
     line_id++;
     split (line, " \t,", tokens);
     if (tokens.size() != 1)
@@ -217,18 +213,16 @@ loadOneColumnFile (
 	   << " at line " << line_id << endl;
       exit (1);
     }
+    if (tokens[0][0] == '#')
+      continue;
     if (find(vItems.begin(), vItems.end(), tokens[0]) == vItems.end())
-    {
       vItems.push_back (tokens[0]);
-    }
   }
   
   stream.close();
   
   if (verbose > 0)
-  {
     cout << "items loaded: " << vItems.size() << endl;
-  }
   
   return vItems;
 }
@@ -252,17 +246,13 @@ loadTwoColumnFile (
   
   openFile (inFile, stream);
   if (verbose > 0)
-  {
     cout <<"load file " << inFile << " ..." << endl;
-  }
   
   while (stream.good())
   {
     getline (stream, line);
     if (line.empty())
-    {
       break;
-    }
     line_id++;
     split (line, " \t,", tokens);
     if (tokens.size() != 2)
@@ -271,18 +261,16 @@ loadTwoColumnFile (
 	   << " at line " << line_id << endl;
       exit (1);
     }
+    if (tokens[0][0] == '#')
+      continue;
     if (mItems.find(tokens[0]) == mItems.end())
-    {
       mItems.insert (make_pair (tokens[0], tokens[1]));
-    }
   }
   
   stream.close();
   
   if (verbose > 0)
-  {
     cout << "items loaded: " << mItems.size() << endl;
-  }
   
   return mItems;
 }
@@ -306,17 +294,13 @@ loadOneColumnFileAsNumbers (
   
   openFile (inFile, stream);
   if (verbose > 0)
-  {
     cout <<"load file " << inFile << " ..." << endl;
-  }
   
   while (stream.good())
   {
     getline (stream, line);
     if (line.empty())
-    {
       break;
-    }
     line_id++;
     split (line, " \t,", tokens);
     if (tokens.size() != 1)
@@ -325,19 +309,17 @@ loadOneColumnFileAsNumbers (
 	   << " at line " << line_id << endl;
       exit (1);
     }
+    if (tokens[0][0] == '#')
+      continue;
     size_t idx = strtoul (tokens[0].c_str(), NULL, 0);
     if (find(vItems.begin(), vItems.end(), idx) == vItems.end())
-    {
       vItems.push_back (idx);
-    }
   }
   
   stream.close();
   
   if (verbose > 0)
-  {
     cout << "items loaded: " << vItems.size() << endl;
-  }
   
   return vItems;
 }
