@@ -83,6 +83,8 @@ bool isDirectory (const char path[]);
 
 int removeDir (string path);
 
+void removeFiles (const vector<string> & vFileNames);
+
 size_t getSeed (void);
 
 void qqnorm (double * ptData, const size_t & n);

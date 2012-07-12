@@ -634,6 +634,20 @@ removeDir(
   return 0;
 }
 
+void
+removeFiles (
+  const vector<string> & vFileNames)
+{
+  for (size_t i = 0; i < vFileNames.size(); ++i)
+  {
+    if (remove (vFileNames[i].c_str()) != 0)
+    {
+      cerr << "ERROR: can't remove file" << vFileNames[i] << endl;
+      exit (1);
+    }
+  }
+}
+
 /** \brief Return a seed based on microseconds since epoch.
  *  \note http://www.guyrutenberg.com/2007/09/03/seeding-srand/
  */
