@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall utils.cpp test_eqtlbma.cpp -lgsl -lgslcblas -o test_eqtlbma
+ *  g++ -Wall -g utils.cpp test_eqtlbma.cpp -lgsl -lgslcblas -o test_eqtlbma
  */
 
 #include <cmath>
@@ -39,7 +39,7 @@
 using namespace std;
 
 #include "utils.h"
-#include "get_joint-analysis_ftr-level_perm-pval2.cpp"
+#include "eqtlbma.cpp"
 
 void
 test_loadSamples_prepData (
@@ -183,6 +183,9 @@ test_loadSamples_checkOut (
 void
 test_loadSamples (const int & verbose)
 {
+  if (verbose > 0)
+    cout << "START 'test_loadSamples'" << endl << flush;
+  
   // prepare input data
   size_t nbSubgroups, nbSamples;
   vector<string> vFileNames;
@@ -209,6 +212,9 @@ test_loadSamples (const int & verbose)
   
   // clean
   removeFiles (vFileNames);
+  
+  if (verbose > 0)
+    cout << "END 'test_loadSamples'" << endl << flush;
 }
 
 int main (int argc, char ** argv)
