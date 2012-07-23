@@ -179,6 +179,19 @@ openFile (
   }
 }
 
+void
+openFile (
+  const string & pathToFile,
+  ogzstream & fileStream)
+{
+  fileStream.open (pathToFile.c_str());
+  if (! fileStream.is_open())
+  {
+    cerr << "ERROR: can't open file " << pathToFile << " to write" << endl;
+    exit (1);
+  }
+}
+
 /** \brief Load a one-column file.
  */
 vector<string>

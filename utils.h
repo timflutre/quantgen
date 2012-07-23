@@ -31,6 +31,8 @@ using namespace std;
 #include <gsl/gsl_sort.h>
 #include <gsl/gsl_cdf.h>
 
+#include "gzstream/gzstream.h"
+
 vector<string> & split (const string & s, char delim, vector<string> & tokens);
 
 vector<string> split (const string & s, char delim);
@@ -49,6 +51,8 @@ string time2string (const time_t & inTime);
 void openFile (const string & pathToFile, ifstream & fileStream);
 
 void openFile (const string & pathToFile, ofstream & fileStream);
+
+void openFile (const string & pathToFile, ogzstream & fileStream);
 
 vector<string> loadOneColumnFile (const string & inFile,
 				  const int & verbose);
