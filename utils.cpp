@@ -729,3 +729,42 @@ log10_weighted_sum (
 bool isNonZero (size_t i) { return (i != 0); };
 
 bool isNonNpos (size_t i) { return (i != string::npos); };
+
+double
+getMaxMemUsedByProcess (void)
+{
+  double vmHWM = 0.0;
+  
+  if (! doesFileExist ("/proc/self/status"))
+  {
+    cerr << "WARNING: /proc/self/stat doesn't exist,"
+	 << " can't track memory usage" << endl << flush;
+  }
+  
+  string line;
+  ifstream stream;
+  vector<string> tokens;
+  openFile ("/proc/self/status", stream);
+  while (stream.good())
+  {
+    getline (stream, line);
+    if (line.empty())
+      break;
+    if (line.find("VmHWM") != string::npos)
+    {
+      split (line, ":", tokens);
+      if (tokens.size() != 2)
+      {
+	cerr << "ERROR: /proc/self/status has a different format" << endl;
+	exit (1);
+      }
+      replaceAll (tokens[1], " ", "");
+      replaceAll (tokens[1], "kB", "");
+      vmHWM = atof (tokens[1].c_str());
+      break;
+    }
+  }
+  stream.close();
+  
+  return vmHWM;
+}

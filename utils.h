@@ -102,4 +102,6 @@ bool isNonZero (size_t i);
 
 bool isNonNpos (size_t i);
 
+double getMaxMemUsedByProcess (void);
+
 #endif
