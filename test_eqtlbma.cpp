@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -g utils.cpp test_eqtlbma.cpp -lgsl -lgslcblas -o test_eqtlbma
+ *  g++ -Wall -g gzstream/gzstream.C utils.cpp test_eqtlbma.cpp -lgsl -lgslcblas -lz -o test_eqtlbma
  */
 
 #include <cmath>
@@ -47,7 +47,8 @@ test_loadSamples_prepData (
   size_t & nbSamples,
   vector<string> & vFileNames,
   map<string, string> & mGenoPaths,
-  map<string, string> & mPhenoPaths)
+  map<string, string> & mPhenoPaths,
+  vector<string> & vSubgroups)
 {
   // samples: 1,2 in s1, 1,4 in s2, 3 w/o phenotype, 4 w/o genotype
   nbSubgroups = 2;
@@ -75,9 +76,11 @@ test_loadSamples_prepData (
   stream << "ind1 ind4" << endl;
   stream.close();
   
-  mGenoPaths["all"] = vFileNames[0];
+  mGenoPaths["s1"] = vFileNames[0];
   mPhenoPaths["s1"] = vFileNames[1];
   mPhenoPaths["s2"] = vFileNames[2];
+  vSubgroups.push_back ("s1");
+  vSubgroups.push_back ("s2");
 }
 
 void
@@ -184,26 +187,26 @@ void
 test_loadSamples (const int & verbose)
 {
   if (verbose > 0)
-    cout << "START 'test_loadSamples'" << endl << flush;
+    cout << "START '" << __FUNCTION__ << "'" << endl << flush;
   
   // prepare input data
   size_t nbSubgroups, nbSamples;
-  vector<string> vFileNames;
-  map<string, string> mGenoPaths;
-  map<string, string> mPhenoPaths;
+  vector<string> vFileNames, vSubgroups;
+  map<string, string> mGenoPaths, mPhenoPaths;
   test_loadSamples_prepData (nbSubgroups, nbSamples, vFileNames, mGenoPaths,
-			     mPhenoPaths);
+			     mPhenoPaths, vSubgroups);
   
   // prepare the expected outputs
   vector<string> vSamples_exp;
   vector<vector<size_t> > vvSampleIdxGenos_exp, vvSampleIdxPhenos_exp;
-  test_loadSamples_prepExp (nbSamples, vSamples_exp, vvSampleIdxGenos_exp, vvSampleIdxPhenos_exp);
+  test_loadSamples_prepExp (nbSamples, vSamples_exp, vvSampleIdxGenos_exp,
+			    vvSampleIdxPhenos_exp);
   
   // run the function
   vector<string> vSamples_obs;
   vector<vector<size_t> > vvSampleIdxGenos_obs, vvSampleIdxPhenos_obs;
-  loadSamples (mGenoPaths, mPhenoPaths, vSamples_obs, vvSampleIdxGenos_obs,
-	       vvSampleIdxPhenos_obs, verbose);
+  loadSamples (mGenoPaths, mPhenoPaths, vSubgroups, vSamples_obs,
+	       vvSampleIdxGenos_obs, vvSampleIdxPhenos_obs, verbose);
   
   // check the observed outputs
   test_loadSamples_checkOut (vSamples_exp, vvSampleIdxGenos_exp,
@@ -214,7 +217,7 @@ test_loadSamples (const int & verbose)
   removeFiles (vFileNames);
   
   if (verbose > 0)
-    cout << "END 'test_loadSamples'" << endl << flush;
+    cout << "END '" << __FUNCTION__ << "'" << endl << flush;
 }
 
 int main (int argc, char ** argv)
