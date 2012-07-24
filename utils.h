@@ -60,6 +60,9 @@ vector<string> loadOneColumnFile (const string & inFile,
 map<string, string> loadTwoColumnFile (const string & inFile,
 				       const int & verbose);
 
+void loadTwoColumnFile (const string & inFile, map<string, string> & mItems,
+			vector<string> & vKeys, const int & verbose);
+
 vector<size_t> loadOneColumnFileAsNumbers (const string & inFile,
 					   const int & verbose);
 
