@@ -63,7 +63,7 @@ void help (char ** argv)
        << "  -v, --verbose\tverbosity level (0/default=1/2/3)" << endl
        << "  -g, --geno\tfile with absolute paths to genotype files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
-       << "\t\tcan be a single line (eg. for multiple tissues)" << endl
+       << "\t\tcan be a single line (eg. for multiple tissues) but identifier of first subgroup" << endl
        << "\t\teach file should be in IMPUTE format (delimiter: space or tab)" << endl
        << "\t\ta header line with sample names is required" << endl
        << "\t\tadd '#' at the beginning of a line to comment it" << endl
@@ -437,8 +437,8 @@ loadGrid (
   return grid;
 }
 
-/** \brief Compute the summary statistics of the linear regression.
- *  \note phenotype = mu + genotype * beta + error
+/** \brief Compute the summary statistics of the simple linear regression.
+ *  \note y_i = mu + g_i * beta + e_i with e_i ~ N(0,sigma^2)
  *  \note missing values should have been already filtered out
  */
 void
@@ -462,7 +462,7 @@ ols (
   }
   ym /= n;
   gm /= n;
-  double vg = gtg - n * gm * gm;  // variance of the genotypes
+  double vg = gtg - n * gm * gm;  // variance of g
 #ifdef DEBUG
   printf ("n=%zu ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n",
 	  n, ym, gm, yty, gtg, gty, vg);
@@ -476,7 +476,7 @@ ols (
     double rss1 = yty - 1/vg * (n*ym*(gtg*ym - gm*gty) - gty*(n*gm*ym - gty));
     if (fabs(betahat) > 1e-8)
       sigmahat = sqrt(rss1 / (n-2));
-    else  // case where phenotypes are not variable enough
+    else  // case where y is not variable enough among samples
       sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
 #ifdef DEBUG
     printf ("sigmahat=%f\n", sigmahat);
@@ -495,7 +495,7 @@ ols (
   else
   {
 #ifdef DEBUG
-    cout << "genotypes are not variable enough" << endl << flush;
+    cout << "g is not variable enough among samples" << endl << flush;
 #endif
     betahat = 0;
     sebetahat = numeric_limits<double>::infinity();
@@ -1609,21 +1609,57 @@ Ftr_makePermsJointOnePop (
 }
 
 void
+loadListsGenoAndPheno (
+  const string & genoPathsFile,
+  const string & phenoPathsFile,
+  map<string, string> & mGenoPaths,
+  map<string, string> & mPhenoPaths,
+  vector<string> & vSubgroups,
+  const int & verbose)
+{
+  loadTwoColumnFile (phenoPathsFile, mPhenoPaths, vSubgroups, verbose);
+  
+  vector<string> vSubgroupsGeno;
+  loadTwoColumnFile (genoPathsFile, mGenoPaths, vSubgroupsGeno, verbose);
+  if (mGenoPaths.size() > 1)
+  {
+    cerr << "ERROR: current version can't handle several genotype files"
+	 << endl;
+    exit (1);
+    
+    if (mGenoPaths.size() != mPhenoPaths.size())
+    {
+      cerr << "ERROR: there should be only one genotype file"
+	   << " or as many as phenotype files" << endl;
+      exit (1);
+    }
+    
+    for (size_t s = 0; s < vSubgroups.size(); ++s)
+      if (vSubgroupsGeno[s].compare(vSubgroups[s]) != 0)
+      {
+	cerr << "ERROR: subgroups are not in the same order in "
+	     << phenoPathsFile << " and " << genoPathsFile << endl;
+	exit (1);
+      }
+  }
+}
+
+void
 loadSamplesAllPhenos (
-  const map<string, string> & mPaths,
+  const map<string, string> & mPhenoPaths,
+  const vector<string> & vSubgroups,
   vector<string> & vSamples,
   vector<vector<string> > & vvSamples,
   const int & verbose)
 {
   ifstream stream;
   string line;
-  for (map<string, string>::const_iterator it = mPaths.begin();
-       it != mPaths.end(); ++it)
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (it->second, stream);
+    openFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
     stream.close();
-    if (it == mPaths.begin())
+    if (s == 0)
     {
       split (line, " \t", vSamples);
       if (vSamples[0].compare("Id") == 0)
@@ -1647,25 +1683,23 @@ loadSamplesAllPhenos (
   {
     cout << "nb of samples (phenotypes): "
 	 << vSamples.size() << endl << flush;
-    size_t s = 0;
-    for (map<string, string>::const_iterator it = mPaths.begin();
-	 it != mPaths.end(); ++it)
+    for (size_t s = 0; s < vSubgroups.size(); ++s)
     {
-      cout << "s" << (s+1) << " (" << it->first << "): "
+      cout << "s" << (s+1) << " (" << vSubgroups[s] << "): "
 	   << vvSamples[s].size() << " samples" << endl << flush;
       if (verbose > 1)
       {
 	for (size_t i = 0; i < vvSamples[s].size(); ++i)
 	  cout << vvSamples[s][i] << endl;
       }
-      ++s;
     }
   }
 }
 
 void
 loadSamplesAllGenos (
-  const map<string, string> & mPaths,
+  const map<string, string> & mGenoPaths,
+  const vector<string> & vSubgroups,
   vector<string> & vSamples,
   vector<vector<string> > & vvSamples,
   const int & verbose)
@@ -1674,16 +1708,16 @@ loadSamplesAllGenos (
   string line, sample;
   vector<string> tokens, tokens2;
   size_t i;
-  for (map<string, string>::const_iterator it = mPaths.begin();
-       it != mPaths.end(); ++it)
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (it->second, stream);
+    openFile (mGenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
     stream.close();
     split (line, " \t", tokens);
     if ((tokens.size() - 5) % 3 != 0)
     {
-      cerr << "ERROR: the header of file " << it->second
+      cerr << "ERROR: the header of file "
+	   << mGenoPaths.find(vSubgroups[s])->second
 	   << " is badly formatted" << endl;
       exit (1);
     }
@@ -1700,23 +1734,24 @@ loadSamplesAllGenos (
       if (find (vSamples.begin(), vSamples.end(), tokens2[i])
 	  == vSamples.end())
 	vSamples.push_back (tokens2[i]);
+    if (mGenoPaths.size() == 1)
+      break;
   }
   if (verbose > 0)
   {
     cout << "nb of samples (genotypes): "
 	 << vSamples.size() << endl << flush;
-    size_t s = 0;
-    for (map<string, string>::const_iterator it = mPaths.begin();
-	 it != mPaths.end(); ++it)
+    for (size_t s = 0; s < vSubgroups.size(); ++s)
     {
-      cout << "s" << (s+1) << " (" << it->first << "): "
+      cout << "s" << (s+1) << " (" << vSubgroups[s] << "): "
 	   << vvSamples[s].size() << " samples" << endl << flush;
       if (verbose > 1)
       {
 	for (size_t i = 0; i < vvSamples[s].size(); ++i)
 	  cout << vvSamples[s][i] << endl;
       }
-      ++s;
+      if (mGenoPaths.size() == 1)
+	break;
     }
   }
 }
@@ -1725,6 +1760,7 @@ void
 loadSamples (
   const map<string, string> & mGenoPaths,
   const map<string, string> & mPhenoPaths,
+  const vector<string> & vSubgroups,
   vector<string> & vSamples,
   vector<vector<size_t> > & vvSampleIdxGenos,
   vector<vector<size_t> > & vvSampleIdxPhenos,
@@ -1735,13 +1771,13 @@ loadSamples (
   
   vector<string> vAllSamplesPhenos;
   vector<vector<string> > vvSamplesPhenos;
-  loadSamplesAllPhenos (mPhenoPaths, vAllSamplesPhenos, vvSamplesPhenos,
-			verbose);
+  loadSamplesAllPhenos (mPhenoPaths, vSubgroups, vAllSamplesPhenos,
+			vvSamplesPhenos, verbose);
   
   vector<string> vAllSamplesGenos;
   vector<vector<string> > vvSamplesGenos;
-  loadSamplesAllGenos (mGenoPaths, vAllSamplesGenos, vvSamplesGenos,
-		       verbose);
+  loadSamplesAllGenos (mGenoPaths, vSubgroups, vAllSamplesGenos,
+		       vvSamplesGenos, verbose);
   
   // fill vSamples by merging vAllSamplesPhenos and vAllSamplesGenos
   vector<string>::iterator it;
@@ -1801,6 +1837,7 @@ loadSamples (
 void
 loadPhenos (
   const map<string, string> & mPhenoPaths,
+  const vector<string> & vSubgroups,
   const vector<string> & vFtrsToKeep,
   map<string, Ftr> & mFtrs,
   const int & verbose)
@@ -1811,12 +1848,11 @@ loadPhenos (
   ifstream phenoStream;
   string line;
   vector<string> tokens;
-  size_t s = 0, nbSamples, nbLines;
+  size_t  nbSamples, nbLines;
   
-  for (map<string, string>::const_iterator it = mPhenoPaths.begin();
-       it != mPhenoPaths.end(); ++it)
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (it->second, phenoStream);
+    openFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream);
     getline (phenoStream, line); // header
     split (line, " \t", tokens);
     if (tokens[0].compare("Id") == 0)
@@ -1839,7 +1875,8 @@ loadPhenos (
       if (tokens.size() != nbSamples + 1)
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
-	     << " of file " << it->second << endl;
+	     << " of file " << mPhenoPaths.find(vSubgroups[s])->second
+	     << endl;
 	exit (1);
       }
       
@@ -1848,30 +1885,33 @@ loadPhenos (
 	Ftr iFtr;
 	Ftr_init (iFtr, tokens[0], mPhenoPaths.size());
 	iFtr.vvIsNa[s].resize (nbSamples, false);
-	iFtr.vvPhenos[s].resize (nbSamples, 0.0);
+	iFtr.vvPhenos[s].resize (nbSamples,
+				 numeric_limits<double>::quiet_NaN());
 	for (size_t i = 1; i < tokens.size(); ++i)
 	{
 	  if (tokens[i].compare("NA") == 0)
 	    iFtr.vvIsNa[s][i-1] = true;
-	  iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
+	  else
+	    iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
 	}
 	mFtrs.insert (make_pair (tokens[0], iFtr));
       }
       else
       {
 	mFtrs[tokens[0]].vvIsNa[s].resize (nbSamples, false);
-	mFtrs[tokens[0]].vvPhenos[s].resize (nbSamples, 0.0);
+	mFtrs[tokens[0]].vvPhenos[s].resize (nbSamples,
+					     numeric_limits<double>::quiet_NaN());
 	for (size_t i = 1; i < tokens.size() ; ++i)
 	{
 	  if (tokens[i].compare("NA") == 0)
 	    mFtrs[tokens[0]].vvIsNa[s][i-1] = true;
-	  mFtrs[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
+	  else
+	    mFtrs[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
 	}
       }
     }
     
     phenoStream.close();
-    ++s;
   }
   
   if (mFtrs.size() == 0)
@@ -1948,6 +1988,7 @@ loadFtrInfo (
 void
 loadGenosAndSnpInfo (
   const map<string, string> & mGenoPaths,
+  const vector<string> & vSubgroups,
   const vector<string> & vSnpsToKeep,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps,
@@ -1959,13 +2000,12 @@ loadGenosAndSnpInfo (
   ifstream genoStream;
   string line;
   vector<string> tokens;
-  size_t s = 0, nbSamples, nbLines;
+  size_t nbSamples, nbLines;
   double maf, AA, AB, BB;
   
-  for (map<string, string>::const_iterator it = mGenoPaths.begin();
-       it != mGenoPaths.end(); ++it)
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (it->second, genoStream);
+    openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream);
     getline (genoStream, line); // header
     split (line, " \t", tokens);
     nbSamples = (size_t) (tokens.size() - 5) / 3;
@@ -1985,7 +2025,8 @@ loadGenosAndSnpInfo (
       if (tokens.size() != (size_t) (3 * nbSamples + 5))
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
-	     << " of file " << it->second << endl;
+	     << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	     << endl;
 	exit (1);
       }
       
@@ -2024,7 +2065,8 @@ loadGenosAndSnpInfo (
     }
     
     genoStream.close();
-    ++s;
+    if (mGenoPaths.size() == 1)
+      break;
   }
   
   for (map<string, Snp>::iterator it = mSnps.begin();
@@ -2227,18 +2269,16 @@ writeResSstats (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
   const map<string, Snp> & mSnps,
-  const map<string, string> & mPhenoPaths,
+  const vector<string> & vSubgroups,
   const int & verbose)
 {
   if (verbose > 0)
     cout << "write results of summary statistics in each subgroup ..." << endl << flush;
   
-  size_t s = 0;
-  for (map<string, string>::const_iterator it = mPhenoPaths.begin();
-       it != mPhenoPaths.end(); ++it)
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
     stringstream ss;
-    ss << outPrefix << "_sumstats_" << it->first << ".txt.gz";
+    ss << outPrefix << "_sumstats_" << vSubgroups[s] << ".txt.gz";
     if (verbose > 0)
       cout << "file " << ss.str() << endl << flush;
     ogzstream outStream;
@@ -2266,7 +2306,6 @@ writeResSstats (
     }
     
     outStream.close();
-    ++s;
   }
 }
 
@@ -2274,18 +2313,16 @@ void
 writeResSepPermPval (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
-  const map<string, string> & mPhenoPaths,
+  const vector<string> & vSubgroups,
   const int & verbose)
 {
   if (verbose > 0)
     cout << "write results of feature-level P-values in each subgroup ..." << endl << flush;
   
-  size_t s = 0;
-  for (map<string, string>::const_iterator it = mPhenoPaths.begin();
-       it != mPhenoPaths.end(); ++it)
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
     stringstream ssOutFile;
-    ssOutFile << outPrefix << "_permPval_" << it->first << ".txt.gz";
+    ssOutFile << outPrefix << "_permPval_" << vSubgroups[s] << ".txt.gz";
     if (verbose > 0)
       cout << "file " << ssOutFile.str() << endl << flush;
     ogzstream outStream;
@@ -2306,7 +2343,6 @@ writeResSepPermPval (
     }
     
     outStream.close();
-    ++s;
   }
 }
 
@@ -2514,22 +2550,22 @@ writeRes (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
   const map<string, Snp> & mSnps,
-  const map<string, string> & mPhenoPaths,
+  const vector<string> & vSubgroups,
   const int & whichStep,
   const vector<vector<double> > & grid,
   const string & whichBfs,
   const int & verbose)
 {
-  writeResSstats (outPrefix, mFtrs, mSnps, mPhenoPaths, verbose);
+  writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, verbose);
   
   if (whichStep == 2 || whichStep == 5)
-    writeResSepPermPval (outPrefix, mFtrs, mPhenoPaths, verbose);
+    writeResSepPermPval (outPrefix, mFtrs, vSubgroups, verbose);
   
   if (whichStep == 3 || whichStep == 4 || whichStep == 5)
   {
-    writeResAbfsUnweighted (outPrefix, mFtrs, mPhenoPaths.size(), grid,
+    writeResAbfsUnweighted (outPrefix, mFtrs, vSubgroups.size(), grid,
 			    whichBfs, verbose);
-    writeResAbfsWeighted (outPrefix, mFtrs, mPhenoPaths.size(), whichBfs,
+    writeResAbfsWeighted (outPrefix, mFtrs, vSubgroups.size(), whichBfs,
 			  verbose);
   }
   
@@ -2557,40 +2593,29 @@ run (
   const string & snpsToKeepFile,
   const int & verbose)
 {
-  map<string, string> mGenoPaths = loadTwoColumnFile (genoPathsFile, verbose);
-  if (mGenoPaths.size() > 1)
-  {
-    cerr << "ERROR: current version can't handle several genotype files"
-	 << endl;
-    exit (1);
-  }
-  map<string, string> mPhenoPaths = loadTwoColumnFile (phenoPathsFile,
-						       verbose);
-  if (mPhenoPaths.size() != mGenoPaths.size() && mGenoPaths.size() > 1)
-  {
-    cerr << "ERROR: there should be only one genotype file"
-	 << " or as many as phenotype files" << endl;
-    exit (1);
-  }
-  
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsToKeepFile, verbose);
   vector<string> vSnpsToKeep = loadOneColumnFile (snpsToKeepFile, verbose);
   vector<vector<double> > grid = loadGrid (gridFile, verbose);
   
+  map<string, string> mGenoPaths, mPhenoPaths;
+  vector<string> vSubgroups;
+  loadListsGenoAndPheno (genoPathsFile, phenoPathsFile, mGenoPaths,
+			 mPhenoPaths, vSubgroups, verbose);
+  
   vector<string> vSamples;
   vector<vector<size_t> > vvSampleIdxGenos, vvSampleIdxPhenos;
-  loadSamples (mGenoPaths, mPhenoPaths, vSamples, vvSampleIdxGenos,
-	       vvSampleIdxPhenos, verbose);
+  loadSamples (mGenoPaths, mPhenoPaths, vSubgroups, vSamples,
+	        vvSampleIdxGenos, vvSampleIdxPhenos, verbose);
   
   map<string, Ftr> mFtrs;
   map<string, vector<Ftr*> > mChr2VecPtFtrs;
-  loadPhenos (mPhenoPaths, vFtrsToKeep, mFtrs, verbose);
+  loadPhenos (mPhenoPaths, vSubgroups, vFtrsToKeep, mFtrs, verbose);
   loadFtrInfo (ftrCoordsFile, mFtrs, mChr2VecPtFtrs, verbose);
   
   map<string, Snp> mSnps;
   map<string, vector<Snp*> > mChr2VecPtSnps;
-  loadGenosAndSnpInfo (mGenoPaths, vSnpsToKeep, mSnps, mChr2VecPtSnps,
-		       verbose);
+  loadGenosAndSnpInfo (mGenoPaths, vSubgroups, vSnpsToKeep, mSnps,
+		       mChr2VecPtSnps, verbose);
   
   inferAssos (mFtrs, mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, vvSampleIdxPhenos,
 	      vvSampleIdxGenos, anchor, lenCis, whichStep, needQnorm, grid,
@@ -2599,7 +2624,7 @@ run (
     makePerms (mFtrs, vvSampleIdxPhenos, vvSampleIdxGenos, whichStep, 
 	       needQnorm, grid, nbPerms, seed, trick, whichPermBf, verbose);
   
-  writeRes (outPrefix, mFtrs, mSnps, mPhenoPaths, whichStep, grid, whichBfs,
+  writeRes (outPrefix, mFtrs, mSnps, vSubgroups, whichStep, grid, whichBfs,
 	    verbose);
 }
 
