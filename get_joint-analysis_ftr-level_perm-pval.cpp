@@ -16,9 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -O3 -fopenmp utils.cpp get_joint-analysis_ftr-level_perm-pval.cpp -lgsl -lgslcblas -o get_joint-analysis_ftr-level_perm-pval
- *  help2man -o get_joint-analysis_ftr-level_perm-pval.man ./get_joint-analysis_ftr-level_perm-pval
- *  groff -mandoc get_joint-analysis_ftr-level_perm-pval.man > get_joint-analysis_ftr-level_perm-pval.ps
+ *  g++ -Wall -O3 -fopenmp gzstream/gzstream.C utils.cpp get_joint-analysis_ftr-level_perm-pval.cpp -lgsl -lgslcblas -lz -o get_joint-analysis_ftr-level_perm-pval
 */
 
 #include <cmath>
