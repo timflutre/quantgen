@@ -453,25 +453,6 @@ getAbfFromStdSumStats (
   return lABF_all;
 }
 
-/** \brief Return log_{10}(\sum_i w_i 10^vec_i)
- */
-double
-log10_weighted_sum (
-  const double * vec,
-  const double * weights,
-  const size_t size)
-{
-  size_t i = 0;
-  double max = vec[0];
-  for (i = 0; i < size; i++)
-    if (vec[i] > max)
-      max = vec[i];
-  double sum = 0;
-  for (i = 0; i < size; i++)
-    sum += weights[i] * pow(10, vec[i] - max);
-  return max + log10(sum);
-}
-
 void
 computeAbfMetaOfAllConfigsForPairOverGrid (
   map<string, double> & mAllConfigsAbfs,
