@@ -91,7 +91,7 @@ void help (char ** argv)
        << "      --qnorm\tquantile-normalize the phenotypes" << endl
        << "      --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
-       << "      --bfs\t\twhich Bayes Factors to compute for the joint analysis" << endl
+       << "      --bfs\twhich Bayes Factors to compute for the joint analysis" << endl
        << "\t\tdefault='const': for the consistent configuration (+fixed-effect)" << endl
        << "\t\t'subset': compute also the BFs for each subgroup-specific configurations" << endl
        << "\t\t'all': compute also the BFs for all configurations" << endl
