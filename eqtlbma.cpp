@@ -1716,6 +1716,12 @@ loadSamplesAllGenos (
   size_t i;
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
+    if (mGenoPaths.find(vSubgroups[s]) == mGenoPaths.end())
+    {
+      cerr << "ERROR: can't find genotypes for subgroup " << vSubgroups[s]
+	   << endl;
+      exit (1);
+    }
     openFile (mGenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
     stream.close();
