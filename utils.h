@@ -107,4 +107,6 @@ bool isNonNpos (size_t i);
 
 double getMaxMemUsedByProcess (void);
 
+void printCmdLine (int argc, char ** argv);
+
 #endif

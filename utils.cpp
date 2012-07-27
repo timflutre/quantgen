@@ -819,3 +819,14 @@ getMaxMemUsedByProcess (void)
   
   return vmHWM;
 }
+
+void
+printCmdLine (
+  int argc,
+  char ** argv)
+{
+  cout << argv[0];
+  for(int i = 1; i < argc; ++i)
+    cout << " " << argv[i];
+  cout << endl;
+}

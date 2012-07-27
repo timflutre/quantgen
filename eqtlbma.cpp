@@ -1166,11 +1166,17 @@ Ftr_inferAssos (
     ResFtrSnp iResFtrSnp;
     ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
     for (size_t s = 0; s < nbSubgroups; ++s)
+    {
       if (iFtr.vvPhenos[s].size() > 0)
 	ResFtrSnp_getSstatsOneSbgrpOnePop (iResFtrSnp, iFtr,
 					   *(iFtr.vPtCisSnps[snpId]), s,
 					   vvSampleIdxPhenos, vvSampleIdxGenos,
 					   needQnorm);
+#ifdef DEBUG
+      if (verbose > 0)
+	cout << iFtr.name << " " << iResFtrSnp.snp << " s" << (s+1) << endl;
+#endif      
+    }
     if (whichStep == 3 || whichStep == 4 || whichStep == 5)
       ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, grid);
     iFtr.vResFtrSnps.push_back (iResFtrSnp);
@@ -2128,7 +2134,11 @@ inferAssos (
   }
   
   if (verbose > 0)
-    cout << endl << "nb of analyzed feature-SNP pairs: " << nbAnalyzedPairs << endl;
+  {
+    if(verbose == 1)
+      cout << endl;
+    cout << "nb of analyzed feature-SNP pairs: " << nbAnalyzedPairs << endl;
+  }
 }
 
 void
@@ -2650,6 +2660,7 @@ int main (int argc, char ** argv)
     time (&startRawTime);
     cout << "START " << argv[0] << " (" << time2string (startRawTime) << ")"
 	 << endl;
+    printCmdLine (argc, argv);
   }
   
   run (genoPathsFile, phenoPathsFile, ftrCoordsFile, anchor, lenCis,
