@@ -109,6 +109,9 @@ split (
   return tokens;
 }
 
+/** \brief Split a string with several delimiters and return only the content
+ *  of one token.
+ */
 string
 split (
   const string & s,
