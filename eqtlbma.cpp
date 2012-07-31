@@ -1860,7 +1860,7 @@ loadPhenos (
   ifstream phenoStream;
   string line;
   vector<string> tokens;
-  size_t  nbSamples, nbLines;
+  size_t nbSamples, nbLines;
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
@@ -1880,10 +1880,6 @@ loadPhenos (
 	break;
       ++nbLines;
       split (line, " \t", tokens);
-      if (! vFtrsToKeep.empty()
-	  && find (vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
-	  == vFtrsToKeep.end())
-	continue;
       if (tokens.size() != nbSamples + 1)
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
@@ -1891,6 +1887,10 @@ loadPhenos (
 	     << endl;
 	exit (1);
       }
+      if (! vFtrsToKeep.empty()
+	  && find (vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
+	  == vFtrsToKeep.end())
+	continue;
       
       if (mFtrs.find(tokens[0]) == mFtrs.end())
       {
@@ -1924,6 +1924,9 @@ loadPhenos (
     }
     
     phenoStream.close();
+    if (verbose > 0)
+      cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
+	   << " features" << endl << flush;
   }
   
   if (mFtrs.size() == 0)
@@ -1932,7 +1935,7 @@ loadPhenos (
     exit (1);
   }
   if (verbose > 0)
-    cout << "nb of features: " << mFtrs.size() << endl;
+    cout << "total nb of features: " << mFtrs.size() << endl;
 /*	map<string, Ftr>::iterator it = mFtrs.begin();
 	while (it != mFtrs.end())
 	{
@@ -2030,10 +2033,6 @@ loadGenosAndSnpInfo (
 	break;
       ++nbLines;
       split (line, " \t", tokens);
-      if (! vSnpsToKeep.empty()
-	  && find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1])
-	  == vSnpsToKeep.end())
-	continue;
       if (tokens.size() != (size_t) (3 * nbSamples + 5))
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
@@ -2041,6 +2040,10 @@ loadGenosAndSnpInfo (
 	     << endl;
 	exit (1);
       }
+      if (! vSnpsToKeep.empty()
+	  && find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1])
+	  == vSnpsToKeep.end())
+	continue;
       
       if (mSnps.find(tokens[1]) == mSnps.end())
       {
