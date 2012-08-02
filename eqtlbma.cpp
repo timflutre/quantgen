@@ -38,6 +38,8 @@
 #include <numeric>
 using namespace std;
 
+#include <gsl/gsl_vector.h>
+#include <gsl/gsl_matrix.h>
 #include <gsl/gsl_sort.h>
 #include <gsl/gsl_sort_vector.h>
 #include <gsl/gsl_rng.h>
@@ -45,6 +47,8 @@ using namespace std;
 #include <gsl/gsl_permutation.h>
 #include <gsl/gsl_cdf.h>
 #include <gsl/gsl_combination.h>
+#include <gsl/gsl_multifit.h>
+#include <gsl/gsl_statistics_double.h>
 
 #include "utils.h"
 
@@ -64,24 +68,30 @@ void help (char ** argv)
        << "  -g, --geno\tfile with absolute paths to genotype files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
        << "\t\tcan be a single line (eg. for multiple tissues) but identifier of first subgroup" << endl
-       << "\t\teach file should be in IMPUTE format (delimiter: space or tab)" << endl
-       << "\t\ta header line with sample names is required" << endl
        << "\t\tadd '#' at the beginning of a line to comment it" << endl
+       << "\t\tsubgroup file: can be in two formats" << endl
+       << "\t\tIMPUTE: row 1 is a header chr<del>name<del>coord<del>a1<del>a2" << endl
+       << "\t\tfollowed by >sample1_a1a1<del>sample1_a1a2<del>sample1_a2a2<del>..." << endl
+       << "\t\tcustom: row 1 for sample names, column 1 for SNP names, genotypes as allele dose" << endl
+       << "      --scoord\tfile with the SNP coordinates (compulsory if custom genotype format)" << endl
+       << "\t\tshould be in the BED format (delimiter: tab)" << endl
+       << "\t\tSNPs in the genotype files without coordinate are skipped" << endl
        << "  -p, --pheno\tfile with absolute paths to phenotype files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
        << "\t\tcan be a single line (single subgroup)" << endl
-       << "\t\trow 1 for sample names, column 1 for feature names" << endl
+       << "\t\tadd '#' at the beginning of a line to comment it" << endl
+       << "\t\tsubgroup file: row 1 for sample names, column 1 for feature names" << endl
        << "\t\tsubgroups can have different features" << endl
        << "\t\tall features should be in the --fcoord file" << endl
-       << "\t\tadd '#' at the beginning of a line to comment it" << endl
-       << "      --fcoord\tfile with the features coordinates" << endl
+       << "      --fcoord\tfile with the feature coordinates" << endl
        << "\t\tshould be in the BED format (delimiter: tab)" << endl
+       << "\t\tfeatures in the phenotype files without coordinate are skipped" << endl
        << "      --anchor\tfeature boundary(ies) for the cis region" << endl
        << "\t\tdefault=FSS, can also be FSS+FES" << endl
        << "      --cis\tlength of half of the cis region (in bp)" << endl
        << "\t\tapart from the anchor(s), default=100000" << endl
        << "  -o, --out\tprefix for the output files" << endl
-       << "\t\tall output files are gzipped" << endl
+       << "\t\tall output files are gzipped and have a header line" << endl
        << "      --step\tstep of the analysis to perform" << endl
        << "\t\t1: only separate analysis of each subgroup, without permutation" << endl
        << "\t\t2: only separate analysis of each subgroup, with permutation" << endl
@@ -89,11 +99,20 @@ void help (char ** argv)
        << "\t\t4: both separate and joint analysis, with permutation for joint only" << endl
        << "\t\t5: both separate and joint analysis, with permutation for both" << endl
        << "      --qnorm\tquantile-normalize the phenotypes" << endl
+       << "      --covar\tfile with absolute paths to covariate files" << endl
+       << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
+       << "\t\tcan be a single line (single subgroup)" << endl
+       << "\t\tadd '#' at the beginning of a line to comment it" << endl
+       << "\t\tsubgroup file: row 1 is a header sample<space/tab>covariate1 ..." << endl
+       << "\t\tall sample names should be in the respective genotype and phenotype files" << endl
+       << "\t\tthe covariates should be numbers, no missing value is allowed" << endl
+       << "\t\tsubgroups can have different covariates" << endl
+       << "\t\tthe order of rows is not important" << endl
        << "      --grid\tfile with the grid of values for phi2 and omega2 (ES model)" << endl
        << "\t\tsee GetGridPhiOmega() in package Rquantgen" << endl
        << "      --bfs\twhich Bayes Factors to compute for the joint analysis" << endl
        << "\t\tdefault='const': for the consistent configuration (+fixed-effect)" << endl
-       << "\t\t'subset': compute also the BFs for each subgroup-specific configurations" << endl
+       << "\t\t'subset': compute also the BFs for each subgroup-specific configuration" << endl
        << "\t\t'all': compute also the BFs for all configurations" << endl
        << "      --nperm\tnumber of permutations" << endl
        << "\t\tdefault=0, recommended=10000" << endl
@@ -101,6 +120,7 @@ void help (char ** argv)
        << "\t\tone for the permutations, another for the trick" << endl
        << "\t\tby default, both are initialized via microseconds from epoch" << endl
        << "\t\tthe RNGs are re-seeded before each subgroup and before the joint analysis" << endl
+       << "this, along with --trick 2, allows for proper comparison of separate and joint analyzes" << endl
        << "      --trick\tapply trick to speed-up permutations" << endl
        << "\t\tstop after the tenth permutation for which the test statistic" << endl
        << "\t\tis better than or equal to the true value, and sample from" << endl
@@ -112,6 +132,7 @@ void help (char ** argv)
        << "\t\tdefault=const/subset/all" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
+       << "\t\tallows to easily parallelize a whole analyzis" << endl
        << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
        << "\t\tone SNP name per line" << endl
        << endl;
@@ -139,6 +160,7 @@ parseArgs (
   int argc,
   char ** argv,
   string & genoPathsFile,
+  string & snpCoordsFile,
   string & phenoPathsFile,
   string & ftrCoordsFile,
   string & anchor,
@@ -146,6 +168,7 @@ parseArgs (
   string & outPrefix,
   int & whichStep,
   bool & needQnorm,
+  string & covarFile,
   string & gridFile,
   string & whichBfs,
   size_t & nbPerms,
@@ -165,6 +188,7 @@ parseArgs (
 	{"version", no_argument, 0, 'V'},
 	{"verbose", required_argument, 0, 'v'},
 	{"geno", required_argument, 0, 'g'},
+	{"scoord", required_argument, 0, 0},
 	{"pheno", required_argument, 0, 'p'},
 	{"fcoord", required_argument, 0, 0},
 	{"anchor", required_argument, 0, 0},
@@ -172,6 +196,7 @@ parseArgs (
 	{"out", required_argument, 0, 'o'},
 	{"step", required_argument, 0, 0},
 	{"qnorm", no_argument, 0, 0},
+	{"covar", required_argument, 0, 0},
 	{"grid", required_argument, 0, 0},
 	{"bfs", required_argument, 0, 0},
 	{"nperm", required_argument, 0, 0},
@@ -192,6 +217,11 @@ parseArgs (
     case 0:
       if (long_options[option_index].flag != 0)
 	break;
+      if (strcmp(long_options[option_index].name, "scoord") == 0)
+      {
+	snpCoordsFile = optarg;
+	break;
+      }
       if (strcmp(long_options[option_index].name, "fcoord") == 0)
       {
 	ftrCoordsFile = optarg;
@@ -215,6 +245,11 @@ parseArgs (
       if (strcmp(long_options[option_index].name, "qnorm") == 0)
       {
 	needQnorm = true;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "covar") == 0)
+      {
+	covarFile = optarg;
 	break;
       }
       if (strcmp(long_options[option_index].name, "grid") == 0)
@@ -288,6 +323,12 @@ parseArgs (
   if (! doesFileExist (genoPathsFile))
   {
     fprintf (stderr, "ERROR: can't file '%s'\n\n", genoPathsFile.c_str());
+    help (argv);
+    exit (1);
+  }
+  if (! snpCoordsFile.empty() && ! doesFileExist (snpCoordsFile))
+  {
+    fprintf (stderr, "ERROR: can't file '%s'\n\n", snpCoordsFile.c_str());
     help (argv);
     exit (1);
   }
@@ -451,57 +492,68 @@ ols (
   double & pval,
   double & R2)
 {
-  size_t i = 0, n = g.size();
-  double ym = 0, gm = 0, yty = 0, gtg = 0, gty = 0;
-  for(i=0; i<n; ++i){
-    ym += y[i];
-    gm += g[i];
-    yty += y[i] * y[i];
-    gtg += g[i] * g[i];
-    gty += g[i] * y[i];
-  }
-  ym /= n;
-  gm /= n;
-  double vg = gtg - n * gm * gm;  // variance of g
-#ifdef DEBUG
-  printf ("n=%zu ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n",
-	  n, ym, gm, yty, gtg, gty, vg);
-#endif
-  if(vg > 1e-8)
+  if (g.size() != y.size() || g.size() <= 2)
   {
-    betahat = (gty - n * gm * ym) / vg;
-#ifdef DEBUG
-    printf ("betahat=%f\n", betahat);
-#endif
-    double rss1 = yty - 1/vg * (n*ym*(gtg*ym - gm*gty) - gty*(n*gm*ym - gty));
-    if (fabs(betahat) > 1e-8)
-      sigmahat = sqrt(rss1 / (n-2));
-    else  // case where y is not variable enough among samples
-      sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
-#ifdef DEBUG
-    printf ("sigmahat=%f\n", sigmahat);
-#endif
-    sebetahat = sigmahat / sqrt(gtg - n*gm*gm);
-#ifdef DEBUG
-    printf ("sebetahat=%f\n", sebetahat);
-#endif
-    double muhat = (ym*gtg - gm*gty) / (gtg - n*gm*gm);
-    double mss = 0;
-    for(i=0; i<n; ++i)
-      mss += pow(muhat + betahat * g[i] - ym, 2);
-    pval = gsl_cdf_fdist_Q (mss/pow(sigmahat,2), 1, n-2);
-    R2 = mss / (mss + rss1);
+    betahat = numeric_limits<double>::quiet_NaN();
+    sebetahat = numeric_limits<double>::quiet_NaN();
+    sigmahat = numeric_limits<double>::quiet_NaN();
+    pval = numeric_limits<double>::quiet_NaN();
+    R2 = numeric_limits<double>::quiet_NaN();
   }
   else
   {
+    size_t i = 0, n = g.size();
+    double ym = 0, gm = 0, yty = 0, gtg = 0, gty = 0;
+    for(i=0; i<n; ++i){
+      ym += y[i];
+      gm += g[i];
+      yty += y[i] * y[i];
+      gtg += g[i] * g[i];
+      gty += g[i] * y[i];
+    }
+    ym /= n;
+    gm /= n;
+    double vg = gtg - n * gm * gm;  // variance of g
 #ifdef DEBUG
-    cout << "g is not variable enough among samples" << endl << flush;
+    printf ("n=%zu ym=%f gm=%f yty=%f gtg=%f gty=%f vg=%f\n",
+	    n, ym, gm, yty, gtg, gty, vg);
 #endif
-    betahat = 0;
-    sebetahat = numeric_limits<double>::infinity();
-    sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
-    pval = 1;
-    R2 = 0;
+    if(vg > 1e-8)
+    {
+      betahat = (gty - n * gm * ym) / vg;
+#ifdef DEBUG
+      printf ("betahat=%f\n", betahat);
+#endif
+      double rss1 = yty - 1/vg * (n*ym*(gtg*ym - gm*gty) - gty*(n*gm*ym - gty));
+      if (fabs(betahat) > 1e-8)
+	sigmahat = sqrt(rss1 / (n-2));
+      else  // case where y is not variable enough among samples
+	sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
+#ifdef DEBUG
+      printf ("sigmahat=%f\n", sigmahat);
+#endif
+      sebetahat = sigmahat / sqrt(gtg - n*gm*gm);
+#ifdef DEBUG
+      printf ("sebetahat=%f\n", sebetahat);
+#endif
+      double muhat = (ym*gtg - gm*gty) / (gtg - n*gm*gm);
+      double mss = 0;
+      for(i=0; i<n; ++i)
+	mss += pow(muhat + betahat * g[i] - ym, 2);
+      pval = gsl_cdf_fdist_Q (mss/pow(sigmahat,2), 1, n-2);
+      R2 = mss / (mss + rss1);
+    }
+    else
+    {
+#ifdef DEBUG
+      cout << "g is not variable enough among samples" << endl << flush;
+#endif
+      betahat = 0;
+      sebetahat = numeric_limits<double>::infinity();
+      sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
+      pval = 1; // or should be drawn from U([0,1])?
+      R2 = 0;
+    }
   }
 }
 
@@ -520,8 +572,8 @@ struct ResFtrSnp
   string snp; // name of the SNP
   vector<size_t> vNs; // sample sizes per subgroup
   vector<double> vBetahats; // MLE of the beta per subgroup
-  vector<double> vSebetahats; // standard errors
-  vector<double> vSigmahats; // MLEs of the sigmas
+  vector<double> vSebetahats; // standard errors per subgroup
+  vector<double> vSigmahats; // MLEs of the sigmas per subgroup
   vector<double> vBetaPvals; // P-values of H0:"beta=0" and H1:"beta!=0"
   vector<double> vPves; // proportions of variance explained (R2)
   vector<vector<double> > vvStdSstatsCorr;
@@ -550,17 +602,20 @@ void
 Snp_init (
   Snp & iSnp,
   const string & name,
-  const size_t & nbSubgroups,
-  const size_t & nbSamplesS1)
+  const size_t & nbSubgroups)
 {
   iSnp.name = name;
   iSnp.chr.clear();
   iSnp.coord = string::npos;
   iSnp.vvGenos.resize (nbSubgroups);
   iSnp.vvIsNa.resize (nbSubgroups);
-  iSnp.vMafs = (vector<double> (nbSubgroups, 0.0));
-  iSnp.vvGenos[0] = (vector<double> (nbSamplesS1, 0.0));
-  iSnp.vvIsNa[0] = (vector<bool> (nbSamplesS1, false));
+  iSnp.vMafs = (vector<double> (nbSubgroups,
+				numeric_limits<double>::quiet_NaN()));
+  for (size_t s = 0; s < nbSubgroups; ++s)
+  {
+    iSnp.vvGenos[s] = (vector<double> ());
+    iSnp.vvIsNa[s] = (vector<bool> ());
+  }
 }
 
 // assume both features are on the same chromosome
@@ -628,7 +683,7 @@ ResFtrSnp_init (
 }
 
 void
-ResFtrSnp_getSstatsOneSbgrpOnePop (
+ResFtrSnp_getSstatsOneSbgrp (
   ResFtrSnp & iResFtrSnp,
   const Ftr & iFtr,
   const Snp & iSnp,
@@ -642,14 +697,14 @@ ResFtrSnp_getSstatsOneSbgrpOnePop (
   for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
   {
     idxPheno = vvSampleIdxPhenos[s][i];
-    idxGeno = vvSampleIdxGenos[0][i];
+    idxGeno = vvSampleIdxGenos[s][i];
     if (idxPheno != string::npos
 	&& idxGeno != string::npos
 	&& ! iFtr.vvIsNa[s][idxPheno]
-	&& ! iSnp.vvIsNa[0][idxGeno])
+	&& ! iSnp.vvIsNa[s][idxGeno])
     {
       y.push_back (iFtr.vvPhenos[s][idxPheno]);
-      g.push_back (iSnp.vvGenos[0][idxGeno]);
+      g.push_back (iSnp.vvGenos[s][idxGeno]);
     }
   }
   
@@ -658,14 +713,95 @@ ResFtrSnp_getSstatsOneSbgrpOnePop (
   
   iResFtrSnp.vNs[s] = y.size();
   
-  if (iResFtrSnp.vNs[s] > 1)
-    ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
-	 iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
-	 iResFtrSnp.vPves[s]);
+  ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
+       iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
+       iResFtrSnp.vPves[s]);
+}
+
+// TODO: get summary stats for other covariates
+// TODO: handle extreme cases (non-variable genotypes and/or phenotypes)
+// TODO: is comparison of nested models (w or w/o genotypes) required?
+void
+ResFtrSnp_getSstatsOneSbgrpWithCovars (
+  ResFtrSnp & iResFtrSnp,
+  const Ftr & iFtr,
+  const Snp & iSnp,
+  const size_t & s,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars)
+{
+  vector<double> vY, vG;
+  size_t idxPheno, idxGeno, j;
+  vector<vector<double> > vvCovars (vSbgrp2Covars[s].size(),
+				    vector<double> ());
+  for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
+  {
+    idxPheno = vvSampleIdxPhenos[s][i];
+    idxGeno = vvSampleIdxGenos[s][i];
+    if (idxPheno != string::npos
+	&& idxGeno != string::npos
+	&& ! iFtr.vvIsNa[s][idxPheno]
+	&& ! iSnp.vvIsNa[s][idxGeno])
+    {
+      vY.push_back (iFtr.vvPhenos[s][idxPheno]);
+      vG.push_back (iSnp.vvGenos[s][idxGeno]);
+      j = 0;
+      for (map<string, vector<double> >::const_iterator it = vSbgrp2Covars[s].begin();
+	   it != vSbgrp2Covars[s].end(); ++it)
+      {
+	vvCovars[j].push_back (it->second[i]);
+	++j;
+      }
+    }
+  }
+  
+  if (needQnorm)
+    qqnorm (&vY[0], vY.size());
+  
+  iResFtrSnp.vNs[s] = vY.size();
+  
+  if (iResFtrSnp.vNs[s] > 2)
+  {
+    size_t N = vY.size(), P = 2 + vvCovars.size();
+    gsl_vector * Y = gsl_vector_alloc (N), * Bhat = gsl_vector_alloc (P);
+    gsl_matrix * X = gsl_matrix_alloc (N, P),
+      * covBhat = gsl_matrix_alloc (P, P);
+    gsl_multifit_linear_workspace * work = gsl_multifit_linear_alloc (N, P);
+    
+    for (size_t n = 0; n < N; ++n)
+    {
+      gsl_vector_set (Y, n, vY[n]);
+      gsl_matrix_set (X, n, 0, 1.0);
+      gsl_matrix_set (X, n, 1, vG[n]);
+      for (size_t p = 2; p < P; ++p)
+	gsl_matrix_set (X, n, p, vvCovars[(p-2)][n]);
+    }
+    
+    double rss, t;
+    size_t rank;
+    gsl_multifit_linear_svd (X, Y, GSL_DBL_EPSILON, &rank, Bhat, covBhat,
+			     &rss, work);
+    iResFtrSnp.vBetahats[s] = gsl_vector_get (Bhat, 1);
+    iResFtrSnp.vSebetahats[s] = sqrt (gsl_matrix_get (covBhat, 1, 1));
+    iResFtrSnp.vSigmahats[s] = sqrt (rss / (N-rank));
+    iResFtrSnp.vPves[s] = 1 - rss / gsl_stats_tss (Y->data, Y->stride,
+      Y->size);
+    
+    t = iResFtrSnp.vBetahats[s] / iResFtrSnp.vSebetahats[s];
+    iResFtrSnp.vBetaPvals[s] = 2 * gsl_cdf_tdist_Q (fabs(t), N-rank);
+    
+    gsl_vector_free (Y);
+    gsl_vector_free (Bhat);
+    gsl_matrix_free (X);
+    gsl_matrix_free (covBhat);
+    gsl_multifit_linear_free (work);
+  }
 }
 
 void
-ResFtrSnp_getSstatsPermOneSbgrpOnePop (
+ResFtrSnp_getSstatsPermOneSbgrp (
   ResFtrSnp & iResFtrSnp,
   const Ftr & iFtr,
   const Snp & iSnp,
@@ -681,14 +817,14 @@ ResFtrSnp_getSstatsPermOneSbgrpOnePop (
   {
     p = gsl_permutation_get (perm, i);
     idxPheno = vvSampleIdxPhenos[s][p];
-    idxGeno = vvSampleIdxGenos[0][i];
+    idxGeno = vvSampleIdxGenos[s][i];
     if (idxPheno != string::npos
 	&& idxGeno != string::npos
 	&& ! iFtr.vvIsNa[s][idxPheno]
-	&& ! iSnp.vvIsNa[0][idxGeno])
+	&& ! iSnp.vvIsNa[s][idxGeno])
     {
       y.push_back (iFtr.vvPhenos[s][idxPheno]);
-      g.push_back (iSnp.vvGenos[0][idxGeno]);
+      g.push_back (iSnp.vvGenos[s][idxGeno]);
     }
   }
   
@@ -697,10 +833,9 @@ ResFtrSnp_getSstatsPermOneSbgrpOnePop (
   
   iResFtrSnp.vNs[s] = y.size();
   
-  if (iResFtrSnp.vNs[s] > 1)
-    ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
-	 iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
-	 iResFtrSnp.vPves[s]);
+  ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
+       iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
+       iResFtrSnp.vPves[s]);
 }
 
 void
@@ -1135,17 +1270,22 @@ Ftr_getCisSnps (
 {
   map<string, vector<Snp*> >::const_iterator itVecPtSnps =
     mChr2VecPtSnps.find(iFtr.chr);
-  
-  for (size_t snpId = 0; snpId < itVecPtSnps->second.size(); ++snpId)
+  if (itVecPtSnps == mChr2VecPtSnps.end())
+    cerr << "WARNING: feature " << iFtr.name << " is on chr '" << iFtr.chr
+	 << "', is it encoded identically in the SNP coords file?" << endl;
+  else
   {
-    Snp * ptSnp = (itVecPtSnps->second)[snpId];
-    int inCis = Snp_isInCis (*ptSnp, iFtr.start, iFtr.end,
-			     anchor, lenCis);
-    if (inCis == 1)
-      break;
-    else if (inCis == -1)
-      continue;
-    iFtr.vPtCisSnps.push_back ((itVecPtSnps->second)[snpId]);
+    for (size_t snpId = 0; snpId < itVecPtSnps->second.size(); ++snpId)
+    {
+      Snp * ptSnp = (itVecPtSnps->second)[snpId];
+      int inCis = Snp_isInCis (*ptSnp, iFtr.start, iFtr.end,
+			       anchor, lenCis);
+      if (inCis == 1)
+	break;
+      else if (inCis == -1)
+	continue;
+      iFtr.vPtCisSnps.push_back ((itVecPtSnps->second)[snpId]);
+    }
   }
 }
 
@@ -1156,6 +1296,7 @@ Ftr_inferAssos (
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const int & whichStep,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const string & whichBfs,
   const int & verbose)
@@ -1167,15 +1308,16 @@ Ftr_inferAssos (
     ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
     for (size_t s = 0; s < nbSubgroups; ++s)
     {
-      if (iFtr.vvPhenos[s].size() > 0)
-	ResFtrSnp_getSstatsOneSbgrpOnePop (iResFtrSnp, iFtr,
-					   *(iFtr.vPtCisSnps[snpId]), s,
-					   vvSampleIdxPhenos, vvSampleIdxGenos,
-					   needQnorm);
+      if (iFtr.vvPhenos[s].size() > 0 &&
+	  iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
+      {
 #ifdef DEBUG
-      if (verbose > 0)
-	cout << iFtr.name << " " << iResFtrSnp.snp << " s" << (s+1) << endl;
-#endif      
+	if (verbose > 0)
+	  cout << iFtr.name << " " << iResFtrSnp.snp << " s" << (s+1) << endl;
+#endif
+	ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]), s, vvSampleIdxPhenos, vvSampleIdxGenos, needQnorm);
+//	ResFtrSnp_getSstatsOneSbgrpWithCovars (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]), s, vvSampleIdxPhenos, vvSampleIdxGenos, needQnorm,vSbgrp2Covars);
+      }
     }
     if (whichStep == 3 || whichStep == 4 || whichStep == 5)
       ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, grid);
@@ -1197,7 +1339,7 @@ Ftr_getMinTrueBetaPvals (
 }
 
 void
-Ftr_makePermsSepOneSubgrpOnePop (
+Ftr_makePermsSepOneSubgrp (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1246,21 +1388,19 @@ Ftr_makePermsSepOneSubgrpOnePop (
       {
 	p = gsl_permutation_get (perm, i);
 	idxPheno = vvSampleIdxPhenos[s][p];
-	idxGeno = vvSampleIdxGenos[0][i];
+	idxGeno = vvSampleIdxGenos[s][i];
 	if (idxPheno != string::npos
 	    && idxGeno != string::npos
 	    && ! iFtr.vvIsNa[s][idxPheno]
-	    && ! iSnp.vvIsNa[0][idxGeno])
+	    && ! iSnp.vvIsNa[s][idxGeno])
 	{
 	  y.push_back (iFtr.vvPhenos[s][idxPheno]);
-	  g.push_back (iSnp.vvGenos[0][idxGeno]);
+	  g.push_back (iSnp.vvGenos[s][idxGeno]);
 	}
       }
       if (needQnorm)
 	qqnorm (&y[0], y.size());
-      if (y.size() > 1)
-	ols (g, y, betahat, sebetahat, sigmahat, permBetaPval,
-	     pve);
+      ols (g, y, betahat, sebetahat, sigmahat, permBetaPval, pve);
       if (permBetaPval < minPermBetaPval)
 	minPermBetaPval = permBetaPval;
     }
@@ -1377,7 +1517,7 @@ Ftr_getMaxL10TrueAbfAll (
 }
 
 void
-Ftr_makePermsJointOnePopAbfConst (
+Ftr_makePermsJointAbfConst (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1411,7 +1551,7 @@ Ftr_makePermsJointOnePopAbfConst (
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
 	if (iFtr.vvPhenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrpOnePop (iResFtrSnp, iFtr, iSnp, s,
+	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 						 vvSampleIdxPhenos,
 						 vvSampleIdxGenos,
 						 needQnorm, perm);
@@ -1437,7 +1577,7 @@ Ftr_makePermsJointOnePopAbfConst (
 }
 
 void
-Ftr_makePermsJointOnePopAbfSubset (
+Ftr_makePermsJointAbfSubset (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1471,7 +1611,7 @@ Ftr_makePermsJointOnePopAbfSubset (
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
 	if (iFtr.vvPhenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrpOnePop (iResFtrSnp, iFtr, iSnp, s,
+	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 						 vvSampleIdxPhenos,
 						 vvSampleIdxGenos,
 						 needQnorm, perm);
@@ -1494,7 +1634,7 @@ Ftr_makePermsJointOnePopAbfSubset (
 }
 
 void
-Ftr_makePermsJointOnePopAbfAll (
+Ftr_makePermsJointAbfAll (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1528,7 +1668,7 @@ Ftr_makePermsJointOnePopAbfAll (
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
 	if (iFtr.vvPhenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrpOnePop (iResFtrSnp, iFtr, iSnp, s,
+	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 						 vvSampleIdxPhenos,
 						 vvSampleIdxGenos,
 						 needQnorm, perm);
@@ -1551,7 +1691,7 @@ Ftr_makePermsJointOnePopAbfAll (
 }
 
 void
-Ftr_makePermsJointOnePop (
+Ftr_makePermsJoint (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1581,7 +1721,7 @@ Ftr_makePermsJointOnePop (
   {
     maxL10TrueAbf = Ftr_getMaxL10TrueAbfConst (iFtr);
     iFtr.maxL10TrueAbf = maxL10TrueAbf;
-    Ftr_makePermsJointOnePopAbfConst (iFtr, vvSampleIdxPhenos,
+    Ftr_makePermsJointAbfConst (iFtr, vvSampleIdxPhenos,
 				      vvSampleIdxGenos, needQnorm, grid,
 				      nbPerms, trick, maxL10TrueAbf,
 				      rngPerm, rngTrick, perm);
@@ -1589,7 +1729,7 @@ Ftr_makePermsJointOnePop (
   else if (whichPermBf.compare("subset") == 0)
   {
     maxL10TrueAbf = Ftr_getMaxL10TrueAbfSubset (iFtr);
-    Ftr_makePermsJointOnePopAbfSubset (iFtr, vvSampleIdxPhenos,
+    Ftr_makePermsJointAbfSubset (iFtr, vvSampleIdxPhenos,
 				       vvSampleIdxGenos, needQnorm, grid,
 				       nbPerms, trick, maxL10TrueAbf,
 				       rngPerm, rngTrick, perm);
@@ -1597,7 +1737,7 @@ Ftr_makePermsJointOnePop (
   else if (whichPermBf.compare("all") == 0)
   {
     maxL10TrueAbf = Ftr_getMaxL10TrueAbfAll (iFtr);
-    Ftr_makePermsJointOnePopAbfAll (iFtr, vvSampleIdxPhenos,
+    Ftr_makePermsJointAbfAll (iFtr, vvSampleIdxPhenos,
 				    vvSampleIdxGenos, needQnorm, grid,
 				    nbPerms, trick, maxL10TrueAbf,
 				    rngPerm, rngTrick, perm);
@@ -1615,7 +1755,7 @@ Ftr_makePermsJointOnePop (
 }
 
 void
-loadListsGenoAndPheno (
+loadListsGenoAndPhenoFiles (
   const string & genoPathsFile,
   const string & phenoPathsFile,
   map<string, string> & mGenoPaths,
@@ -1625,28 +1765,12 @@ loadListsGenoAndPheno (
 {
   loadTwoColumnFile (phenoPathsFile, mPhenoPaths, vSubgroups, verbose);
   
-  vector<string> vSubgroupsGeno;
-  loadTwoColumnFile (genoPathsFile, mGenoPaths, vSubgroupsGeno, verbose);
-  if (mGenoPaths.size() > 1)
+  mGenoPaths = loadTwoColumnFile (genoPathsFile, verbose);
+  if (mGenoPaths.size() > 1 && mGenoPaths.size() != mPhenoPaths.size())
   {
-    cerr << "ERROR: current version can't handle several genotype files"
-	 << endl;
+    cerr << "ERROR: there should be only one genotype file"
+	 << " or as many as phenotype files" << endl;
     exit (1);
-    
-    if (mGenoPaths.size() != mPhenoPaths.size())
-    {
-      cerr << "ERROR: there should be only one genotype file"
-	   << " or as many as phenotype files" << endl;
-      exit (1);
-    }
-    
-    for (size_t s = 0; s < vSubgroups.size(); ++s)
-      if (vSubgroupsGeno[s].compare(vSubgroups[s]) != 0)
-      {
-	cerr << "ERROR: subgroups are not in the same order in "
-	     << phenoPathsFile << " and " << genoPathsFile << endl;
-	exit (1);
-      }
   }
 }
 
@@ -1726,26 +1850,40 @@ loadSamplesAllGenos (
     getline (stream, line);
     stream.close();
     split (line, " \t", tokens);
-    if ((tokens.size() - 5) % 3 != 0)
+    
+    if (tokens[0].compare("chr") == 0) // IMPUTE format
     {
-      cerr << "ERROR: the header of file "
-	   << mGenoPaths.find(vSubgroups[s])->second
-	   << " is badly formatted" << endl;
-      exit (1);
+      if ((tokens.size() - 5) % 3 != 0)
+      {
+	cerr << "ERROR: the header of IMPUTE file "
+	     << mGenoPaths.find(vSubgroups[s])->second
+	     << " is badly formatted" << endl;
+	exit (1);
+      }
+      tokens2.clear();
+      i = 5;
+      while (i < tokens.size())
+      {
+	sample = split (tokens[i], "_a", 0); // sampleX_a1a1, sampleX_a1a2 or sampleX_a2a2
+	tokens2.push_back (sample);
+	i = i + 3;
+      }
+      vvSamples.push_back (tokens2);
+      for (i = 0; i < tokens2.size(); ++i)
+	if (find (vSamples.begin(), vSamples.end(), tokens2[i])
+	    == vSamples.end())
+	  vSamples.push_back (tokens2[i]);
     }
-    tokens2.clear();
-    i = 5;
-    while (i < tokens.size())
+    else
     {
-      sample = split (tokens[i], "_a", 0); // indX_a1a1, indX_a1a2 or indX_a2a2
-      tokens2.push_back (sample);
-      i = i + 3;
+      if (tokens[0].compare("Id") == 0)
+	tokens.erase (tokens.begin());
+      vvSamples.push_back (tokens);
+      for (i = 0; i < tokens.size(); ++i)
+	if (find (vSamples.begin(), vSamples.end(), tokens[i])
+	    == vSamples.end())
+	  vSamples.push_back (tokens[i]);
     }
-    vvSamples.push_back (tokens2);
-    for (i = 0; i < tokens2.size(); ++i)
-      if (find (vSamples.begin(), vSamples.end(), tokens2[i])
-	  == vSamples.end())
-	vSamples.push_back (tokens2[i]);
     if (mGenoPaths.size() == 1)
       break;
   }
@@ -1935,7 +2073,7 @@ loadPhenos (
     exit (1);
   }
   if (verbose > 0)
-    cout << "total nb of features: " << mFtrs.size() << endl;
+    cout << "total nb of features with phenotypes: " << mFtrs.size() << endl;
 /*	map<string, Ftr>::iterator it = mFtrs.begin();
 	while (it != mFtrs.end())
 	{
@@ -1987,17 +2125,26 @@ loadFtrInfo (
   {
     if (it->second.chr.empty())
     {
-      cerr << "ERROR: some features have no coordinate, eg. "
-	   << it->second.name << endl;
-      exit (1);
+      cerr << "WARNING: skip feature " << it->second.name
+	   << " because it has no coordinate" << endl;
+      mFtrs.erase (it++);
     }
-    ++it;
+    else
+      ++it;
   }
   
   // sort the features per chr
   for (map<string, vector<Ftr*> >::iterator it = mChr2VecPtFtrs.begin();
        it != mChr2VecPtFtrs.end(); ++it)
     sort (it->second.begin(), it->second.end(), Ftr_compByCoord);
+  
+  if (mFtrs.size() == 0)
+  {
+    cerr << "ERROR: no feature to analyze" << endl;
+    exit (1);
+  }
+  if (verbose > 0)
+    cout << "total nb of features to analyze: " << mFtrs.size() << endl;
 }
 
 void
@@ -2048,7 +2195,10 @@ loadGenosAndSnpInfo (
       if (mSnps.find(tokens[1]) == mSnps.end())
       {
 	Snp iSnp;
-	Snp_init (iSnp, tokens[1], mGenoPaths.size(), nbSamples);
+	Snp_init (iSnp, tokens[1], mGenoPaths.size());
+	iSnp.vvIsNa[s].resize (nbSamples, false);
+	iSnp.vvGenos[s].resize (nbSamples,
+				numeric_limits<double>::quiet_NaN());
 	maf = 0;
 	for (size_t i = 0; i < nbSamples; ++i)
 	{
@@ -2084,14 +2234,6 @@ loadGenosAndSnpInfo (
       break;
   }
   
-  for (map<string, Snp>::iterator it = mSnps.begin();
-       it != mSnps.end(); ++it)
-    if (it->second.vvGenos.size() == 0)
-    {
-      cerr << "ERROR: SNP " << it->first << " has no genotype" << endl;
-      exit (1);
-    }
-  
   // sort the SNPs per chr
   for (map<string, vector<Snp*> >::iterator it = mChr2VecPtSnps.begin();
        it != mChr2VecPtSnps.end(); ++it)
@@ -2099,6 +2241,357 @@ loadGenosAndSnpInfo (
   
   if (verbose > 0)
     cout << "nb of SNPs: " << mSnps.size() << endl;
+}
+
+/** \brief Load genotypes from each subgroup file.
+ *  \note format: row 1 for sample names, column 1 for SNP names,
+ *  genotypes as allele dose
+ */
+void
+loadGenos (
+  const map<string, string> & mGenoPaths,
+  const vector<string> & vSubgroups,
+  const vector<string> & vSnpsToKeep,
+  map<string, Snp> & mSnps,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "load genotypes ..." << endl << flush;
+  
+  ifstream genoStream;
+  string line;
+  vector<string> tokens;
+  size_t nbSamples, nbLines;
+  double maf;
+  
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
+  {
+    clock_t timeBegin = clock();
+    openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream);
+    getline (genoStream, line); // header
+    split (line, " \t", tokens);
+    if (tokens[0].compare("Id") == 0)
+      nbSamples = tokens.size() - 1;
+    else
+      nbSamples = tokens.size();
+    nbLines = 1;
+    
+    while (true)
+    {
+      getline (genoStream, line);
+      if (line.empty())
+	break;
+      ++nbLines;
+      split (line, " \t", tokens);
+      if (tokens.size() != nbSamples + 1)
+      {
+	cerr << "ERROR: not enough columns on line " << nbLines
+	     << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	     << endl;
+	exit (1);
+      }
+      if (! vSnpsToKeep.empty()
+	  && find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[0])
+	  == vSnpsToKeep.end())
+	continue;
+      
+      maf = 0;
+      if (mSnps.find(tokens[0]) == mSnps.end())
+      {
+	Snp iSnp;
+	Snp_init (iSnp, tokens[0], mGenoPaths.size());
+	iSnp.vvIsNa[s].resize (nbSamples, false);
+	iSnp.vvGenos[s].resize (nbSamples,
+				numeric_limits<double>::quiet_NaN());
+	for (size_t i = 1; i < tokens.size(); ++i)
+	{
+	  if (tokens[i].compare("NA") == 0)
+	    iSnp.vvIsNa[s][i-1] = true;
+	  else
+	  {
+	    iSnp.vvGenos[s][i-1] = atof (tokens[i].c_str());
+	    maf += iSnp.vvGenos[s][i-1];
+	  }
+	}
+	maf /= 2 * (nbSamples
+		    - count (iSnp.vvIsNa[s].begin(),
+			     iSnp.vvIsNa[s].end(),
+			     true));
+	iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+	mSnps.insert (make_pair (tokens[0], iSnp));
+      }
+      else
+      {
+	mSnps[tokens[0]].vvIsNa[s].resize (nbSamples, false);
+	mSnps[tokens[0]].vvGenos[s].resize (nbSamples,
+					    numeric_limits<double>::quiet_NaN());
+	for (size_t i = 1; i < tokens.size() ; ++i)
+	{
+	  if (tokens[i].compare("NA") == 0)
+	    mSnps[tokens[0]].vvIsNa[s][i-1] = true;
+	  else
+	  {
+	    mSnps[tokens[0]].vvGenos[s][i-1] = atof (tokens[i].c_str());
+	    maf += mSnps[tokens[0]].vvGenos[s][i-1];
+	  }
+	}
+	maf /= 2 * (nbSamples
+		    - count (mSnps[tokens[0]].vvIsNa[s].begin(),
+			     mSnps[tokens[0]].vvIsNa[s].end(),
+			     true));
+	mSnps[tokens[0]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+      }
+    }
+    
+    genoStream.close();
+    if (verbose > 0)
+      cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
+	   << " SNPs (loaded in " << setprecision(8)
+	   << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0)
+	   << " min)" << endl << flush;
+  }
+  
+  if (mSnps.size() == 0)
+  {
+    cerr << "ERROR: no SNP to analyze" << endl;
+    exit (1);
+  }
+  if (verbose > 0)
+    cout << "total nb of SNPs with genotypes: " << mSnps.size() << endl;
+}
+
+void
+loadSnpInfo (
+  const string & snpCoordsFile,
+  map<string, Snp> & mSnps,
+  map<string, vector<Snp*> > & mChr2VecPtSnps,
+  const int & verbose)
+{
+  if (verbose > 0)
+    cout << "load SNP coordinates ..." << endl << flush;
+  
+  // parse the BED file
+  ifstream snpCoordsStream;
+  openFile (snpCoordsFile, snpCoordsStream);
+  string line;
+  vector<string> tokens;
+  while (true)
+  {
+    getline (snpCoordsStream, line);
+    if (line.empty())
+      break;
+    split (line, " \t", tokens);
+    if (mSnps.find(tokens[3]) == mSnps.end())
+      continue;
+    mSnps[tokens[3]].chr = tokens[0];
+    mSnps[tokens[3]].coord = atol (tokens[1].c_str()) + 1;
+    
+    if (mChr2VecPtSnps.find(tokens[0]) == mChr2VecPtSnps.end())
+      mChr2VecPtSnps.insert (make_pair (tokens[0],
+					vector<Snp*> ()));
+    mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[3]]));
+  }
+  snpCoordsStream.close();
+  
+  // check that all SNPs have coordinates
+  map<string, Snp>::iterator it = mSnps.begin();
+  while (it != mSnps.end())
+  {
+    if (it->second.chr.empty())
+    {
+      cerr << "WARNING: skip SNP " << it->second.name
+	   << " because it has no coordinate" << endl;
+      mSnps.erase (it++);
+    }
+    else
+      ++it;
+  }
+  
+  // sort the SNPs per chr
+  for (map<string, vector<Snp*> >::iterator it = mChr2VecPtSnps.begin();
+       it != mChr2VecPtSnps.end(); ++it)
+    sort (it->second.begin(), it->second.end(), Snp_compByCoord);
+  
+  if (mSnps.size() == 0)
+  {
+    cerr << "ERROR: no SNP to analyze" << endl;
+    exit (1);
+  }
+  if (verbose > 0)
+    cout << "total nb of SNPs to analyze: " << mSnps.size() << endl;
+}
+
+void
+loadListCovarFiles (
+  const string & covarPathsFile,
+  const vector<string> & vSubgroups,
+  map<string, string> & mCovarPaths,
+  const int & verbose)
+{
+  mCovarPaths = loadTwoColumnFile (covarPathsFile, verbose);
+  
+  map<string, string>::iterator it = mCovarPaths.begin();
+  while (it != mCovarPaths.end())
+  {
+    if (find (vSubgroups.begin(), vSubgroups.end(), it->first)
+	== vSubgroups.end())
+    {
+      cerr << "WARNING: skip covariates of subgroup " << it->first
+	   << " as there is no corresponding genotype nor phenotype files"
+	   << endl;
+      mCovarPaths.erase (it++);
+    }
+    else
+      ++it;
+  }
+}
+
+void
+loadCovarsFromFiles (
+  const vector<string> & vSubgroups,
+  const vector<string> & vSamples,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  const map<string, string> & mCovarPaths,
+  vector<map<string, vector<double> > > & vSbgrp2Covars)
+{
+  ifstream covarStream;
+  vector<string> tokens;
+  string line;
+  size_t nbLines = 0;
+
+  for (size_t s = 0; s < vSubgroups.size(); ++s)
+  {
+    if (mCovarPaths.find(vSubgroups[s]) == mCovarPaths.end())
+      continue;
+    
+    openFile (mCovarPaths.find(vSubgroups[s])->second, covarStream);
+    
+    // parse the header line to get covar names and order
+    getline (covarStream, line);
+    if (line.empty())
+    {
+      cerr << "ERROR: covariate file "
+	   << mCovarPaths.find(vSubgroups[s])->second
+	   << " should have a header line" << endl;
+      exit (1);
+    }
+    nbLines = 1;
+    vector<string> vCovars;
+    split (line, " \t", vCovars);
+    if (vCovars[0].compare ("sample") == 0)
+      vCovars.erase (vCovars.begin());
+    else
+    {
+      cerr << "ERROR: file " << mCovarPaths.find(vSubgroups[s])->second
+	   << " should have a header line starting with 'sample'" << endl;
+      exit (1);
+    }
+    
+    // parse the rest of the file into a temporary container
+    map<string, vector<double> > mSample2Covars;
+    while (covarStream.good())
+    {
+      getline (covarStream, line);
+      if (line.empty())
+	break;
+      ++nbLines;
+      split (line, " \t", tokens);
+      if (tokens.size() != vCovars.size() + 1)
+      {
+	cerr << "ERROR: not enough columns on line " << nbLines
+	     << " of file " << mCovarPaths.find(vSubgroups[s])->second
+	     << endl;
+	exit (1);
+      }
+      if (find (vSamples.begin(), vSamples.end(), tokens[0])
+	  == vSamples.end())
+      {
+	cerr << "WARNING: skip sample " << tokens[0]
+	     << " in line " << nbLines
+	     << " of file " << mCovarPaths.find(vSubgroups[s])->second
+	     << " because it is absent from all genotype and phenotype files"
+	     << endl;
+	continue;
+      }
+      mSample2Covars.insert (make_pair (tokens[0], vector<double> (
+					  vCovars.size(),
+					  numeric_limits<double>::quiet_NaN())));
+      for (size_t c = 0; c < vCovars.size(); ++c)
+	mSample2Covars[tokens[0]][c] = atof (tokens[(c+1)].c_str());
+    }
+    covarStream.close();
+    
+    // check that all samples with covar from the given subgroup also have
+    // a genotype and a phenotype
+    if (vvSampleIdxGenos.size() == 1)
+    {
+      for (size_t i = 0; i < vSamples.size(); ++i)
+	if (vvSampleIdxGenos[s][i] != string::npos
+	    && vvSampleIdxPhenos[s][i] != string::npos
+	    && mSample2Covars.find(vSamples[i]) == mSample2Covars.end())
+	{
+	  cerr << "ERROR: sample " << vSamples[i] << " has genotype"
+	       << " and phenotype in subgroup " << (s+1)
+	       << " but no covariate" << endl;
+	  exit (1);
+	}
+    }
+    else
+    {
+      for (size_t i = 0; i < vSamples.size(); ++i)
+	if (vvSampleIdxGenos[s][i] != string::npos
+	    && vvSampleIdxPhenos[s][i] != string::npos
+	    && mSample2Covars.find(vSamples[i]) == mSample2Covars.end())
+	{
+	  cerr << "ERROR: sample " << vSamples[i] << " has genotype"
+	       << " and phenotype in subgroup " << (s+1)
+	       << " but no covariate" << endl;
+	  exit (1);
+	}
+    }
+    
+    // fill the final containers with samples in the right order
+    map<string, vector<double> > mCovars;
+    for (size_t c = 0; c < vCovars.size(); ++c)
+    {
+      mCovars.insert (make_pair (vCovars[c], vector<double> (
+				   vSamples.size(),
+				   numeric_limits<double>::quiet_NaN())));
+      for (size_t i = 0; i < vSamples.size(); ++i)
+	if (mSample2Covars.find(vSamples[i]) != mSample2Covars.end())
+	  mCovars[vCovars[c]][i] = mSample2Covars[vSamples[i]][c];
+    }
+    vSbgrp2Covars.push_back (mCovars);
+  }
+}
+
+void
+loadCovariates (
+  const string & covarPathsFile,
+  const vector<string> & vSubgroups,
+  const vector<string> & vSamples,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  vector<map<string, vector<double> > > & vSbgrp2Covars,
+  const int & verbose)
+{
+  if (covarPathsFile.empty())
+    vSbgrp2Covars = vector<map<string, vector<double> > >
+      (vvSampleIdxPhenos.size(), map<string, vector<double> > ());
+  else
+  {
+    if (verbose > 0)
+      cout << "load covariates ..." << endl << flush;
+    map<string, string> mCovarPaths;
+    loadListCovarFiles (covarPathsFile, vSubgroups, mCovarPaths, verbose);
+    loadCovarsFromFiles (vSubgroups, vSamples, vvSampleIdxGenos,
+			 vvSampleIdxPhenos, mCovarPaths, vSbgrp2Covars);
+    if (verbose > 0)
+      for (size_t s = 0; s < vSbgrp2Covars.size(); ++s)
+	cout << "s" << (s+1) << " (" << vSubgroups[s] << "): "
+	     << vSbgrp2Covars[s].size() << " covariates" << endl;
+  }
 }
 
 void
@@ -2113,6 +2606,7 @@ inferAssos (
   const size_t & lenCis,
   const int & whichStep,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const string & whichBfs,
   const int & verbose)
@@ -2128,16 +2622,17 @@ inferAssos (
        itF != mFtrs.end(); ++itF)
   {
     ++countFtrs;
+    if (verbose == 1)
+      progressBar ("", countFtrs, mFtrs.size());
     Ftr_getCisSnps (itF->second, mChr2VecPtSnps, anchor, lenCis);
+    if (verbose > 1)
+      cout << itF->second.name << ": " << itF->second.vPtCisSnps.size()
+	   << " SNPs in cis" << endl << flush;
     if (itF->second.vPtCisSnps.size() > 0)
     {
-      if (verbose == 1)
-	progressBar ("", countFtrs, mFtrs.size());
-      if (verbose > 1)
-	cout << itF->second.name << ": " << itF->second.vPtCisSnps.size()
-	     << " SNPs in cis" << endl << flush;
       Ftr_inferAssos (itF->second, vvSampleIdxPhenos, vvSampleIdxGenos,
-		      whichStep, needQnorm, grid, whichBfs, verbose-1);
+		      whichStep, needQnorm, vSbgrp2Covars, grid, whichBfs,
+		      verbose-1);
       nbAnalyzedPairs += itF->second.vResFtrSnps.size();
     }
   }
@@ -2151,7 +2646,7 @@ inferAssos (
 }
 
 void
-makePermsSepOnePop (
+makePermsSep (
   map<string, Ftr> & mFtrs,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -2179,14 +2674,12 @@ makePermsSepOnePop (
 	 itF != mFtrs.end(); ++itF)
     {
       ++countFtrs;
+      if (verbose == 1)
+	progressBar (ss.str(), countFtrs, mFtrs.size());
       if (itF->second.vPtCisSnps.size() > 0)
-      {
-	if (verbose == 1)
-	  progressBar (ss.str(), countFtrs, mFtrs.size());
-	Ftr_makePermsSepOneSubgrpOnePop (itF->second, vvSampleIdxPhenos,
-					 vvSampleIdxGenos, needQnorm, nbPerms, trick,
-					 s, rngPerm, rngTrick);
-      }
+	Ftr_makePermsSepOneSubgrp (itF->second, vvSampleIdxPhenos,
+				   vvSampleIdxGenos, needQnorm, nbPerms, trick,
+				   s, rngPerm, rngTrick);
     }
     if (verbose == 1)
       cout << endl << flush;
@@ -2194,7 +2687,7 @@ makePermsSepOnePop (
 }
 
 void
-makePermsJointOnePop (
+makePermsJoint (
   map<string, Ftr> & mFtrs,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -2216,14 +2709,12 @@ makePermsJointOnePop (
        itF != mFtrs.end(); ++itF)
   {
     ++countFtrs;
+    if (verbose == 1)
+      progressBar ("joint", countFtrs, mFtrs.size());
     if (itF->second.vPtCisSnps.size() > 0)
-    {
-      if (verbose == 1)
-	progressBar ("joint", countFtrs, mFtrs.size());
-      Ftr_makePermsJointOnePop (itF->second, vvSampleIdxPhenos,
-				vvSampleIdxGenos, needQnorm, grid, nbPerms,
-				trick, whichPermBf, rngPerm, rngTrick);
-    }
+      Ftr_makePermsJoint (itF->second, vvSampleIdxPhenos,
+			  vvSampleIdxGenos, needQnorm, grid, nbPerms,
+			  trick, whichPermBf, rngPerm, rngTrick);
   }
   if (verbose == 1)
     cout << endl << flush;
@@ -2269,12 +2760,12 @@ makePerms (
   }
   
   if (whichStep == 2 || whichStep == 5)
-    makePermsSepOnePop (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
+    makePermsSep (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
 			needQnorm, nbPerms, seed, trick, rngPerm, rngTrick,
 			verbose);
   
   if (whichStep == 4 || whichStep == 5)
-    makePermsJointOnePop (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
+    makePermsJoint (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
 			  needQnorm, grid, nbPerms, seed, trick, whichPermBf,
 			  rngPerm, rngTrick, verbose);
   
@@ -2312,16 +2803,17 @@ writeResSstats (
       const Ftr * ptF = &(itF->second);
       for (vector<ResFtrSnp>::const_iterator itP = ptF->vResFtrSnps.begin();
 	   itP != ptF->vResFtrSnps.end(); ++itP)
-	outStream << ptF->name
-		  << " " << itP->snp
-		  << " " << mSnps.find(itP->snp)->second.vMafs[0]
-		  << " " << itP->vNs[s]
-		  << " " << itP->vBetahats[s]
-		  << " " << itP->vSebetahats[s]
-		  << " " << itP->vSigmahats[s]
-		  << " " << itP->vBetaPvals[s]
-		  << " " << itP->vPves[s]
-		  << endl;
+	if (itP->vNs[s] > 0)
+	  outStream << ptF->name
+		    << " " << itP->snp
+		    << " " << mSnps.find(itP->snp)->second.vMafs[s]
+		    << " " << itP->vNs[s]
+		    << " " << itP->vBetahats[s]
+		    << " " << itP->vSebetahats[s]
+		    << " " << itP->vSigmahats[s]
+		    << " " << itP->vBetaPvals[s]
+		    << " " << itP->vPves[s]
+		    << endl;
     }
     
     outStream.close();
@@ -2391,6 +2883,7 @@ writeResAbfsUnweighted (
     outStream << " ABFgrid" << (i+1);
   outStream << endl;
   
+  // write results
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
@@ -2488,6 +2981,8 @@ writeResAbfsWeighted (
   }
   outStream << endl;
   
+  // write results
+  size_t n;
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
@@ -2495,39 +2990,43 @@ writeResAbfsWeighted (
     for (vector<ResFtrSnp>::const_iterator itP = ptF->vResFtrSnps.begin();
 	 itP != ptF->vResFtrSnps.end(); ++itP)
     {
-      outStream << ptF->name
-		<< " " << itP->snp
-		<< " " << count_if (itP->vNs.begin(), itP->vNs.end(), isNonZero)
-		<< " " << accumulate (itP->vNs.begin(), itP->vNs.end(), 0)
-		<< " " << itP->mWeightedAbfs.find("const")->second
-		<< " " << itP->mWeightedAbfs.find("const-fix")->second
-		<< " " << itP->mWeightedAbfs.find("const-maxh")->second;
-      if (whichBfs.compare("const") != 0)
+      n = accumulate (itP->vNs.begin(), itP->vNs.end(), 0);
+      if (n > 0)
       {
-	for (size_t k = 1; k < nbSubgroups; ++k)
+	outStream << ptF->name
+		  << " " << itP->snp
+		  << " " << count_if (itP->vNs.begin(), itP->vNs.end(), isNonZero)
+		  << " " << n
+		  << " " << itP->mWeightedAbfs.find("const")->second
+		  << " " << itP->mWeightedAbfs.find("const-fix")->second
+		  << " " << itP->mWeightedAbfs.find("const-maxh")->second;
+	if (whichBfs.compare("const") != 0)
 	{
-	  comb = gsl_combination_calloc (nbSubgroups, k);
-	  if (comb == NULL)
+	  for (size_t k = 1; k < nbSubgroups; ++k)
 	  {
-	    cerr << "ERROR: can't allocate memory for the combination" << endl;
-	    exit (1);
-	  }
-	  while (true)
-	  {
-	    ssConfig.str("");
-	    ssConfig << gsl_combination_get (comb, 0) + 1;
-	    if (comb->k > 1)
-	      for (size_t i = 1; i < k; ++i)
-		ssConfig << "-" << gsl_combination_get (comb, i) + 1;
-	    outStream << " " << itP->mWeightedAbfs.find(ssConfig.str())->second;
-	    if (gsl_combination_next (comb) != GSL_SUCCESS)
+	    comb = gsl_combination_calloc (nbSubgroups, k);
+	    if (comb == NULL)
+	    {
+	      cerr << "ERROR: can't allocate memory for the combination" << endl;
+	      exit (1);
+	    }
+	    while (true)
+	    {
+	      ssConfig.str("");
+	      ssConfig << gsl_combination_get (comb, 0) + 1;
+	      if (comb->k > 1)
+		for (size_t i = 1; i < k; ++i)
+		  ssConfig << "-" << gsl_combination_get (comb, i) + 1;
+	      outStream << " " << itP->mWeightedAbfs.find(ssConfig.str())->second;
+	      if (gsl_combination_next (comb) != GSL_SUCCESS)
+		break;
+	    }
+	    if (whichBfs.compare("subset") == 0)
 	      break;
 	  }
-	  if (whichBfs.compare("subset") == 0)
-	    break;
 	}
+	outStream << endl;
       }
-      outStream << endl;
     }
   }
   
@@ -2595,6 +3094,7 @@ writeRes (
 void
 run (
   const string & genoPathsFile,
+  const string & snpCoordFile,
   const string & phenoPathsFile,
   const string & ftrCoordsFile,
   const string & anchor,
@@ -2602,6 +3102,7 @@ run (
   const string & outPrefix,
   const int & whichStep,
   const bool & needQnorm,
+  const string & covarPathsFile,
   const string & gridFile,
   const string & whichBfs,
   const size_t & nbPerms,
@@ -2618,8 +3119,8 @@ run (
   
   map<string, string> mGenoPaths, mPhenoPaths;
   vector<string> vSubgroups;
-  loadListsGenoAndPheno (genoPathsFile, phenoPathsFile, mGenoPaths,
-			 mPhenoPaths, vSubgroups, verbose);
+  loadListsGenoAndPhenoFiles (genoPathsFile, phenoPathsFile, mGenoPaths,
+			      mPhenoPaths, vSubgroups, verbose);
   
   vector<string> vSamples;
   vector<vector<size_t> > vvSampleIdxGenos, vvSampleIdxPhenos;
@@ -2633,12 +3134,22 @@ run (
   
   map<string, Snp> mSnps;
   map<string, vector<Snp*> > mChr2VecPtSnps;
-  loadGenosAndSnpInfo (mGenoPaths, vSubgroups, vSnpsToKeep, mSnps,
-		       mChr2VecPtSnps, verbose);
+  if (snpCoordFile.empty())
+    loadGenosAndSnpInfo (mGenoPaths, vSubgroups, vSnpsToKeep, mSnps,
+			 mChr2VecPtSnps, verbose);
+  else
+  {
+    loadGenos (mGenoPaths, vSubgroups, vSnpsToKeep, mSnps, verbose);
+    loadSnpInfo (snpCoordFile, mSnps, mChr2VecPtSnps, verbose);
+  }
+  
+  vector<map<string, vector<double> > > vSbgrp2Covars;
+  loadCovariates (covarPathsFile, vSubgroups, vSamples, vvSampleIdxGenos,
+		  vvSampleIdxPhenos, vSbgrp2Covars, verbose);
   
   inferAssos (mFtrs, mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, vvSampleIdxPhenos,
-	      vvSampleIdxGenos, anchor, lenCis, whichStep, needQnorm, grid,
-	      whichBfs, verbose);
+	      vvSampleIdxGenos, anchor, lenCis, whichStep, needQnorm, vSbgrp2Covars,
+	      grid, whichBfs, verbose);
   if (whichStep == 2 || whichStep == 4 || whichStep == 5)
     makePerms (mFtrs, vvSampleIdxPhenos, vvSampleIdxGenos, whichStep, 
 	       needQnorm, grid, nbPerms, seed, trick, whichPermBf, verbose);
@@ -2654,14 +3165,14 @@ int main (int argc, char ** argv)
   int verbose = 1, whichStep = 0, trick = 0;
   size_t lenCis = 100000, nbPerms = 0, seed = string::npos;
   bool needQnorm = false;
-  string genoPathsFile, phenoPathsFile, ftrCoordsFile, anchor = "FSS",
-    outPrefix, gridFile, whichBfs = "const", whichPermBf = "const",
-    ftrsToKeepFile, snpsToKeepFile;
+  string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
+    anchor = "FSS", outPrefix, covarPathsFile, gridFile, whichBfs = "const",
+    whichPermBf = "const", ftrsToKeepFile, snpsToKeepFile;
   
-  parseArgs (argc, argv, genoPathsFile, phenoPathsFile, ftrCoordsFile,
-	     anchor, lenCis, outPrefix, whichStep, needQnorm, gridFile,
-	     whichBfs, nbPerms, seed, trick, whichPermBf, ftrsToKeepFile,
-	     snpsToKeepFile, verbose);
+  parseArgs (argc, argv, genoPathsFile, snpCoordFile, phenoPathsFile,
+	     ftrCoordsFile, anchor, lenCis, outPrefix, whichStep, needQnorm,
+	     covarPathsFile, gridFile, whichBfs, nbPerms, seed, trick,
+	     whichPermBf, ftrsToKeepFile, snpsToKeepFile, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -2672,10 +3183,10 @@ int main (int argc, char ** argv)
     printCmdLine (argc, argv);
   }
   
-  run (genoPathsFile, phenoPathsFile, ftrCoordsFile, anchor, lenCis,
-       outPrefix, whichStep, needQnorm, gridFile, whichBfs,
-       nbPerms, seed, trick, whichPermBf, ftrsToKeepFile, snpsToKeepFile,
-       verbose);
+  run (genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile, anchor,
+       lenCis, outPrefix, whichStep, needQnorm, covarPathsFile, gridFile,
+       whichBfs, nbPerms, seed, trick, whichPermBf, ftrsToKeepFile,
+       snpsToKeepFile, verbose);
   
   if (verbose > 0)
   {
