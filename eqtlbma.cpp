@@ -478,33 +478,27 @@ loadGrid (
   return grid;
 }
 
-/** \brief Compute the summary statistics of the simple linear regression.
+/** \brief Fit a simple linear regression model.
  *  \note y_i = mu + g_i * beta + e_i with e_i ~ N(0,sigma^2)
  *  \note missing values should have been already filtered out
+ *  \note g and y should have the same size, strictly larger than 2
  */
 void
-ols (
+fitSimpleLinearRegression (
   const vector<double> & g,
   const vector<double> & y,
+  double & pve,
+  double & sigmahat,
   double & betahat,
   double & sebetahat,
-  double & sigmahat,
-  double & pval,
-  double & R2)
+  double & pval)
 {
-  if (g.size() != y.size() || g.size() <= 2)
-  {
-    betahat = numeric_limits<double>::quiet_NaN();
-    sebetahat = numeric_limits<double>::quiet_NaN();
-    sigmahat = numeric_limits<double>::quiet_NaN();
-    pval = numeric_limits<double>::quiet_NaN();
-    R2 = numeric_limits<double>::quiet_NaN();
-  }
-  else
+  if (g.size() == y.size() && g.size() > 2)
   {
     size_t i = 0, n = g.size();
     double ym = 0, gm = 0, yty = 0, gtg = 0, gty = 0;
-    for(i=0; i<n; ++i){
+    for(i=0; i<n; ++i)
+    {
       ym += y[i];
       gm += g[i];
       yty += y[i] * y[i];
@@ -521,40 +515,146 @@ ols (
     if(vg > 1e-8)
     {
       betahat = (gty - n * gm * ym) / vg;
-#ifdef DEBUG
-      printf ("betahat=%f\n", betahat);
-#endif
       double rss1 = yty - 1/vg * (n*ym*(gtg*ym - gm*gty) - gty*(n*gm*ym - gty));
       if (fabs(betahat) > 1e-8)
 	sigmahat = sqrt(rss1 / (n-2));
       else  // case where y is not variable enough among samples
 	sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
-#ifdef DEBUG
-      printf ("sigmahat=%f\n", sigmahat);
-#endif
       sebetahat = sigmahat / sqrt(gtg - n*gm*gm);
-#ifdef DEBUG
-      printf ("sebetahat=%f\n", sebetahat);
-#endif
       double muhat = (ym*gtg - gm*gty) / (gtg - n*gm*gm);
       double mss = 0;
       for(i=0; i<n; ++i)
 	mss += pow(muhat + betahat * g[i] - ym, 2);
       pval = gsl_cdf_fdist_Q (mss/pow(sigmahat,2), 1, n-2);
-      R2 = mss / (mss + rss1);
+      pve = mss / (mss + rss1);
     }
     else
     {
-#ifdef DEBUG
-      cout << "g is not variable enough among samples" << endl << flush;
-#endif
       betahat = 0;
       sebetahat = numeric_limits<double>::infinity();
       sigmahat = sqrt((yty - n * ym * ym) / (n-2));  // sqrt(rss0/(n-2))
       pval = 1; // or should be drawn from U([0,1])?
-      R2 = 0;
+      pve = 0;
     }
   }
+}
+
+/** \brief Fit a multiple linear regression model.
+ *  \note y_i = beta_0 + beta_1 * g_i + beta_2 * c_i + ... + e_i with e_i ~ N(0,sigma^2)
+ *  \note missing values should have been already filtered out
+ */
+void
+fitMultipleLinearRegression (
+  const vector<double> & vG,
+  const vector<double> & vY,
+  const vector<vector<double> > & vvCovars,
+  double & pve,
+  double & sigmahat,
+  vector<vector<double> > & vvResPredictors)
+{
+  size_t N = vY.size(), P = 2 + vvCovars.size();
+  gsl_vector * Y = gsl_vector_alloc (N), * Bhat = gsl_vector_alloc (P);
+  gsl_matrix * X = gsl_matrix_alloc (N, P),
+    * covBhat = gsl_matrix_alloc (P, P);
+  gsl_multifit_linear_workspace * work = gsl_multifit_linear_alloc (N, P);
+  
+  for (size_t n = 0; n < N; ++n)
+  {
+    gsl_vector_set (Y, n, vY[n]);
+    gsl_matrix_set (X, n, 0, 1.0);
+    gsl_matrix_set (X, n, 1, vG[n]);
+    for (size_t p = 2; p < P; ++p)
+      gsl_matrix_set (X, n, p, vvCovars[(p-2)][n]);
+  }
+  
+  double rss;
+  size_t rank;
+  gsl_multifit_linear_svd (X, Y, GSL_DBL_EPSILON, &rank, Bhat, covBhat,
+			   &rss, work);
+  pve = 1 - rss / gsl_stats_tss (Y->data, Y->stride,
+				 Y->size);
+  sigmahat = sqrt (rss / (N-rank));
+  
+  vvResPredictors[0][0] = gsl_vector_get (Bhat, 1);
+  vvResPredictors[0][1] = sqrt (gsl_matrix_get (covBhat, 1, 1));
+  vvResPredictors[0][2] = 2 * gsl_cdf_tdist_Q (
+    fabs(vvResPredictors[0][0] / vvResPredictors[0][1]), N - rank);
+  
+  for (size_t p = 2; p < P; ++p)
+  {
+    vvResPredictors[(p-1)][0] = gsl_vector_get (Bhat, p);
+    vvResPredictors[(p-1)][1] = sqrt (gsl_matrix_get (covBhat, p, p));
+    vvResPredictors[(p-1)][2] = 2 * gsl_cdf_tdist_Q (
+      fabs(vvResPredictors[(p-1)][0] / vvResPredictors[(p-1)][1]), N - rank);
+  }
+  
+  gsl_vector_free (Y);
+  gsl_vector_free (Bhat);
+  gsl_matrix_free (X);
+  gsl_matrix_free (covBhat);
+  gsl_multifit_linear_free (work);
+}
+
+double
+getAbfFromStdSumStats (
+  const vector<size_t> & vNs,
+  const vector<vector<double> > & vvStdSstatsCorr,
+  const double & phi2,
+  const double & oma2)
+{
+  double l10AbfAll = 0, bhat = 0, varbhat = 0, t = 0, bbarhat_num = 0,
+    bbarhat_denom = 0, varbbarhat = 0;
+  vector<double> l10AbfsSingleSbgrp;
+  
+  for (size_t s = 0; s < vNs.size(); ++s)
+  {
+    if (vNs[s] > 2)
+    {
+      bhat = vvStdSstatsCorr[s][0];
+      varbhat = pow (vvStdSstatsCorr[s][1], 2);
+      t = vvStdSstatsCorr[s][2];
+      double lABF_single;
+      if (fabs(t) < 1e-8)
+      {
+	lABF_single = 0;
+      }
+      else
+      {
+	bbarhat_num += bhat / (varbhat + phi2);
+	bbarhat_denom += 1 / (varbhat + phi2);
+	varbbarhat += 1 / (varbhat + phi2);
+	lABF_single = 0.5 * log10(varbhat)
+	  - 0.5 * log10(varbhat + phi2)
+	  + (0.5 * pow(t,2) * phi2 / (varbhat + phi2)) / log(10);
+      }
+      l10AbfsSingleSbgrp.push_back (lABF_single);
+#ifdef DEBUG
+      printf ("l10AbfsSingleSbgrp[%ld]=%e\n", s+1, l10AbfsSingleSbgrp[s]);
+#endif
+    }
+  }
+  
+  double bbarhat = (bbarhat_denom != 0) ?
+    bbarhat_num / bbarhat_denom
+    : 0;
+  varbbarhat = (varbbarhat != 0) ?
+    1 / varbbarhat
+    : numeric_limits<double>::infinity();
+  double T2 = pow(bbarhat, 2.0) / varbbarhat;
+  double lABF_bbar = (T2 != 0) ?
+    0.5 * log10(varbbarhat) - 0.5 * log10(varbbarhat + oma2)
+    + (0.5 * T2 * oma2 / (varbbarhat + oma2)) / log(10)
+    : 0;
+#ifdef DEBUG
+  printf ("bbarhat=%e varbbarhat=%e T2=%e lABF_bbar=%e\n",
+	  bbarhat, varbbarhat, T2, lABF_bbar);
+#endif
+  
+  l10AbfAll = lABF_bbar;
+  for (size_t i = 0; i < l10AbfsSingleSbgrp.size(); ++i)
+    l10AbfAll += l10AbfsSingleSbgrp[i];
+  
+  return l10AbfAll;
 }
 
 struct Snp
@@ -571,11 +671,14 @@ struct ResFtrSnp
 {
   string snp; // name of the SNP
   vector<size_t> vNs; // sample sizes per subgroup
-  vector<double> vBetahats; // MLE of the beta per subgroup
-  vector<double> vSebetahats; // standard errors per subgroup
-  vector<double> vSigmahats; // MLEs of the sigmas per subgroup
-  vector<double> vBetaPvals; // P-values of H0:"beta=0" and H1:"beta!=0"
   vector<double> vPves; // proportions of variance explained (R2)
+  vector<double> vSigmahats; // MLEs of the error variance per subgroup
+  
+  // summary stats for predictors (genotype + covariates) per subgroup
+  // key: name of predictors ; values: summary stats
+  // 0:betahat ; 1:sebetahat ; 2:betaPval
+  vector<map<string, vector<double> > > vMapPredictors;
+  
   vector<vector<double> > vvStdSstatsCorr;
   map<string, vector<double> > mUnweightedAbfs;
   map<string, double> mWeightedAbfs;
@@ -670,14 +773,10 @@ ResFtrSnp_init (
 {
   iResFtrSnp.snp = snpName;
   iResFtrSnp.vNs.assign (nbSubgroups, 0);
-  iResFtrSnp.vBetahats.assign (nbSubgroups,
-			       numeric_limits<double>::quiet_NaN());
-  iResFtrSnp.vSebetahats.assign (nbSubgroups,
-				 numeric_limits<double>::quiet_NaN());
+  iResFtrSnp.vMapPredictors.assign (nbSubgroups,
+  				    map<string, vector<double> > ());
   iResFtrSnp.vSigmahats.assign (nbSubgroups,
-				numeric_limits<double>::quiet_NaN());
-  iResFtrSnp.vBetaPvals.assign (nbSubgroups,
-				numeric_limits<double>::quiet_NaN());
+  				numeric_limits<double>::quiet_NaN());
   iResFtrSnp.vPves.assign (nbSubgroups,
 			   numeric_limits<double>::quiet_NaN());
 }
@@ -708,21 +807,25 @@ ResFtrSnp_getSstatsOneSbgrp (
     }
   }
   
-  if (needQnorm)
-    qqnorm (&y[0], y.size());
-  
   iResFtrSnp.vNs[s] = y.size();
   
-  ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
-       iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
-       iResFtrSnp.vPves[s]);
+  if (iResFtrSnp.vNs[s] > 2)
+  {
+    if (needQnorm)
+      qqnorm (&y[0], y.size());
+    
+    iResFtrSnp.vMapPredictors[s]["genotype"] =
+      vector<double>  (3, numeric_limits<double>::quiet_NaN());
+    fitSimpleLinearRegression (g, y, iResFtrSnp.vPves[s],
+			       iResFtrSnp.vSigmahats[s],
+			       iResFtrSnp.vMapPredictors[s]["genotype"][0],
+			       iResFtrSnp.vMapPredictors[s]["genotype"][1],
+			       iResFtrSnp.vMapPredictors[s]["genotype"][2]);
+  }
 }
 
-// TODO: get summary stats for other covariates
-// TODO: handle extreme cases (non-variable genotypes and/or phenotypes)
-// TODO: is comparison of nested models (w or w/o genotypes) required?
 void
-ResFtrSnp_getSstatsOneSbgrpWithCovars (
+ResFtrSnp_getSstatsOneSbgrp (
   ResFtrSnp & iResFtrSnp,
   const Ftr & iFtr,
   const Snp & iSnp,
@@ -748,8 +851,8 @@ ResFtrSnp_getSstatsOneSbgrpWithCovars (
       vY.push_back (iFtr.vvPhenos[s][idxPheno]);
       vG.push_back (iSnp.vvGenos[s][idxGeno]);
       j = 0;
-      for (map<string, vector<double> >::const_iterator it = vSbgrp2Covars[s].begin();
-	   it != vSbgrp2Covars[s].end(); ++it)
+      for (map<string, vector<double> >::const_iterator it =
+	     vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
       {
 	vvCovars[j].push_back (it->second[i]);
 	++j;
@@ -757,46 +860,28 @@ ResFtrSnp_getSstatsOneSbgrpWithCovars (
     }
   }
   
-  if (needQnorm)
-    qqnorm (&vY[0], vY.size());
-  
   iResFtrSnp.vNs[s] = vY.size();
   
   if (iResFtrSnp.vNs[s] > 2)
   {
-    size_t N = vY.size(), P = 2 + vvCovars.size();
-    gsl_vector * Y = gsl_vector_alloc (N), * Bhat = gsl_vector_alloc (P);
-    gsl_matrix * X = gsl_matrix_alloc (N, P),
-      * covBhat = gsl_matrix_alloc (P, P);
-    gsl_multifit_linear_workspace * work = gsl_multifit_linear_alloc (N, P);
+    if (needQnorm)
+      qqnorm (&vY[0], vY.size());
     
-    for (size_t n = 0; n < N; ++n)
+    vector<vector<double> > vvResPredictors (
+      1 + vvCovars.size(),
+      vector<double> (3, numeric_limits<double>::quiet_NaN()));
+    fitMultipleLinearRegression (vG, vY, vvCovars,
+				 iResFtrSnp.vPves[s],
+				 iResFtrSnp.vSigmahats[s],
+				 vvResPredictors);
+    iResFtrSnp.vMapPredictors[s]["genotype"] = vvResPredictors[0];
+    j = 1;
+    for (map<string, vector<double> >::const_iterator it =
+	   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
     {
-      gsl_vector_set (Y, n, vY[n]);
-      gsl_matrix_set (X, n, 0, 1.0);
-      gsl_matrix_set (X, n, 1, vG[n]);
-      for (size_t p = 2; p < P; ++p)
-	gsl_matrix_set (X, n, p, vvCovars[(p-2)][n]);
+      iResFtrSnp.vMapPredictors[s][it->first] = vvResPredictors[j];
+	++j;
     }
-    
-    double rss, t;
-    size_t rank;
-    gsl_multifit_linear_svd (X, Y, GSL_DBL_EPSILON, &rank, Bhat, covBhat,
-			     &rss, work);
-    iResFtrSnp.vBetahats[s] = gsl_vector_get (Bhat, 1);
-    iResFtrSnp.vSebetahats[s] = sqrt (gsl_matrix_get (covBhat, 1, 1));
-    iResFtrSnp.vSigmahats[s] = sqrt (rss / (N-rank));
-    iResFtrSnp.vPves[s] = 1 - rss / gsl_stats_tss (Y->data, Y->stride,
-      Y->size);
-    
-    t = iResFtrSnp.vBetahats[s] / iResFtrSnp.vSebetahats[s];
-    iResFtrSnp.vBetaPvals[s] = 2 * gsl_cdf_tdist_Q (fabs(t), N-rank);
-    
-    gsl_vector_free (Y);
-    gsl_vector_free (Bhat);
-    gsl_matrix_free (X);
-    gsl_matrix_free (covBhat);
-    gsl_multifit_linear_free (work);
   }
 }
 
@@ -828,14 +913,84 @@ ResFtrSnp_getSstatsPermOneSbgrp (
     }
   }
   
-  if (needQnorm)
-    qqnorm (&y[0], y.size());
-  
   iResFtrSnp.vNs[s] = y.size();
   
-  ols (g, y, iResFtrSnp.vBetahats[s], iResFtrSnp.vSebetahats[s],
-       iResFtrSnp.vSigmahats[s], iResFtrSnp.vBetaPvals[s],
-       iResFtrSnp.vPves[s]);
+  if (iResFtrSnp.vNs[s] > 2)
+  {
+    if (needQnorm)
+      qqnorm (&y[0], y.size());
+    
+    iResFtrSnp.vMapPredictors[s]["genotype"] =
+      vector<double>  (3, numeric_limits<double>::quiet_NaN());
+    fitSimpleLinearRegression (g, y, iResFtrSnp.vPves[s],
+			       iResFtrSnp.vSigmahats[s],
+			       iResFtrSnp.vMapPredictors[s]["genotype"][0],
+			       iResFtrSnp.vMapPredictors[s]["genotype"][1],
+			       iResFtrSnp.vMapPredictors[s]["genotype"][2]);
+  }
+}
+
+void
+ResFtrSnp_getSstatsPermOneSbgrp (
+  ResFtrSnp & iResFtrSnp,
+  const Ftr & iFtr,
+  const Snp & iSnp,
+  const size_t & s,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
+  const gsl_permutation * perm)
+{
+  vector<double> vY, vG;
+  size_t idxPheno, idxGeno, j, p;
+  vector<vector<double> > vvCovars (vSbgrp2Covars[s].size(),
+				    vector<double> ());
+  for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
+  {
+    p = gsl_permutation_get (perm, i);
+    idxPheno = vvSampleIdxPhenos[s][p];
+    idxGeno = vvSampleIdxGenos[s][i];
+    if (idxPheno != string::npos
+	&& idxGeno != string::npos
+	&& ! iFtr.vvIsNa[s][idxPheno]
+	&& ! iSnp.vvIsNa[s][idxGeno])
+    {
+      vY.push_back (iFtr.vvPhenos[s][idxPheno]);
+      vG.push_back (iSnp.vvGenos[s][idxGeno]);
+      j = 0;
+      for (map<string, vector<double> >::const_iterator it =
+	     vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+      {
+	vvCovars[j].push_back (it->second[i]);
+	++j;
+      }
+    }
+  }
+  
+  iResFtrSnp.vNs[s] = vY.size();
+  
+  if (iResFtrSnp.vNs[s] > 2)
+  {
+    if (needQnorm)
+      qqnorm (&vY[0], vY.size());
+    
+    vector<vector<double> > vvResPredictors (
+      1 + vvCovars.size(),
+      vector<double> (3, numeric_limits<double>::quiet_NaN()));
+    fitMultipleLinearRegression (vG, vY, vvCovars,
+				 iResFtrSnp.vPves[s],
+				 iResFtrSnp.vSigmahats[s],
+				 vvResPredictors);
+    iResFtrSnp.vMapPredictors[s]["genotype"] = vvResPredictors[0];
+    j = 1;
+    for (map<string, vector<double> >::const_iterator it =
+	   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+    {
+      iResFtrSnp.vMapPredictors[s][it->first] = vvResPredictors[j];
+	++j;
+    }
+  }
 }
 
 void
@@ -844,19 +999,22 @@ ResFtrSnp_corrSmallSampleSize (
 {
   for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
   {
-    if (iResFtrSnp.vNs[s] > 1)
+    if (iResFtrSnp.vNs[s] > 2)
     {
       double n = iResFtrSnp.vNs[s],
-	bhat = iResFtrSnp.vBetahats[s] / iResFtrSnp.vSigmahats[s],
-	sebhat = iResFtrSnp.vSebetahats[s] / iResFtrSnp.vSigmahats[s],
+	bhat = iResFtrSnp.vMapPredictors[s]["genotype"][0] /
+	iResFtrSnp.vSigmahats[s],
+	sebhat = iResFtrSnp.vMapPredictors[s]["genotype"][1] /
+	iResFtrSnp.vSigmahats[s],
 	t = gsl_cdf_gaussian_Pinv (gsl_cdf_tdist_P (-fabs(bhat/sebhat),
 						    n-2), 1.0),
 	sigmahat = 0;
       vector<double> vStdSstatsCorr;
       if (fabs(t) > 1e-8)
       {
-	sigmahat = fabs (iResFtrSnp.vBetahats[s]) / (fabs (t) * sebhat);
-	bhat = iResFtrSnp.vBetahats[s] / sigmahat;
+	sigmahat = fabs (iResFtrSnp.vMapPredictors[s]["genotype"][0]) /
+	  (fabs (t) * sebhat);
+	bhat = iResFtrSnp.vMapPredictors[s]["genotype"][0] / sigmahat;
 	sebhat = bhat / t;
       }
       else
@@ -873,74 +1031,6 @@ ResFtrSnp_corrSmallSampleSize (
     else
       iResFtrSnp.vvStdSstatsCorr.push_back (vector<double> (3, 0.0));
   }
-}
-
-double
-getAbfFromStdSumStats (
-  const vector<size_t> & vNs,
-  const vector<vector<double> > & vvStdSstatsCorr,
-  const double & phi2,
-  const double & oma2)
-{
-  double l10AbfAll = 0, bhat = 0, varbhat = 0, t = 0, bbarhat_num = 0,
-    bbarhat_denom = 0, varbbarhat = 0;
-  vector<double> l10AbfsSingleSbgrp;
-#ifdef DEBUG
-  printf ("phi2=%f oma2=%f\n", phi2, oma2);
-#endif
-  
-  for (size_t s = 0; s < vNs.size(); ++s)
-  {
-    if (vNs[s] > 1)
-    {
-      bhat = vvStdSstatsCorr[s][0];
-      varbhat = pow (vvStdSstatsCorr[s][1], 2);
-      t = vvStdSstatsCorr[s][2];
-      double lABF_single;
-      if (fabs(t) < 1e-8)
-      {
-	lABF_single = 0;
-      }
-      else
-      {
-	bbarhat_num += bhat / (varbhat + phi2);
-	bbarhat_denom += 1 / (varbhat + phi2);
-	varbbarhat += 1 / (varbhat + phi2);
-	lABF_single = 0.5 * log10(varbhat)
-	  - 0.5 * log10(varbhat + phi2)
-	  + (0.5 * pow(t,2) * phi2 / (varbhat + phi2)) / log(10);
-      }
-      l10AbfsSingleSbgrp.push_back (lABF_single);
-#ifdef DEBUG
-      printf ("l10AbfsSingleSbgrp[%ld]=%e\n", s+1, l10AbfsSingleSbgrp[s]);
-#endif
-    }
-  }
-  
-  double bbarhat = (bbarhat_denom != 0) ?
-    bbarhat_num / bbarhat_denom
-    : 0;
-  varbbarhat = (varbbarhat != 0) ?
-    1 / varbbarhat
-    : numeric_limits<double>::infinity();
-  double T2 = pow(bbarhat, 2.0) / varbbarhat;
-  double lABF_bbar = (T2 != 0) ?
-    0.5 * log10(varbbarhat) - 0.5 * log10(varbbarhat + oma2)
-    + (0.5 * T2 * oma2 / (varbbarhat + oma2)) / log(10)
-    : 0;
-#ifdef DEBUG
-  printf ("bbarhat=%e varbbarhat=%e T2=%e lABF_bbar=%e\n",
-	  bbarhat, varbbarhat, T2, lABF_bbar);
-#endif
-  
-  l10AbfAll = lABF_bbar;
-  for (size_t i = 0; i < l10AbfsSingleSbgrp.size(); ++i)
-    l10AbfAll += l10AbfsSingleSbgrp[i];
-#ifdef DEBUG
-  printf ("l10AbfAll=%e\n", l10AbfAll);
-#endif
-  
-  return l10AbfAll;
 }
 
 void
@@ -1009,7 +1099,7 @@ ResFtrSnp_calcAbfsSpecific (
     ssConfig.str("");
     ssConfig << (s+1);
     
-    if (iResFtrSnp.vNs[s] > 1)
+    if (iResFtrSnp.vNs[s] > 2)
     {
       vvStdSstatsCorr.clear ();
       for (size_t i = 0; i < iResFtrSnp.vNs.size(); ++i)
@@ -1100,7 +1190,7 @@ ResFtrSnp_calcAbfsAllConfigs (
       vvStdSstatsCorr.clear();
       for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
       {
-	if (iResFtrSnp.vNs[s] > 1 && vIsEqtlInConfig[s])
+	if (iResFtrSnp.vNs[s] > 2 && vIsEqtlInConfig[s])
 	{
 	  vNs[s] = iResFtrSnp.vNs[s];
 	  vvStdSstatsCorr.push_back (iResFtrSnp.vvStdSstatsCorr[s]);
@@ -1111,7 +1201,7 @@ ResFtrSnp_calcAbfsAllConfigs (
 	  vvStdSstatsCorr.push_back (vector<double> (3, 0));
 	}
       }
-      if (accumulate (vNs.begin(), vNs.end(), 0) > 0)
+      if (accumulate (vNs.begin(), vNs.end(), 0) > 2)
       {
 	vL10Abfs.assign (grid.size(), 0);
 	for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
@@ -1315,8 +1405,10 @@ Ftr_inferAssos (
 	if (verbose > 0)
 	  cout << iFtr.name << " " << iResFtrSnp.snp << " s" << (s+1) << endl;
 #endif
-	ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]), s, vvSampleIdxPhenos, vvSampleIdxGenos, needQnorm);
-//	ResFtrSnp_getSstatsOneSbgrpWithCovars (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]), s, vvSampleIdxPhenos, vvSampleIdxGenos, needQnorm,vSbgrp2Covars);
+	ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr,
+				     *(iFtr.vPtCisSnps[snpId]), s,
+				     vvSampleIdxPhenos, vvSampleIdxGenos,
+				     needQnorm, vSbgrp2Covars);
       }
     }
     if (whichStep == 3 || whichStep == 4 || whichStep == 5)
@@ -1330,11 +1422,15 @@ Ftr_getMinTrueBetaPvals (
   const Ftr & iFtr,
   const size_t & s)
 {
-  double minTrueBetaPval = 1;
+  double minTrueBetaPval = 1, trueBetaPval;
   for (vector<ResFtrSnp>::const_iterator it = iFtr.vResFtrSnps.begin();
        it != iFtr.vResFtrSnps.end(); ++it)
-    if (it->vNs[s] > 1 && it->vBetaPvals[s] < minTrueBetaPval)
-      minTrueBetaPval = it->vBetaPvals[s];
+    if (it->vNs[s] > 2)
+    {
+      trueBetaPval = (it->vMapPredictors[s].find("genotype")->second)[2];
+      if (trueBetaPval < minTrueBetaPval)
+	minTrueBetaPval = trueBetaPval;
+    }
   return minTrueBetaPval;
 }
 
@@ -1344,6 +1440,7 @@ Ftr_makePermsSepOneSubgrp (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const size_t & nbPerms,
   const int & trick,
   const size_t & s,
@@ -1351,10 +1448,8 @@ Ftr_makePermsSepOneSubgrp (
   const gsl_rng * & rngTrick)
 {
 //  clock_t timeBegin = clock();
-  size_t idxPheno, idxGeno, p;
   bool shuffleOnly;
-  double minTrueBetaPval, minPermBetaPval, permBetaPval,
-    betahat, sebetahat, sigmahat, pve;
+  double minTrueBetaPval, minPermBetaPval;
   gsl_permutation * perm = NULL;
   Snp iSnp;
   
@@ -1382,27 +1477,16 @@ Ftr_makePermsSepOneSubgrp (
     for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
     {
       iSnp = *(iFtr.vPtCisSnps[snpId]);
-      permBetaPval = 1;
-      vector<double> y, g;
-      for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
-      {
-	p = gsl_permutation_get (perm, i);
-	idxPheno = vvSampleIdxPhenos[s][p];
-	idxGeno = vvSampleIdxGenos[s][i];
-	if (idxPheno != string::npos
-	    && idxGeno != string::npos
-	    && ! iFtr.vvIsNa[s][idxPheno]
-	    && ! iSnp.vvIsNa[s][idxGeno])
-	{
-	  y.push_back (iFtr.vvPhenos[s][idxPheno]);
-	  g.push_back (iSnp.vvGenos[s][idxGeno]);
-	}
-      }
-      if (needQnorm)
-	qqnorm (&y[0], y.size());
-      ols (g, y, betahat, sebetahat, sigmahat, permBetaPval, pve);
-      if (permBetaPval < minPermBetaPval)
-	minPermBetaPval = permBetaPval;
+      ResFtrSnp iResFtrSnp;
+      ResFtrSnp_init (iResFtrSnp, iSnp.name, 1);
+      if (iFtr.vvPhenos[s].size() > 0)
+	ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, 0,
+					 vvSampleIdxPhenos,
+					 vvSampleIdxGenos,
+					 needQnorm, vSbgrp2Covars, perm);
+      if (iResFtrSnp.vNs[0] > 2 &&
+	  iResFtrSnp.vMapPredictors[0]["genotypes"][2] < minPermBetaPval)
+	minPermBetaPval = iResFtrSnp.vMapPredictors[0]["genotypes"][2];
     }
     
     if (minPermBetaPval <= minTrueBetaPval)
@@ -1522,6 +1606,7 @@ Ftr_makePermsJointAbfConst (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
@@ -1552,9 +1637,9 @@ Ftr_makePermsJointAbfConst (
       for (size_t s = 0; s < nbSubgroups; ++s)
 	if (iFtr.vvPhenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-						 vvSampleIdxPhenos,
-						 vvSampleIdxGenos,
-						 needQnorm, perm);
+					   vvSampleIdxPhenos,
+					   vvSampleIdxGenos,
+					   needQnorm, vSbgrp2Covars, perm);
       ResFtrSnp_corrSmallSampleSize (iResFtrSnp);
       l10Abf = ResFtrSnp_calcAbfConst (iResFtrSnp, grid);
       if (l10Abf > maxL10PermAbf)
@@ -1562,10 +1647,7 @@ Ftr_makePermsJointAbfConst (
     }
     
     if (maxL10PermAbf >= maxL10TrueAbf)
-    {
       ++iFtr.jointPermPval;
-//      cout << endl << permId << " " << maxL10PermAbf << endl;
-    }
     if (trick != 0 && iFtr.jointPermPval == 11)
     {
       if (trick == 1)
@@ -1582,6 +1664,7 @@ Ftr_makePermsJointAbfSubset (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
@@ -1612,9 +1695,9 @@ Ftr_makePermsJointAbfSubset (
       for (size_t s = 0; s < nbSubgroups; ++s)
 	if (iFtr.vvPhenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-						 vvSampleIdxPhenos,
-						 vvSampleIdxGenos,
-						 needQnorm, perm);
+					   vvSampleIdxPhenos,
+					   vvSampleIdxGenos, needQnorm,
+					   vSbgrp2Covars, perm);
       ResFtrSnp_corrSmallSampleSize (iResFtrSnp);
       l10Abf = ResFtrSnp_calcAbfSubset (iResFtrSnp, grid);
       if (l10Abf > maxL10PermAbf)
@@ -1639,6 +1722,7 @@ Ftr_makePermsJointAbfAll (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
@@ -1669,9 +1753,9 @@ Ftr_makePermsJointAbfAll (
       for (size_t s = 0; s < nbSubgroups; ++s)
 	if (iFtr.vvPhenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-						 vvSampleIdxPhenos,
-						 vvSampleIdxGenos,
-						 needQnorm, perm);
+					   vvSampleIdxPhenos,
+					   vvSampleIdxGenos, needQnorm,
+					   vSbgrp2Covars, perm);
       ResFtrSnp_corrSmallSampleSize (iResFtrSnp);
       l10Abf = ResFtrSnp_calcAbfAll (iResFtrSnp, grid);
       if (l10Abf > maxL10PermAbf)
@@ -1696,6 +1780,7 @@ Ftr_makePermsJoint (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
@@ -1722,25 +1807,25 @@ Ftr_makePermsJoint (
     maxL10TrueAbf = Ftr_getMaxL10TrueAbfConst (iFtr);
     iFtr.maxL10TrueAbf = maxL10TrueAbf;
     Ftr_makePermsJointAbfConst (iFtr, vvSampleIdxPhenos,
-				      vvSampleIdxGenos, needQnorm, grid,
-				      nbPerms, trick, maxL10TrueAbf,
-				      rngPerm, rngTrick, perm);
+				vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+				grid, nbPerms, trick, maxL10TrueAbf,
+				rngPerm, rngTrick, perm);
   }
   else if (whichPermBf.compare("subset") == 0)
   {
     maxL10TrueAbf = Ftr_getMaxL10TrueAbfSubset (iFtr);
     Ftr_makePermsJointAbfSubset (iFtr, vvSampleIdxPhenos,
-				       vvSampleIdxGenos, needQnorm, grid,
-				       nbPerms, trick, maxL10TrueAbf,
-				       rngPerm, rngTrick, perm);
+				 vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+				 grid, nbPerms, trick, maxL10TrueAbf,
+				 rngPerm, rngTrick, perm);
   }
   else if (whichPermBf.compare("all") == 0)
   {
     maxL10TrueAbf = Ftr_getMaxL10TrueAbfAll (iFtr);
     Ftr_makePermsJointAbfAll (iFtr, vvSampleIdxPhenos,
-				    vvSampleIdxGenos, needQnorm, grid,
-				    nbPerms, trick, maxL10TrueAbf,
-				    rngPerm, rngTrick, perm);
+			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+			      grid, nbPerms, trick, maxL10TrueAbf,
+			      rngPerm, rngTrick, perm);
   }
   
   if (iFtr.nbPermsSoFar == nbPerms)
@@ -1975,13 +2060,6 @@ loadSamples (
     }
     vvSampleIdxGenos.push_back (vSampleIdxGenos);
   }
-  
-  // if (verbose > 0)
-  // {
-  //   for (size_t s = 0; s < vvSampleIdxPhenos.size(); ++s)
-  //     for (size_t i = 0; i < vSamples.size(); ++i)
-  // 	cout << "s" << (s+1) << " " << vSamples[i] << ": " << (vvSampleIdxPhenos[s][i]+1) << endl;
-  // }
 }
 
 void
@@ -2074,15 +2152,6 @@ loadPhenos (
   }
   if (verbose > 0)
     cout << "total nb of features with phenotypes: " << mFtrs.size() << endl;
-/*	map<string, Ftr>::iterator it = mFtrs.begin();
-	while (it != mFtrs.end())
-	{
-	for (size_t s = 0; s < it->second.vvPhenos.size(); ++s)
-	for (size_t i = 0; i < it->second.vvPhenos[s].size(); ++i)
-	cout << it->first << " " << (s+1) << " " << (i+1) << " "
-	<< it->second.vvPhenos[s][i] << endl;
-	++it;
-	}*/
 }
 
 void
@@ -2651,6 +2720,7 @@ makePermsSep (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const size_t & nbPerms,
   const size_t & seed,
   const int & trick,
@@ -2678,8 +2748,8 @@ makePermsSep (
 	progressBar (ss.str(), countFtrs, mFtrs.size());
       if (itF->second.vPtCisSnps.size() > 0)
 	Ftr_makePermsSepOneSubgrp (itF->second, vvSampleIdxPhenos,
-				   vvSampleIdxGenos, needQnorm, nbPerms, trick,
-				   s, rngPerm, rngTrick);
+				   vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+				   nbPerms, trick, s, rngPerm, rngTrick);
     }
     if (verbose == 1)
       cout << endl << flush;
@@ -2692,6 +2762,7 @@ makePermsJoint (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const size_t & seed,
@@ -2713,8 +2784,8 @@ makePermsJoint (
       progressBar ("joint", countFtrs, mFtrs.size());
     if (itF->second.vPtCisSnps.size() > 0)
       Ftr_makePermsJoint (itF->second, vvSampleIdxPhenos,
-			  vvSampleIdxGenos, needQnorm, grid, nbPerms,
-			  trick, whichPermBf, rngPerm, rngTrick);
+			  vvSampleIdxGenos, needQnorm, vSbgrp2Covars, grid,
+			  nbPerms, trick, whichPermBf, rngPerm, rngTrick);
   }
   if (verbose == 1)
     cout << endl << flush;
@@ -2727,6 +2798,7 @@ makePerms (
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const int & whichStep,
   const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const size_t & seed,
@@ -2761,13 +2833,13 @@ makePerms (
   
   if (whichStep == 2 || whichStep == 5)
     makePermsSep (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
-			needQnorm, nbPerms, seed, trick, rngPerm, rngTrick,
-			verbose);
+		  needQnorm, vSbgrp2Covars, nbPerms, seed, trick, rngPerm,
+		  rngTrick, verbose);
   
   if (whichStep == 4 || whichStep == 5)
     makePermsJoint (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
-			  needQnorm, grid, nbPerms, seed, trick, whichPermBf,
-			  rngPerm, rngTrick, verbose);
+		    needQnorm, vSbgrp2Covars, grid, nbPerms, seed, trick,
+		    whichPermBf, rngPerm, rngTrick, verbose);
   
   gsl_rng_free (rngPerm);
   if (trick != 0)
@@ -2780,10 +2852,12 @@ writeResSstats (
   const map<string, Ftr> & mFtrs,
   const map<string, Snp> & mSnps,
   const vector<string> & vSubgroups,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of summary statistics in each subgroup ..." << endl << flush;
+    cout << "write results of summary statistics in each subgroup ..."
+	 << endl << flush;
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
@@ -2794,7 +2868,13 @@ writeResSstats (
     ogzstream outStream;
     openFile (ss.str(), outStream);
     
-    outStream << "ftr snp maf n betahat sebetahat sigmahat betaPval pve";
+    outStream << "ftr snp maf n pve sigmahat"
+	      << " betahat.geno sebetahat.geno betapval.geno";
+    for (map<string, vector<double> >::const_iterator it =
+	   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+      outStream << " betahat." << it->first
+		<< " sebetahat." << it->first
+		<< " betapval." << it->first;
     outStream << endl;
     
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
@@ -2803,17 +2883,31 @@ writeResSstats (
       const Ftr * ptF = &(itF->second);
       for (vector<ResFtrSnp>::const_iterator itP = ptF->vResFtrSnps.begin();
 	   itP != ptF->vResFtrSnps.end(); ++itP)
-	if (itP->vNs[s] > 0)
+	if (itP->vNs[s] > 2)
+	{
 	  outStream << ptF->name
 		    << " " << itP->snp
 		    << " " << mSnps.find(itP->snp)->second.vMafs[s]
 		    << " " << itP->vNs[s]
-		    << " " << itP->vBetahats[s]
-		    << " " << itP->vSebetahats[s]
-		    << " " << itP->vSigmahats[s]
-		    << " " << itP->vBetaPvals[s]
 		    << " " << itP->vPves[s]
-		    << endl;
+		    << " " << itP->vSigmahats[s]
+		    << " " << (itP->vMapPredictors[s].find("genotype")->
+			       second)[0]
+		    << " " << (itP->vMapPredictors[s].find("genotype")->
+			       second)[1]
+		    << " " << (itP->vMapPredictors[s].find("genotype")->
+			       second)[2];
+	  for (map<string, vector<double> >::const_iterator itC =
+		 vSbgrp2Covars[s].begin(); itC != vSbgrp2Covars[s].end();
+	       ++itC)
+	    outStream << " " << (itP->vMapPredictors[s].find(itC->first)->
+				 second)[0]
+		      << " " << (itP->vMapPredictors[s].find(itC->first)->
+				 second)[1]
+		      << " " << (itP->vMapPredictors[s].find(itC->first)->
+				 second)[2];
+	  outStream << endl;
+	}
     }
     
     outStream.close();
@@ -2828,7 +2922,8 @@ writeResSepPermPval (
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of feature-level P-values in each subgroup ..." << endl << flush;
+    cout << "write results of feature-level P-values in each subgroup ..."
+	 << endl << flush;
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
@@ -2867,7 +2962,8 @@ writeResAbfsUnweighted (
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of Bayes Factors, all subgroups jointly ..." << endl << flush;
+    cout << "write results of Bayes Factors, all subgroups jointly ..."
+	 << endl << flush;
   
   gsl_combination * comb;
   stringstream ssOutFile, ssConfig;
@@ -2906,7 +3002,8 @@ writeResAbfsUnweighted (
 	  comb = gsl_combination_calloc (nbSubgroups, k);
 	  if (comb == NULL)
 	  {
-	    cerr << "ERROR: can't allocate memory for the combination" << endl;
+	    cerr << "ERROR: can't allocate memory for the combination"
+		 << endl;
 	    exit (1);
 	  }
 	  while (true)
@@ -2920,7 +3017,8 @@ writeResAbfsUnweighted (
 		      << " " << itP->snp
 		      << " " << ssConfig.str();
 	    for (size_t i = 0; i < grid.size(); ++i)
-	      outStream << " " << itP->mUnweightedAbfs.find(ssConfig.str())->second[i];
+	      outStream << " " << itP->mUnweightedAbfs.find(ssConfig.str())->
+		second[i];
 	    outStream << endl;
 	    if (gsl_combination_next (comb) != GSL_SUCCESS)
 	      break;
@@ -2944,7 +3042,8 @@ writeResAbfsWeighted (
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of Bayes Factors, all subgroups jointly ..." << endl << flush;
+    cout << "write results of Bayes Factors, all subgroups jointly ..."
+	 << endl << flush;
   
   gsl_combination * comb;
   stringstream ssOutFile, ssConfig;
@@ -2991,11 +3090,12 @@ writeResAbfsWeighted (
 	 itP != ptF->vResFtrSnps.end(); ++itP)
     {
       n = accumulate (itP->vNs.begin(), itP->vNs.end(), 0);
-      if (n > 0)
+      if (n > 2)
       {
 	outStream << ptF->name
 		  << " " << itP->snp
-		  << " " << count_if (itP->vNs.begin(), itP->vNs.end(), isNonZero)
+		  << " " << count_if (itP->vNs.begin(), itP->vNs.end(),
+				      isNonZero)
 		  << " " << n
 		  << " " << itP->mWeightedAbfs.find("const")->second
 		  << " " << itP->mWeightedAbfs.find("const-fix")->second
@@ -3007,7 +3107,8 @@ writeResAbfsWeighted (
 	    comb = gsl_combination_calloc (nbSubgroups, k);
 	    if (comb == NULL)
 	    {
-	      cerr << "ERROR: can't allocate memory for the combination" << endl;
+	      cerr << "ERROR: can't allocate memory for the combination"
+		   << endl;
 	      exit (1);
 	    }
 	    while (true)
@@ -3017,7 +3118,8 @@ writeResAbfsWeighted (
 	      if (comb->k > 1)
 		for (size_t i = 1; i < k; ++i)
 		  ssConfig << "-" << gsl_combination_get (comb, i) + 1;
-	      outStream << " " << itP->mWeightedAbfs.find(ssConfig.str())->second;
+	      outStream << " " << itP->mWeightedAbfs.find(ssConfig.str())->
+		second;
 	      if (gsl_combination_next (comb) != GSL_SUCCESS)
 		break;
 	    }
@@ -3040,7 +3142,8 @@ writeResJointPermPval (
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of feature-level P-values, all subgroups jointly ..." << endl << flush;
+    cout << "write results of feature-level P-values, all subgroups jointly ..."
+	 << endl << flush;
   
   stringstream ssOutFile;
   ssOutFile << outPrefix << "_jointPermPvals.txt.gz";
@@ -3069,12 +3172,14 @@ writeRes (
   const map<string, Ftr> & mFtrs,
   const map<string, Snp> & mSnps,
   const vector<string> & vSubgroups,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const int & whichStep,
   const vector<vector<double> > & grid,
   const string & whichBfs,
   const int & verbose)
 {
-  writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, verbose);
+  writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
+		  verbose);
   
   if (whichStep == 2 || whichStep == 5)
     writeResSepPermPval (outPrefix, mFtrs, vSubgroups, verbose);
@@ -3148,14 +3253,15 @@ run (
 		  vvSampleIdxPhenos, vSbgrp2Covars, verbose);
   
   inferAssos (mFtrs, mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, vvSampleIdxPhenos,
-	      vvSampleIdxGenos, anchor, lenCis, whichStep, needQnorm, vSbgrp2Covars,
-	      grid, whichBfs, verbose);
+	      vvSampleIdxGenos, anchor, lenCis, whichStep, needQnorm,
+	      vSbgrp2Covars, grid, whichBfs, verbose);
   if (whichStep == 2 || whichStep == 4 || whichStep == 5)
     makePerms (mFtrs, vvSampleIdxPhenos, vvSampleIdxGenos, whichStep, 
-	       needQnorm, grid, nbPerms, seed, trick, whichPermBf, verbose);
+	       needQnorm, vSbgrp2Covars, grid, nbPerms, seed, trick,
+	       whichPermBf, verbose);
   
-  writeRes (outPrefix, mFtrs, mSnps, vSubgroups, whichStep, grid, whichBfs,
-	    verbose);
+  writeRes (outPrefix, mFtrs, mSnps, vSubgroups, vSbgrp2Covars, whichStep,
+	    grid, whichBfs, verbose);
 }
 
 #ifdef EQTLBMA_MAIN
