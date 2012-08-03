@@ -67,7 +67,6 @@ void help (char ** argv)
        << "  -v, --verbose\tverbosity level (0/default=1/2/3)" << endl
        << "  -g, --geno\tfile with absolute paths to genotype files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
-       << "\t\tcan be a single line (eg. for multiple tissues) but identifier of first subgroup" << endl
        << "\t\tadd '#' at the beginning of a line to comment it" << endl
        << "\t\tsubgroup file: can be in two formats" << endl
        << "\t\tIMPUTE: row 1 is a header chr<del>name<del>coord<del>a1<del>a2" << endl
@@ -1957,8 +1956,6 @@ loadSamplesAllGenos (
 	    == vSamples.end())
 	  vSamples.push_back (tokens[i]);
     }
-    if (mGenoPaths.size() == 1)
-      break;
   }
   if (verbose > 0)
   {
@@ -1973,8 +1970,6 @@ loadSamplesAllGenos (
 	for (size_t i = 0; i < vvSamples[s].size(); ++i)
 	  cout << vvSamples[s][i] << endl;
       }
-      if (mGenoPaths.size() == 1)
-	break;
     }
   }
 }
@@ -2249,6 +2244,7 @@ loadGenosAndSnpInfo (
 	  == vSnpsToKeep.end())
 	continue;
       
+      maf = 0;
       if (mSnps.find(tokens[1]) == mSnps.end())
       {
 	Snp iSnp;
@@ -2256,7 +2252,6 @@ loadGenosAndSnpInfo (
 	iSnp.vvIsNa[s].resize (nbSamples, false);
 	iSnp.vvGenos[s].resize (nbSamples,
 				numeric_limits<double>::quiet_NaN());
-	maf = 0;
 	for (size_t i = 0; i < nbSamples; ++i)
 	{
 	  AA = atof(tokens[5+3*i].c_str());
@@ -2284,11 +2279,36 @@ loadGenosAndSnpInfo (
 					    vector<Snp*> ()));
 	mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[1]]));
       }
+      else
+      {
+	mSnps[tokens[1]].vvIsNa[s].resize (nbSamples, false);
+	mSnps[tokens[1]].vvGenos[s].resize (nbSamples,
+					    numeric_limits<double>::quiet_NaN());
+	for (size_t i = 0; i < nbSamples; ++i)
+	{
+	  AA = atof(tokens[5+3*i].c_str());
+	  AB = atof(tokens[5+3*i+1].c_str());
+	  BB = atof(tokens[5+3*i+2].c_str());
+	  if (AA == 0 && AB == 0 && BB == 0)
+	    mSnps[tokens[1]].vvIsNa[s][i] = true;
+	  else
+	  {
+	    mSnps[tokens[1]].vvGenos[s][i] = 0 * AA + 1 * AB + 2 * BB;
+	    maf += mSnps[tokens[1]].vvGenos[s][i];
+	  }
+	}
+	maf /= 2 * (nbSamples
+		    - count (mSnps[tokens[1]].vvIsNa[s].begin(),
+			     mSnps[tokens[1]].vvIsNa[s].end(),
+			     true));
+	mSnps[tokens[1]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+      }
     }
     
     genoStream.close();
-    if (mGenoPaths.size() == 1)
-      break;
+    if (verbose > 0)
+      cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
+	   << " SNPs" << endl << flush;
   }
   
   // sort the SNPs per chr
