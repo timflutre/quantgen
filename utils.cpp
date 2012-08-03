@@ -436,7 +436,7 @@ printCounter (
 }
 
 /** \brief Display a progress bar on stdout.
- *  \note from the GEMMA package by Xiang Zhou
+ *  \note adapted from the GEMMA package by Xiang Zhou
 */
 void
 progressBar (
@@ -448,7 +448,7 @@ progressBar (
   int barsize = (int) (progress / 2.0);
   char bar[51];
   
-  cout << msg;
+  cout << "\r" << msg;
   for (int i = 0; i < 50; i++)
   {
     if (i < barsize)
@@ -457,7 +457,7 @@ progressBar (
       bar[i] = ' ';
     cout << bar[i];
   }
-  cout << setprecision(2) << fixed << progress << "%\r" << flush;
+  cout << setprecision(2) << fixed << progress << "%" << flush;
 }
 
 /** \brief Convert int, float, etc into a string.
