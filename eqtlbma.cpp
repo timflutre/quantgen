@@ -1334,7 +1334,7 @@ Ftr_init (
   iFtr.vNbPermsSoFar.assign (nbSubgroups, 0);
   iFtr.jointPermPval = numeric_limits<double>::quiet_NaN();
   iFtr.nbPermsSoFar = 0;
-  iFtr.maxL10TrueAbf = 0;
+  iFtr.maxL10TrueAbf = numeric_limits<double>::quiet_NaN();
 }
 
 // assume both features are on the same chromosome
@@ -1513,90 +1513,82 @@ Ftr_makePermsSepOneSubgrp (
 /** \brief Retrieve the highest log10(ABF) over SNPs of the given feature
  *  among the const ABF
  */
-double
-Ftr_getMaxL10TrueAbfConst (
-  const Ftr & iFtr)
+void
+Ftr_findMaxL10TrueAbfConst (
+  Ftr & iFtr)
 {
-  double maxL10TrueAbf = 0;
-  
-  // loop over SNPs
-  for (vector<ResFtrSnp>::const_iterator it = iFtr.vResFtrSnps.begin();
-       it != iFtr.vResFtrSnps.end(); ++it)
-    if ((it->mWeightedAbfs.find("const"))->second > maxL10TrueAbf)
-      maxL10TrueAbf = (it->mWeightedAbfs.find("const"))->second;
-  
-  return maxL10TrueAbf;
+  if (iFtr.vResFtrSnps.size() > 0)
+  {
+    iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[0].mWeightedAbfs["const"];
+    for (size_t snpId = 1; snpId < iFtr.vResFtrSnps.size(); ++snpId)
+      if (iFtr.vResFtrSnps[snpId].mWeightedAbfs["const"] > iFtr.maxL10TrueAbf)
+	iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs["const"];
+  }
 }
 
 /** \brief Retrieve the highest log10(ABF) over SNPs of the given feature
  *  among the const ABF and each subgroup-specific ABF
  */
-double
-Ftr_getMaxL10TrueAbfSubset (
-  const Ftr & iFtr)
+void
+Ftr_findMaxL10TrueAbfSubset (
+  Ftr & iFtr)
 {
-  double maxL10TrueAbf = 0;
-  stringstream ssConfig;
-  
-  // loop over SNPs
-  for (vector<ResFtrSnp>::const_iterator it = iFtr.vResFtrSnps.begin();
-       it != iFtr.vResFtrSnps.end(); ++it)
+  if (iFtr.vResFtrSnps.size() > 0)
   {
-    if ((it->mWeightedAbfs.find("const"))->second > maxL10TrueAbf)
-      maxL10TrueAbf = (it->mWeightedAbfs.find("const"))->second;
+    iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[0].mWeightedAbfs["const"];
     
-    // loop over subgroup-specific configuration
-    for (size_t s = 0; s < it->vNs.size(); ++s)
+    stringstream ssConfig;
+    for (size_t snpId = 1; snpId < iFtr.vResFtrSnps.size(); ++snpId)
     {
-      ssConfig.str("");
-      ssConfig << (s+1);
-      if (it->mWeightedAbfs.find(ssConfig.str())->second > maxL10TrueAbf)
-	maxL10TrueAbf = it->mWeightedAbfs.find(ssConfig.str())->second;
+      if (iFtr.vResFtrSnps[snpId].mWeightedAbfs["const"] > iFtr.maxL10TrueAbf)
+	iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs["const"];
+      for (size_t s = 0; s < iFtr.vResFtrSnps[snpId].vNs.size(); ++s)
+      {
+	ssConfig.str("");
+	ssConfig << (s+1);
+	if (iFtr.vResFtrSnps[snpId].mWeightedAbfs[ssConfig.str()] > iFtr.maxL10TrueAbf)
+	  iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs[ssConfig.str()];
+      }
     }
   }
-  
-  return maxL10TrueAbf;
 }
 
 /** \brief Retrieve the highest log10(ABF) over SNPs of the given feature
  *  among the const ABF, each subgroup-specific ABF, and all other
  *  configurations
  */
-double
-Ftr_getMaxL10TrueAbfAll (
-  const Ftr & iFtr)
+void
+Ftr_findMaxL10TrueAbfAll (
+  Ftr & iFtr)
 {
-  double maxL10TrueAbf = 0;
-  stringstream ssConfig;
-  gsl_combination * comb;
-  vector<bool> vIsEqtlInConfig;
-  
-  // loop over SNPs
-  for (vector<ResFtrSnp>::const_iterator it = iFtr.vResFtrSnps.begin();
-       it != iFtr.vResFtrSnps.end(); ++it)
+  if (iFtr.vResFtrSnps.size() > 0)
   {
-    if ((it->mWeightedAbfs.find("const"))->second > maxL10TrueAbf)
-      maxL10TrueAbf = (it->mWeightedAbfs.find("const"))->second;
+    iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[0].mWeightedAbfs["const"];
     
-    // loop over all configurations (except const)
-    for (size_t k = 1; k < it->vNs.size(); ++k)
+    stringstream ssConfig;
+    gsl_combination * comb;
+    vector<bool> vIsEqtlInConfig;
+    for (size_t snpId = 1; snpId < iFtr.vResFtrSnps.size(); ++snpId)
     {
-      comb = gsl_combination_calloc (it->vNs.size(), k);
-      if (comb == NULL)
+      if (iFtr.vResFtrSnps[snpId].mWeightedAbfs["const"] > iFtr.maxL10TrueAbf)
+	iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs["const"];
+      for (size_t k = 1; k < iFtr.vResFtrSnps[snpId].vNs.size(); ++k)
       {
-	cerr << "ERROR: can't allocate memory for the combination" << endl;
-	exit (1);
-      }
-      while (true)
-      {
-	prepareConfig (ssConfig, vIsEqtlInConfig, comb);
-	if (it->mWeightedAbfs.find(ssConfig.str())->second > maxL10TrueAbf)
-	  maxL10TrueAbf = it->mWeightedAbfs.find(ssConfig.str())->second;
+	comb = gsl_combination_calloc (iFtr.vResFtrSnps[snpId].vNs.size(), k);
+	if (comb == NULL)
+	{
+	  cerr << "ERROR: can't allocate memory for the combination" << endl;
+	  exit (1);
+	}
+	while (true)
+	{
+	  prepareConfig (ssConfig, vIsEqtlInConfig, comb);
+	  if (iFtr.vResFtrSnps[snpId].mWeightedAbfs[ssConfig.str()] > iFtr.maxL10TrueAbf)
+	    iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs[ssConfig.str()];
+	}
       }
     }
   }
-  
-  return maxL10TrueAbf;
 }
 
 void
@@ -1618,7 +1610,7 @@ Ftr_makePermsJointAbfConst (
   bool shuffleOnly = false;
   Snp iSnp;
   
-  iFtr.maxL10TrueAbf = Ftr_getMaxL10TrueAbfConst (iFtr);
+  Ftr_findMaxL10TrueAbfConst (iFtr);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1677,7 +1669,7 @@ Ftr_makePermsJointAbfSubset (
   bool shuffleOnly = false;
   Snp iSnp;
   
-  iFtr.maxL10TrueAbf = Ftr_getMaxL10TrueAbfSubset (iFtr);
+  Ftr_findMaxL10TrueAbfSubset (iFtr);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1736,7 +1728,7 @@ Ftr_makePermsJointAbfAll (
   bool shuffleOnly = false;
   Snp iSnp;
   
-  iFtr.maxL10TrueAbf = Ftr_getMaxL10TrueAbfAll (iFtr);
+  Ftr_findMaxL10TrueAbfAll (iFtr);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
