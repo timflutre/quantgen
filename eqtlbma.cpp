@@ -1619,7 +1619,7 @@ Ftr_makePermsJointAbfConst (
       continue;
     
     ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = 0;
+    maxL10PermAbf = - numeric_limits<double>::infinity();
     
     for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
     {
@@ -1678,7 +1678,7 @@ Ftr_makePermsJointAbfSubset (
       continue;
     
     ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = 0;
+    maxL10PermAbf = - numeric_limits<double>::infinity();
     
     for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
     {
@@ -1737,7 +1737,7 @@ Ftr_makePermsJointAbfAll (
       continue;
     
     ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = 0;
+    maxL10PermAbf = - numeric_limits<double>::infinity();
     
     for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
     {
