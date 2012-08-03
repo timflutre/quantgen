@@ -1610,7 +1610,6 @@ Ftr_makePermsJointAbfConst (
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
-  const double & maxL10TrueAbf,
   const gsl_rng * & rngPerm,
   const gsl_rng * & rngTrick,
   const gsl_permutation * perm)
@@ -1619,6 +1618,8 @@ Ftr_makePermsJointAbfConst (
   double maxL10PermAbf, l10Abf;
   bool shuffleOnly = false;
   Snp iSnp;
+  
+  iFtr.maxL10TrueAbf = Ftr_getMaxL10TrueAbfConst (iFtr);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1646,7 +1647,7 @@ Ftr_makePermsJointAbfConst (
 	maxL10PermAbf = l10Abf;
     }
     
-    if (maxL10PermAbf >= maxL10TrueAbf)
+    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
       ++iFtr.jointPermPval;
     if (trick != 0 && iFtr.jointPermPval == 11)
     {
@@ -1668,7 +1669,6 @@ Ftr_makePermsJointAbfSubset (
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
-  const double & maxL10TrueAbf,
   const gsl_rng * & rngPerm,
   const gsl_rng * & rngTrick,
   const gsl_permutation * perm)
@@ -1677,6 +1677,8 @@ Ftr_makePermsJointAbfSubset (
   double maxL10PermAbf, l10Abf;
   bool shuffleOnly = false;
   Snp iSnp;
+  
+  iFtr.maxL10TrueAbf = Ftr_getMaxL10TrueAbfSubset (iFtr);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1704,7 +1706,7 @@ Ftr_makePermsJointAbfSubset (
 	maxL10PermAbf = l10Abf;
     }
     
-    if (maxL10PermAbf >= maxL10TrueAbf)
+    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
       ++iFtr.jointPermPval;
     if (trick != 0 && iFtr.jointPermPval == 11)
     {
@@ -1726,7 +1728,6 @@ Ftr_makePermsJointAbfAll (
   const vector<vector<double> > & grid,
   const size_t & nbPerms,
   const int & trick,
-  const double & maxL10TrueAbf,
   const gsl_rng * & rngPerm,
   const gsl_rng * & rngTrick,
   const gsl_permutation * perm)
@@ -1735,6 +1736,8 @@ Ftr_makePermsJointAbfAll (
   double maxL10PermAbf, l10Abf;
   bool shuffleOnly = false;
   Snp iSnp;
+  
+  iFtr.maxL10TrueAbf = Ftr_getMaxL10TrueAbfAll (iFtr);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1762,7 +1765,7 @@ Ftr_makePermsJointAbfAll (
 	maxL10PermAbf = l10Abf;
     }
     
-    if (maxL10PermAbf >= maxL10TrueAbf)
+    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
       ++iFtr.jointPermPval;
     if (trick != 0 && iFtr.jointPermPval == 11)
     {
@@ -1788,8 +1791,6 @@ Ftr_makePermsJoint (
   const gsl_rng * & rngPerm,
   const gsl_rng * & rngTrick)
 {
-//  clock_t timeBegin = clock();
-  double maxL10TrueAbf;
   gsl_permutation * perm = NULL;
   
   perm = gsl_permutation_calloc (vvSampleIdxPhenos[0].size());
@@ -1803,30 +1804,18 @@ Ftr_makePermsJoint (
   iFtr.nbPermsSoFar = 0;
   
   if (whichPermBf.compare("const") == 0)
-  {
-    maxL10TrueAbf = Ftr_getMaxL10TrueAbfConst (iFtr);
-    iFtr.maxL10TrueAbf = maxL10TrueAbf;
     Ftr_makePermsJointAbfConst (iFtr, vvSampleIdxPhenos,
 				vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-				grid, nbPerms, trick, maxL10TrueAbf,
-				rngPerm, rngTrick, perm);
-  }
+				grid, nbPerms, trick, rngPerm, rngTrick, perm);
   else if (whichPermBf.compare("subset") == 0)
-  {
-    maxL10TrueAbf = Ftr_getMaxL10TrueAbfSubset (iFtr);
     Ftr_makePermsJointAbfSubset (iFtr, vvSampleIdxPhenos,
 				 vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-				 grid, nbPerms, trick, maxL10TrueAbf,
-				 rngPerm, rngTrick, perm);
-  }
+				 grid, nbPerms, trick, rngPerm, rngTrick,
+				 perm);
   else if (whichPermBf.compare("all") == 0)
-  {
-    maxL10TrueAbf = Ftr_getMaxL10TrueAbfAll (iFtr);
     Ftr_makePermsJointAbfAll (iFtr, vvSampleIdxPhenos,
 			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-			      grid, nbPerms, trick, maxL10TrueAbf,
-			      rngPerm, rngTrick, perm);
-  }
+			      grid, nbPerms, trick, rngPerm, rngTrick, perm);
   
   if (iFtr.nbPermsSoFar == nbPerms)
     iFtr.jointPermPval /= (nbPerms + 1);
@@ -1836,7 +1825,6 @@ Ftr_makePermsJoint (
 				       (11 / ((double) (iFtr.nbPermsSoFar + 1))));
   
   gsl_permutation_free (perm);
-//  cout << endl << setprecision(8) << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0) << endl;
 }
 
 void
@@ -2684,9 +2672,10 @@ inferAssos (
     cout << "look for association between each pair feature-SNP ..." << endl
 	 << "anchor=" << anchor << " lenCis=" << lenCis << endl << flush;
   
+  clock_t timeBegin = clock();
   size_t nbAnalyzedPairs = 0;
-  
   size_t countFtrs = 0;
+  
   for (map<string, Ftr>::iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
@@ -2709,7 +2698,8 @@ inferAssos (
   if (verbose > 0)
   {
     if(verbose == 1)
-      cout << endl;
+      cout << " (" << setprecision(8) << (clock() - timeBegin) /
+	(double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
     cout << "nb of analyzed feature-SNP pairs: " << nbAnalyzedPairs << endl;
   }
 }
@@ -2733,6 +2723,7 @@ makePermsSep (
   
   for (size_t s = 0; s < nbSubgroups; ++s)
   {
+    clock_t timeBegin = clock();
     gsl_rng_set (rngPerm, seed);
     if (trick != 0)
       gsl_rng_set (rngTrick, seed);
@@ -2752,7 +2743,8 @@ makePermsSep (
 				   nbPerms, trick, s, rngPerm, rngTrick);
     }
     if (verbose == 1)
-      cout << endl << flush;
+      cout << " (" << setprecision(8) << (clock() - timeBegin) /
+	(double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
   }
 }
 
@@ -2772,6 +2764,7 @@ makePermsJoint (
   const gsl_rng * rngTrick,
   const int & verbose)
 {
+  clock_t timeBegin = clock();
   gsl_rng_set (rngPerm, seed);
   if (trick != 0)
     gsl_rng_set (rngTrick, seed);
@@ -2788,7 +2781,8 @@ makePermsJoint (
 			  nbPerms, trick, whichPermBf, rngPerm, rngTrick);
   }
   if (verbose == 1)
-    cout << endl << flush;
+    cout << " (" << setprecision(8) << (clock() - timeBegin) /
+      (double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
 }
 
 void
