@@ -164,7 +164,12 @@ openFile (
   fileStream.open (pathToFile.c_str());
   if (! fileStream.is_open())
   {
-    cerr << "ERROR: can't open file " << pathToFile << " to read" << endl;
+    cerr << "ERROR: can't open file " << pathToFile << " to read ("
+    	 << boolalpha
+    	 << "fail=" << fileStream.fail()
+    	 << ", bad=" << fileStream.bad()
+	 << noboolalpha
+    	 << ")" << endl;
     exit (1);
   }
 }
@@ -177,7 +182,12 @@ openFile (
   fileStream.open (pathToFile.c_str());
   if (! fileStream.is_open())
   {
-    cerr << "ERROR: can't open file " << pathToFile << " to write" << endl;
+    cerr << "ERROR: can't open file " << pathToFile << " to write ("
+    	 << boolalpha
+    	 << "fail=" << fileStream.fail()
+    	 << ", bad=" << fileStream.bad()
+	 << noboolalpha
+    	 << ")" << endl;
     exit (1);
   }
 }
@@ -190,9 +200,67 @@ openFile (
   fileStream.open (pathToFile.c_str());
   if (! fileStream.is_open())
   {
-    cerr << "ERROR: can't open file " << pathToFile << " to write" << endl;
+    cerr << "ERROR: can't open file " << pathToFile << " to write ("
+    	 << boolalpha
+    	 << "fail=" << fileStream.fail()
+    	 << ", bad=" << fileStream.bad()
+	 << noboolalpha
+    	 << ")" << endl;
     exit (1);
   }
+}
+
+void
+closeFile (
+  const string & pathToFile,
+  ifstream & fileStream)
+{
+  // http://gehrcke.de/2011/06/reading-files-in-c-using-ifstream-dealing-correctly-with-badbit-failbit-eofbit-and-perror/comment-page-1/#comment-6060
+  if (fileStream.bad())
+  {
+    cerr << "ERROR: stream of file " << pathToFile
+	 << " has badbit=true before closing" << endl;
+    exit (1);
+  }
+  fileStream.close ();
+}
+
+void
+closeFile (
+  const string & pathToFile,
+  ofstream & fileStream)
+{
+  if (! fileStream.good())
+  {
+    cerr << "ERROR: stream of file " << pathToFile
+	 << " returns good()=false before closing" << endl
+	 << boolalpha
+	 << "fail()=" << fileStream.fail()
+	 << " bad()=" << fileStream.bad()
+	 << " eof()=" << fileStream.eof()
+	 << noboolalpha << endl;
+    exit (1);
+  }
+  fileStream.close ();
+}
+
+void
+closeFile (
+  const string & pathToFile,
+  ogzstream & fileStream)
+{
+  if (! fileStream.good())
+  {
+    cerr << "ERROR: stream of file " << pathToFile
+	 << " returns good()=false before closing" << endl
+	 << boolalpha
+	 << "fail()=" << fileStream.fail()
+	 << " bad()=" << fileStream.bad()
+	 << " eof()=" << fileStream.eof()
+	 << noboolalpha << endl;
+    exit (1);
+  }
+  fileStream.close ();
 }
 
 /** \brief Load a one-column file.
@@ -216,11 +284,8 @@ loadOneColumnFile (
   if (verbose > 0)
     cout <<"load file " << inFile << " ..." << endl;
   
-  while (stream.good())
+  while (getline (stream, line))
   {
-    getline (stream, line);
-    if (line.empty())
-      break;
     line_id++;
     split (line, " \t,", tokens);
     if (tokens.size() != 1)
@@ -264,11 +329,8 @@ loadTwoColumnFile (
   if (verbose > 0)
     cout <<"load file " << inFile << " ..." << endl;
   
-  while (stream.good())
+  while (getline (stream, line))
   {
-    getline (stream, line);
-    if (line.empty())
-      break;
     line_id++;
     split (line, " \t,", tokens);
     if (tokens.size() != 2)
@@ -313,11 +375,8 @@ loadTwoColumnFile (
     if (verbose > 0)
       cout <<"load file " << inFile << " ..." << endl;
     
-    while (stream.good())
+    while (getline (stream, line))
     {
-      getline (stream, line);
-      if (line.empty())
-	break;
       line_id++;
       split (line, " \t,", tokens);
       if (tokens.size() != 2)
@@ -363,11 +422,8 @@ loadOneColumnFileAsNumbers (
   if (verbose > 0)
     cout <<"load file " << inFile << " ..." << endl;
   
-  while (stream.good())
+  while (getline (stream, line))
   {
-    getline (stream, line);
-    if (line.empty())
-      break;
     line_id++;
     split (line, " \t,", tokens);
     if (tokens.size() != 1)
@@ -788,28 +844,27 @@ double
 getMaxMemUsedByProcess (void)
 {
   double vmHWM = 0.0;
+  string pathToFile = "/proc/self/status";
   
-  if (! doesFileExist ("/proc/self/status"))
+  if (! doesFileExist (pathToFile))
   {
-    cerr << "WARNING: /proc/self/stat doesn't exist,"
+    cerr << "WARNING: " << pathToFile << " doesn't exist,"
 	 << " can't track memory usage" << endl << flush;
   }
   
   string line;
   ifstream stream;
   vector<string> tokens;
-  openFile ("/proc/self/status", stream);
-  while (stream.good())
+  openFile (pathToFile, stream);
+  while (getline (stream, line))
   {
-    getline (stream, line);
-    if (line.empty())
-      break;
     if (line.find("VmHWM") != string::npos)
     {
       split (line, ":", tokens);
       if (tokens.size() != 2)
       {
-	cerr << "ERROR: /proc/self/status has a different format" << endl;
+	cerr << "ERROR: file " << pathToFile
+	     << " has a different format" << endl;
 	exit (1);
       }
       replaceAll (tokens[1], " ", "");
@@ -818,7 +873,7 @@ getMaxMemUsedByProcess (void)
       break;
     }
   }
-  stream.close();
+  closeFile (pathToFile, stream);
   
   return vmHWM;
 }

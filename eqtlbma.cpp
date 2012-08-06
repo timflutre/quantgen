@@ -179,7 +179,7 @@ parseArgs (
   int & verbose)
 {
   int c = 0;
-  while (1)
+  while (true)
   {
     static struct option long_options[] =
       {
@@ -452,11 +452,8 @@ loadGrid (
   vector<string> tokens;
   string line;
   openFile (gridFile, gridStream);
-  while (gridStream.good())
+  while (getline (gridStream, line))
   {
-    getline (gridStream, line);
-    if (line.empty())
-      break;
     split (line, " \t", tokens);
     if (tokens.size() != 2)
     {
@@ -469,7 +466,7 @@ loadGrid (
     grid_values.push_back (atof (tokens[1].c_str()));
     grid.push_back (grid_values);
   }
-  gridStream.close();
+  closeFile (gridFile, gridStream);
   
   if (verbose > 0)
     cout << "grid size: " << grid.size() << endl;
@@ -1852,7 +1849,7 @@ loadSamplesAllPhenos (
   {
     openFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
-    stream.close();
+    closeFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
     if (s == 0)
     {
       split (line, " \t", vSamples);
@@ -1912,7 +1909,7 @@ loadSamplesAllGenos (
     }
     openFile (mGenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
-    stream.close();
+    closeFile (mGenoPaths.find(vSubgroups[s])->second, stream);
     split (line, " \t", tokens);
     
     if (tokens[0].compare("chr") == 0) // IMPUTE format
@@ -2064,11 +2061,8 @@ loadPhenos (
       nbSamples = tokens.size();
     nbLines = 1;
     
-    while (true)
+    while (getline (phenoStream, line))
     {
-      getline (phenoStream, line);
-      if (line.empty())
-	break;
       ++nbLines;
       split (line, " \t", tokens);
       if (tokens.size() != nbSamples + 1)
@@ -2114,7 +2108,7 @@ loadPhenos (
       }
     }
     
-    phenoStream.close();
+    closeFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
 	   << " features" << endl << flush;
@@ -2144,11 +2138,8 @@ loadFtrInfo (
   openFile (ftrCoordsFile, ftrCoordsStream);
   string line;
   vector<string> tokens;
-  while (true)
+  while (getline (ftrCoordsStream, line))
   {
-    getline (ftrCoordsStream, line);
-    if (line.empty())
-      break;
     split (line, " \t", tokens);
     if (mFtrs.find(tokens[3]) == mFtrs.end())
       continue;
@@ -2161,7 +2152,7 @@ loadFtrInfo (
 					vector<Ftr*> ()));
     mChr2VecPtFtrs[tokens[0]].push_back (&(mFtrs[tokens[3]]));
   }
-  ftrCoordsStream.close();
+  closeFile (ftrCoordsFile, ftrCoordsStream);
   
   // check that all features have coordinates
   map<string, Ftr>::iterator it = mFtrs.begin();
@@ -2217,11 +2208,8 @@ loadGenosAndSnpInfo (
     nbSamples = (size_t) (tokens.size() - 5) / 3;
     nbLines = 1;
     
-    while (true)
+    while (getline (genoStream, line))
     {
-      getline (genoStream, line);
-      if (line.empty())
-	break;
       ++nbLines;
       split (line, " \t", tokens);
       if (tokens.size() != (size_t) (3 * nbSamples + 5))
@@ -2297,7 +2285,7 @@ loadGenosAndSnpInfo (
       }
     }
     
-    genoStream.close();
+    closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
 	   << " SNPs" << endl << flush;
@@ -2345,11 +2333,8 @@ loadGenos (
       nbSamples = tokens.size();
     nbLines = 1;
     
-    while (true)
+    while (getline (genoStream, line))
     {
-      getline (genoStream, line);
-      if (line.empty())
-	break;
       ++nbLines;
       split (line, " \t", tokens);
       if (tokens.size() != nbSamples + 1)
@@ -2412,7 +2397,7 @@ loadGenos (
       }
     }
     
-    genoStream.close();
+    closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
 	   << " SNPs (loaded in " << setprecision(8)
@@ -2444,11 +2429,8 @@ loadSnpInfo (
   openFile (snpCoordsFile, snpCoordsStream);
   string line;
   vector<string> tokens;
-  while (true)
+  while (getline (snpCoordsStream, line))
   {
-    getline (snpCoordsStream, line);
-    if (line.empty())
-      break;
     split (line, " \t", tokens);
     if (mSnps.find(tokens[3]) == mSnps.end())
       continue;
@@ -2460,7 +2442,7 @@ loadSnpInfo (
 					vector<Snp*> ()));
     mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[3]]));
   }
-  snpCoordsStream.close();
+  closeFile (snpCoordsFile, snpCoordsStream);
   
   // check that all SNPs have coordinates
   map<string, Snp>::iterator it = mSnps.begin();
@@ -2559,11 +2541,8 @@ loadCovarsFromFiles (
     
     // parse the rest of the file into a temporary container
     map<string, vector<double> > mSample2Covars;
-    while (covarStream.good())
+    while (getline (covarStream, line))
     {
-      getline (covarStream, line);
-      if (line.empty())
-	break;
       ++nbLines;
       split (line, " \t", tokens);
       if (tokens.size() != vCovars.size() + 1)
@@ -2589,7 +2568,7 @@ loadCovarsFromFiles (
       for (size_t c = 0; c < vCovars.size(); ++c)
 	mSample2Covars[tokens[0]][c] = atof (tokens[(c+1)].c_str());
     }
-    covarStream.close();
+    closeFile (mCovarPaths.find(vSubgroups[s])->second, covarStream);
     
     // check that all samples with covar from the given subgroup also have
     // a genotype and a phenotype
@@ -2867,12 +2846,12 @@ writeResSstats (
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    stringstream ss;
-    ss << outPrefix << "_sumstats_" << vSubgroups[s] << ".txt.gz";
+    stringstream ssOutFile;
+    ssOutFile << outPrefix << "_sumstats_" << vSubgroups[s] << ".txt.gz";
     if (verbose > 0)
-      cout << "file " << ss.str() << endl << flush;
+      cout << "file " << ssOutFile.str() << endl << flush;
     ogzstream outStream;
-    openFile (ss.str(), outStream);
+    openFile (ssOutFile.str(), outStream);
     
     outStream << "ftr snp maf n pve sigmahat"
 	      << " betahat.geno sebetahat.geno betapval.geno";
@@ -2916,7 +2895,7 @@ writeResSstats (
 	}
     }
     
-    outStream.close();
+    closeFile (ssOutFile.str(), outStream);
   }
 }
 
@@ -2954,7 +2933,7 @@ writeResSepPermPval (
 		<< endl;
     }
     
-    outStream.close();
+    closeFile (ssOutFile.str(), outStream);
   }
 }
 
@@ -3036,7 +3015,7 @@ writeResAbfsUnweighted (
     }
   }
   
-  outStream.close();
+  closeFile (ssOutFile.str(), outStream);
 }
 
 void
@@ -3138,7 +3117,7 @@ writeResAbfsWeighted (
     }
   }
   
-  outStream.close();
+  closeFile (ssOutFile.str(), outStream);
 }
 
 void
@@ -3169,7 +3148,7 @@ writeResJointPermPval (
 	      << " " << itF->second.maxL10TrueAbf
 	      << endl;
   
-  outStream.close();
+  closeFile (ssOutFile.str(), outStream);
 }
 
 void

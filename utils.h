@@ -54,6 +54,12 @@ void openFile (const string & pathToFile, ofstream & fileStream);
 
 void openFile (const string & pathToFile, ogzstream & fileStream);
 
+void closeFile (const string & pathToFile, ifstream & fileStream);
+
+void closeFile (const string & pathToFile, ofstream & fileStream);
+
+void closeFile (const string & pathToFile, ogzstream & fileStream);
+
 vector<string> loadOneColumnFile (const string & inFile,
 				  const int & verbose);
 
