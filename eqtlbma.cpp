@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -DEQTLBMA_MAIN gzstream/gzstream.C utils.cpp eqtlbma.cpp -lgsl -lgslcblas -lz -o eqtlbma
+ *  g++ -Wall -DEQTLBMA_MAIN utils.cpp eqtlbma.cpp -lgsl -lgslcblas -lz -o eqtlbma
  */
 
 #include <cmath>
@@ -692,6 +692,7 @@ struct Ftr
   vector<ResFtrSnp> vResFtrSnps;
   vector<double> vPermPvalsSep; // permutation P-values in each subgroup
   vector<size_t> vNbPermsSoFar; // nb of permutations in each subgroup
+  vector<double> vMinTruePvals; // min true P-value over SNPs in each subgroup
   double jointPermPval; // permutation P-value of the joint analysis
   size_t nbPermsSoFar;
   double maxL10TrueAbf;
@@ -1329,6 +1330,7 @@ Ftr_init (
   }
   iFtr.vPermPvalsSep.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
   iFtr.vNbPermsSoFar.assign (nbSubgroups, 0);
+  iFtr.vMinTruePvals.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
   iFtr.jointPermPval = numeric_limits<double>::quiet_NaN();
   iFtr.nbPermsSoFar = 0;
   iFtr.maxL10TrueAbf = numeric_limits<double>::quiet_NaN();
@@ -1413,21 +1415,25 @@ Ftr_inferAssos (
   }
 }
 
-double
-Ftr_getMinTrueBetaPvals (
-  const Ftr & iFtr,
+/** \brief Retrieve the lowest genotype P-value over SNPs of the given feature
+ *  for the given subgroup
+ */
+void
+Ftr_findMinTrueGenoPvals (
+  Ftr & iFtr,
   const size_t & s)
 {
-  double minTrueBetaPval = 1, trueBetaPval;
-  for (vector<ResFtrSnp>::const_iterator it = iFtr.vResFtrSnps.begin();
-       it != iFtr.vResFtrSnps.end(); ++it)
-    if (it->vNs[s] > 2)
-    {
-      trueBetaPval = (it->vMapPredictors[s].find("genotype")->second)[2];
-      if (trueBetaPval < minTrueBetaPval)
-	minTrueBetaPval = trueBetaPval;
-    }
-  return minTrueBetaPval;
+  if (iFtr.vResFtrSnps.size() > 0 && iFtr.vResFtrSnps[0].vNs[s] > 2)
+  {
+    iFtr.vMinTruePvals[s] =
+      iFtr.vResFtrSnps[0].vMapPredictors[s]["genotype"][2];
+    for (size_t snpId = 1; snpId < iFtr.vResFtrSnps.size(); ++snpId)
+      if (iFtr.vResFtrSnps[snpId].vNs[s] > 2 &&
+	  iFtr.vResFtrSnps[snpId].vMapPredictors[s]["genotype"][2]
+	  < iFtr.vMinTruePvals[s])
+	iFtr.vMinTruePvals[s] =
+	  iFtr.vResFtrSnps[snpId].vMapPredictors[s]["genotype"][2];
+  }
 }
 
 void
@@ -1444,15 +1450,13 @@ Ftr_makePermsSepOneSubgrp (
   const gsl_rng * & rngTrick)
 {
 //  clock_t timeBegin = clock();
-  bool shuffleOnly;
-  double minTrueBetaPval, minPermBetaPval;
   gsl_permutation * perm = NULL;
+  double minPermBetaPval;
+  bool shuffleOnly = false;
   Snp iSnp;
   
+  Ftr_findMinTrueGenoPvals (iFtr, s);
   iFtr.vPermPvalsSep[s] = 1;
-  iFtr.vNbPermsSoFar[s] = 0;
-  minTrueBetaPval = Ftr_getMinTrueBetaPvals (iFtr, s);
-  shuffleOnly = false;
   
   perm = gsl_permutation_calloc (vvSampleIdxPhenos[s].size());
   if (perm == NULL)
@@ -1485,7 +1489,7 @@ Ftr_makePermsSepOneSubgrp (
 	minPermBetaPval = iResFtrSnp.vMapPredictors[0]["genotypes"][2];
     }
     
-    if (minPermBetaPval <= minTrueBetaPval)
+    if (minPermBetaPval <= iFtr.vMinTruePvals[s])
       ++(iFtr.vPermPvalsSep[s]);
     if (trick != 0 && iFtr.vPermPvalsSep[s] == 11)
     {
@@ -2846,21 +2850,23 @@ writeResSstats (
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    stringstream ssOutFile;
+    stringstream ssOutFile, ssTxt;
     ssOutFile << outPrefix << "_sumstats_" << vSubgroups[s] << ".txt.gz";
     if (verbose > 0)
       cout << "file " << ssOutFile.str() << endl << flush;
-    ogzstream outStream;
-    openFile (ssOutFile.str(), outStream);
+    gzFile outStream;
+    openFile (ssOutFile.str(), outStream, "wb");
     
-    outStream << "ftr snp maf n pve sigmahat"
-	      << " betahat.geno sebetahat.geno betapval.geno";
+    ssTxt << "ftr snp maf n pve sigmahat"
+	  << " betahat.geno sebetahat.geno betapval.geno";
     for (map<string, vector<double> >::const_iterator it =
 	   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
-      outStream << " betahat." << it->first
-		<< " sebetahat." << it->first
-		<< " betapval." << it->first;
-    outStream << endl;
+      ssTxt << " betahat." << it->first
+	    << " sebetahat." << it->first
+	    << " betapval." << it->first;
+    ssTxt << endl;
+    size_t lineId = 1;
+    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
 	 itF != mFtrs.end(); ++itF)
@@ -2870,28 +2876,28 @@ writeResSstats (
 	   itP != ptF->vResFtrSnps.end(); ++itP)
 	if (itP->vNs[s] > 2)
 	{
-	  outStream << ptF->name
-		    << " " << itP->snp
-		    << " " << mSnps.find(itP->snp)->second.vMafs[s]
-		    << " " << itP->vNs[s]
-		    << " " << itP->vPves[s]
-		    << " " << itP->vSigmahats[s]
-		    << " " << (itP->vMapPredictors[s].find("genotype")->
-			       second)[0]
-		    << " " << (itP->vMapPredictors[s].find("genotype")->
-			       second)[1]
-		    << " " << (itP->vMapPredictors[s].find("genotype")->
-			       second)[2];
+	  ssTxt.str("");
+	  ++lineId;
+	  ssTxt << ptF->name
+		<< " " << itP->snp
+		<< " " << mSnps.find(itP->snp)->second.vMafs[s]
+		<< " " << itP->vNs[s]
+		<< " " << itP->vPves[s]
+		<< " " << itP->vSigmahats[s]
+		<< " " << (itP->vMapPredictors[s].find("genotype")->second)[0]
+		<< " " << (itP->vMapPredictors[s].find("genotype")->second)[1]
+		<< " " << (itP->vMapPredictors[s].find("genotype")->second)[2];
 	  for (map<string, vector<double> >::const_iterator itC =
 		 vSbgrp2Covars[s].begin(); itC != vSbgrp2Covars[s].end();
 	       ++itC)
-	    outStream << " " << (itP->vMapPredictors[s].find(itC->first)->
-				 second)[0]
-		      << " " << (itP->vMapPredictors[s].find(itC->first)->
-				 second)[1]
-		      << " " << (itP->vMapPredictors[s].find(itC->first)->
-				 second)[2];
-	  outStream << endl;
+	    ssTxt << " " << (itP->vMapPredictors[s].find(itC->first)->
+			     second)[0]
+		  << " " << (itP->vMapPredictors[s].find(itC->first)->
+			     second)[1]
+		  << " " << (itP->vMapPredictors[s].find(itC->first)->
+			     second)[2];
+	  ssTxt << endl;
+	  gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
 	}
     }
     
@@ -2912,25 +2918,30 @@ writeResSepPermPval (
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    stringstream ssOutFile;
+    stringstream ssOutFile, ssTxt;
     ssOutFile << outPrefix << "_permPval_" << vSubgroups[s] << ".txt.gz";
     if (verbose > 0)
       cout << "file " << ssOutFile.str() << endl << flush;
-    ogzstream outStream;
-    openFile (ssOutFile.str(), outStream);
+    gzFile outStream;
+    openFile (ssOutFile.str(), outStream, "wb");
     
-    outStream << "ftr nbSnps permPval nbPerms";
-    outStream << endl;
+    ssTxt << "ftr nbSnps permPval nbPerms minTruePval" << endl;
+    size_t lineId = 1;
+    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
 	 itF != mFtrs.end(); ++itF)
     {
       const Ftr * ptF = &(itF->second);
-      outStream << ptF->name
-		<< " " << ptF->vPtCisSnps.size()
-		<< " " << ptF->vPermPvalsSep[s]
-		<< " " << ptF->vNbPermsSoFar[s]
-		<< endl;
+      ssTxt.str("");
+      ++lineId;
+      ssTxt << ptF->name
+	    << " " << ptF->vPtCisSnps.size()
+	    << " " << ptF->vPermPvalsSep[s]
+	    << " " << ptF->vNbPermsSoFar[s]
+	    << " " << ptF->vMinTruePvals[s]
+	    << endl;
+      gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     }
     
     closeFile (ssOutFile.str(), outStream);
@@ -2951,18 +2962,20 @@ writeResAbfsUnweighted (
 	 << endl << flush;
   
   gsl_combination * comb;
-  stringstream ssOutFile, ssConfig;
+  stringstream ssOutFile, ssConfig, ssTxt;
   ssOutFile << outPrefix << "_abfs_unweighted.txt.gz";
   if (verbose > 0)
     cout << "file " << ssOutFile.str() << endl << flush;
-  ogzstream outStream;
-  openFile (ssOutFile.str(), outStream);
+  gzFile outStream;
+  openFile (ssOutFile.str(), outStream, "wb");
   
   // write header line
-  outStream << "ftr snp config";
+  ssTxt << "ftr snp config";
   for (size_t i = 0; i < grid.size(); ++i)
-    outStream << " ABFgrid" << (i+1);
-  outStream << endl;
+    ssTxt << " ABFgrid" << (i+1);
+  ssTxt << endl;
+  size_t lineId = 1;
+  gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   // write results
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
@@ -2973,12 +2986,15 @@ writeResAbfsUnweighted (
     for (vector<ResFtrSnp>::const_iterator itP = ptF->vResFtrSnps.begin();
 	 itP != ptF->vResFtrSnps.end(); ++itP)
     {
-      outStream << ptF->name
-		<< " " << itP->snp
-		<< " const";
+      ssTxt.str("");
+      ++lineId;
+      ssTxt << ptF->name
+	    << " " << itP->snp
+	    << " const";
       for (size_t i = 0; i < grid.size(); ++i)
-	outStream << " " << itP->mUnweightedAbfs.find("const")->second[i];
-      outStream << endl;
+	ssTxt << " " << itP->mUnweightedAbfs.find("const")->second[i];
+      ssTxt << endl;
+      gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
       
       if (whichBfs.compare("const") != 0)
       {
@@ -2998,13 +3014,16 @@ writeResAbfsUnweighted (
 	    if (comb->k > 1)
 	      for (size_t i = 1; i < k; ++i)
 		ssConfig << "-" << gsl_combination_get (comb, i) + 1;
-	    outStream << ptF->name
-		      << " " << itP->snp
-		      << " " << ssConfig.str();
+	    ssTxt.str("");
+	    ++lineId;
+	    ssTxt << ptF->name
+		  << " " << itP->snp
+		  << " " << ssConfig.str();
 	    for (size_t i = 0; i < grid.size(); ++i)
-	      outStream << " " << itP->mUnweightedAbfs.find(ssConfig.str())->
+	      ssTxt << " " << itP->mUnweightedAbfs.find(ssConfig.str())->
 		second[i];
-	    outStream << endl;
+	    ssTxt << endl;
+	    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
 	    if (gsl_combination_next (comb) != GSL_SUCCESS)
 	      break;
 	  }
@@ -3031,15 +3050,15 @@ writeResAbfsWeighted (
 	 << endl << flush;
   
   gsl_combination * comb;
-  stringstream ssOutFile, ssConfig;
+  stringstream ssOutFile, ssConfig, ssTxt;
   ssOutFile << outPrefix << "_abfs_weighted.txt.gz";
   if (verbose > 0)
     cout << "file " << ssOutFile.str() << endl << flush;
-  ogzstream outStream;
-  openFile (ssOutFile.str(), outStream);
+  gzFile outStream;
+  openFile (ssOutFile.str(), outStream, "wb");
   
   // write header line
-  outStream << "ftr snp nb.subgroups nb.samples abf.const abf.const.fix abf.const.maxh";
+  ssTxt << "ftr snp nb.subgroups nb.samples abf.const abf.const.fix abf.const.maxh";
   if (whichBfs.compare("const") != 0)
   {
     for (size_t k = 1; k < nbSubgroups; ++k)
@@ -3052,10 +3071,10 @@ writeResAbfsWeighted (
       }
       while (true)
       {
-	outStream << " abf." << gsl_combination_get (comb, 0) + 1;
+	ssTxt << " abf." << gsl_combination_get (comb, 0) + 1;
 	if (comb->k > 1)
 	  for (size_t i = 1; i < k; ++i)
-	    outStream << "-" << gsl_combination_get (comb, i) + 1;
+	    ssTxt << "-" << gsl_combination_get (comb, i) + 1;
 	if (gsl_combination_next (comb) != GSL_SUCCESS)
 	  break;
       }
@@ -3063,7 +3082,9 @@ writeResAbfsWeighted (
 	break;
     }
   }
-  outStream << endl;
+  ssTxt << endl;
+  size_t lineId = 1;
+  gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   // write results
   size_t n;
@@ -3077,14 +3098,15 @@ writeResAbfsWeighted (
       n = accumulate (itP->vNs.begin(), itP->vNs.end(), 0);
       if (n > 2)
       {
-	outStream << ptF->name
-		  << " " << itP->snp
-		  << " " << count_if (itP->vNs.begin(), itP->vNs.end(),
-				      isNonZero)
-		  << " " << n
-		  << " " << itP->mWeightedAbfs.find("const")->second
-		  << " " << itP->mWeightedAbfs.find("const-fix")->second
-		  << " " << itP->mWeightedAbfs.find("const-maxh")->second;
+	ssTxt.str("");
+	++lineId;
+	ssTxt << ptF->name
+	      << " " << itP->snp
+	      << " " << count_if (itP->vNs.begin(), itP->vNs.end(), isNonZero)
+	      << " " << n
+	      << " " << itP->mWeightedAbfs.find("const")->second
+	      << " " << itP->mWeightedAbfs.find("const-fix")->second
+	      << " " << itP->mWeightedAbfs.find("const-maxh")->second;
 	if (whichBfs.compare("const") != 0)
 	{
 	  for (size_t k = 1; k < nbSubgroups; ++k)
@@ -3103,7 +3125,7 @@ writeResAbfsWeighted (
 	      if (comb->k > 1)
 		for (size_t i = 1; i < k; ++i)
 		  ssConfig << "-" << gsl_combination_get (comb, i) + 1;
-	      outStream << " " << itP->mWeightedAbfs.find(ssConfig.str())->
+	      ssTxt << " " << itP->mWeightedAbfs.find(ssConfig.str())->
 		second;
 	      if (gsl_combination_next (comb) != GSL_SUCCESS)
 		break;
@@ -3112,7 +3134,8 @@ writeResAbfsWeighted (
 	      break;
 	  }
 	}
-	outStream << endl;
+	ssTxt << endl;
+	gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
       }
     }
   }
@@ -3130,23 +3153,30 @@ writeResJointPermPval (
     cout << "write results of feature-level P-values, all subgroups jointly ..."
 	 << endl << flush;
   
-  stringstream ssOutFile;
+  stringstream ssOutFile, ssTxt;
   ssOutFile << outPrefix << "_jointPermPvals.txt.gz";
   if (verbose > 0)
     cout << "file " << ssOutFile.str() << endl << flush;
-  ogzstream outStream;
-  openFile (ssOutFile.str(), outStream);
+  gzFile outStream;
+  openFile (ssOutFile.str(), outStream, "wb");
   
-  outStream << "ftr nbSnps jointPermPval nbPerms maxL10TrueAbf" << endl;
+  ssTxt << "ftr nbSnps jointPermPval nbPerms maxL10TrueAbf" << endl;
+  size_t lineId = 1;
+  gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
-    outStream << itF->second.name
-	      << " " << itF->second.vPtCisSnps.size()
-	      << " " << itF->second.jointPermPval
-	      << " " << itF->second.nbPermsSoFar
-	      << " " << itF->second.maxL10TrueAbf
-	      << endl;
+  {
+    ssTxt.str("");
+    ++lineId;
+    ssTxt << itF->second.name
+	  << " " << itF->second.vPtCisSnps.size()
+	  << " " << itF->second.jointPermPval
+	  << " " << itF->second.nbPermsSoFar
+	  << " " << itF->second.maxL10TrueAbf
+	  << endl;
+    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+  }
   
   closeFile (ssOutFile.str(), outStream);
 }
