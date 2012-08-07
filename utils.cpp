@@ -1,7 +1,7 @@
 /** \file utils.cpp
  *
- *  `utils.cpp' gathers functions useful for any programs.
- *  Copyright (C) 2011  T. Flutre
+ *  `utils.cpp' gathers functions useful for any program.
+ *  Copyright (C) 2011-2012  T. Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <cerrno>
 
 #include <sstream>
 #include <iostream>
@@ -195,17 +196,15 @@ openFile (
 void
 openFile (
   const string & pathToFile,
-  ogzstream & fileStream)
+  gzFile & fileStream,
+  const char * mode)
 {
-  fileStream.open (pathToFile.c_str());
-  if (! fileStream.is_open())
+  fileStream = gzopen (pathToFile.c_str(), mode);
+  if (fileStream == NULL)
   {
-    cerr << "ERROR: can't open file " << pathToFile << " to write ("
-    	 << boolalpha
-    	 << "fail=" << fileStream.fail()
-    	 << ", bad=" << fileStream.bad()
-	 << noboolalpha
-    	 << ")" << endl;
+    cerr << "ERROR: can't open file " << pathToFile
+	 << " with mode " << *mode
+    	 << " (errno=" << errno << ")" << endl;
     exit (1);
   }
 }
@@ -247,20 +246,30 @@ closeFile (
 void
 closeFile (
   const string & pathToFile,
-  ogzstream & fileStream)
+  gzFile & fileStream)
 {
-  if (! fileStream.good())
+  int ret = gzclose (fileStream);
+  if (ret != Z_OK)
   {
-    cerr << "ERROR: stream of file " << pathToFile
-	 << " returns good()=false before closing" << endl
-	 << boolalpha
-	 << "fail()=" << fileStream.fail()
-	 << " bad()=" << fileStream.bad()
-	 << " eof()=" << fileStream.eof()
-	 << noboolalpha << endl;
+    cerr << "ERROR: can't close the file " << pathToFile
+	 << ", gzclose() returned " << ret << endl;
     exit (1);
   }
-  fileStream.close ();
+}
+
+void
+gzwriteLine (
+  gzFile & fileStream,
+  const string & line,
+  const string & pathToFile,
+  const size_t & lineId)
+{
+  if (gzprintf (fileStream, "%s", line.c_str()) <= 0)
+  {
+    cerr << "ERROR: can't write line " << lineId
+	 << " in file " << pathToFile << endl;
+    exit (1);
+  }
 }
 
 /** \brief Load a one-column file.

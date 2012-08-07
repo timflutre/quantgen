@@ -1,7 +1,7 @@
 /** \file utils.h
  *
- *  `utils.cpp' gathers functions useful for any program (requires the GSL).
- *  Copyright (C) 2012  T. Flutre
+ *  `utils.cpp' gathers functions useful for any program.
+ *  Copyright (C) 2011-2012  T. Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -31,7 +31,7 @@ using namespace std;
 #include <gsl/gsl_sort.h>
 #include <gsl/gsl_cdf.h>
 
-#include "gzstream/gzstream.h"
+#include "zlib.h"
 
 vector<string> & split (const string & s, char delim, vector<string> & tokens);
 
@@ -52,13 +52,17 @@ void openFile (const string & pathToFile, ifstream & fileStream);
 
 void openFile (const string & pathToFile, ofstream & fileStream);
 
-void openFile (const string & pathToFile, ogzstream & fileStream);
+void openFile (const string & pathToFile, gzFile & fileStream,
+	       const char * mode);
 
 void closeFile (const string & pathToFile, ifstream & fileStream);
 
 void closeFile (const string & pathToFile, ofstream & fileStream);
 
-void closeFile (const string & pathToFile, ogzstream & fileStream);
+void closeFile (const string & pathToFile, gzFile & fileStream);
+
+void gzwriteLine (gzFile & fileStream, const string & line,
+		  const string & pathToFile, const size_t & lineId);
 
 vector<string> loadOneColumnFile (const string & inFile,
 				  const int & verbose);
