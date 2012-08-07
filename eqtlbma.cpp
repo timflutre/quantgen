@@ -1485,8 +1485,8 @@ Ftr_makePermsSepOneSubgrp (
 					 vvSampleIdxGenos,
 					 needQnorm, vSbgrp2Covars, perm);
       if (iResFtrSnp.vNs[0] > 2 &&
-	  iResFtrSnp.vMapPredictors[0]["genotypes"][2] < minPermBetaPval)
-	minPermBetaPval = iResFtrSnp.vMapPredictors[0]["genotypes"][2];
+	  iResFtrSnp.vMapPredictors[0]["genotype"][2] < minPermBetaPval)
+	minPermBetaPval = iResFtrSnp.vMapPredictors[0]["genotype"][2];
     }
     
     if (minPermBetaPval <= iFtr.vMinTruePvals[s])
