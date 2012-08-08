@@ -1853,6 +1853,12 @@ loadSamplesAllPhenos (
   {
     openFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
+    if (line.empty())
+    {
+      cerr << "ERROR: file " << mPhenoPaths.find(vSubgroups[s])->second
+	   << " is empty" << endl;
+      exit (1);
+    }
     closeFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
     if (s == 0)
     {
@@ -1913,6 +1919,12 @@ loadSamplesAllGenos (
     }
     openFile (mGenoPaths.find(vSubgroups[s])->second, stream);
     getline (stream, line);
+    if (line.empty())
+    {
+      cerr << "ERROR: file " << mGenoPaths.find(vSubgroups[s])->second
+	   << " is empty" << endl;
+      exit (1);
+    }
     closeFile (mGenoPaths.find(vSubgroups[s])->second, stream);
     split (line, " \t", tokens);
     
@@ -2526,9 +2538,8 @@ loadCovarsFromFiles (
     getline (covarStream, line);
     if (line.empty())
     {
-      cerr << "ERROR: covariate file "
-	   << mCovarPaths.find(vSubgroups[s])->second
-	   << " should have a header line" << endl;
+      cerr << "ERROR: file " << mCovarPaths.find(vSubgroups[s])->second
+	   << " is empty" << endl;
       exit (1);
     }
     nbLines = 1;
