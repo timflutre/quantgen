@@ -24,7 +24,6 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <dirent.h>
-#include <cerrno>
 
 #include <sstream>
 #include <iostream>
@@ -257,6 +256,29 @@ closeFile (
   }
 }
 
+int
+getline (
+  gzFile & fileStream,
+  string & line)
+{
+  int res = 1, c;
+  line.clear ();
+  while (true)
+  {
+    c = gzgetc (fileStream);
+    if (c == -1) // eof or error
+    {
+      res = 0;
+      break;
+    }
+    else if (c == 10) // 10 is ASCII code for '\n'
+      break;
+    else
+      line.push_back (c);
+  }
+  return res;
+}
+
 void
 gzwriteLine (
   gzFile & fileStream,
@@ -285,11 +307,11 @@ loadOneColumnFile (
     return vItems;
   
   string line;
-  ifstream stream;
+  gzFile stream;
   vector<string> tokens;
   size_t line_id = 0;
   
-  openFile (inFile, stream);
+  openFile (inFile, stream, "rb");
   if (verbose > 0)
     cout <<"load file " << inFile << " ..." << endl;
   
@@ -309,7 +331,13 @@ loadOneColumnFile (
       vItems.push_back (tokens[0]);
   }
   
-  stream.close();
+  if (! gzeof (stream))
+  {
+    cerr << "ERROR: can't read successfully file "
+	 << inFile << " up to the end" << endl;
+    exit (1);
+  }
+  closeFile (inFile, stream);
   
   if (verbose > 0)
     cout << "items loaded: " << vItems.size() << endl;
@@ -330,11 +358,11 @@ loadTwoColumnFile (
     return mItems;
   
   string line;
-  ifstream stream;
+  gzFile stream;
   vector<string> tokens;
   size_t line_id = 0;
   
-  openFile (inFile, stream);
+  openFile (inFile, stream, "rb");
   if (verbose > 0)
     cout <<"load file " << inFile << " ..." << endl;
   
@@ -354,7 +382,13 @@ loadTwoColumnFile (
       mItems.insert (make_pair (tokens[0], tokens[1]));
   }
   
-  stream.close();
+  if (! gzeof (stream))
+  {
+    cerr << "ERROR: can't read successfully file "
+	 << inFile << " up to the end" << endl;
+    exit (1);
+  }
+  closeFile (inFile, stream);
   
   if (verbose > 0)
     cout << "items loaded: " << mItems.size() << endl;
@@ -376,11 +410,11 @@ loadTwoColumnFile (
   if (! inFile.empty())
   {
     string line;
-    ifstream stream;
+    gzFile stream;
     vector<string> tokens;
     size_t line_id = 0;
     
-    openFile (inFile, stream);
+    openFile (inFile, stream, "rb");
     if (verbose > 0)
       cout <<"load file " << inFile << " ..." << endl;
     
@@ -403,7 +437,13 @@ loadTwoColumnFile (
       }
     }
     
-    stream.close();
+    if (! gzeof (stream))
+    {
+      cerr << "ERROR: can't read successfully file "
+	   << inFile << " up to the end" << endl;
+      exit (1);
+    }
+    closeFile (inFile, stream);
     
     if (verbose > 0)
       cout << "items loaded: " << mItems.size() << endl;
@@ -423,11 +463,11 @@ loadOneColumnFileAsNumbers (
     return vItems;
   
   string line;
-  ifstream stream;
+  gzFile stream;
   vector<string> tokens;
   size_t line_id = 0;
   
-  openFile (inFile, stream);
+  openFile (inFile, stream, "rb");
   if (verbose > 0)
     cout <<"load file " << inFile << " ..." << endl;
   
@@ -448,7 +488,13 @@ loadOneColumnFileAsNumbers (
       vItems.push_back (idx);
   }
   
-  stream.close();
+  if (! gzeof (stream))
+  {
+    cerr << "ERROR: can't read successfully file "
+	 << inFile << " up to the end" << endl;
+    exit (1);
+  }
+  closeFile (inFile, stream);
   
   if (verbose > 0)
     cout << "items loaded: " << vItems.size() << endl;

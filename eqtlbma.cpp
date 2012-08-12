@@ -31,7 +31,6 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <fstream>
 #include <algorithm>
 #include <limits>
 #include <sstream>
@@ -448,10 +447,10 @@ loadGrid (
   if (verbose > 0)
     cout << "load grid ..." << endl << flush;
   
-  ifstream gridStream;
+  gzFile gridStream;
   vector<string> tokens;
   string line;
-  openFile (gridFile, gridStream);
+  openFile (gridFile, gridStream, "rb");
   while (getline (gridStream, line))
   {
     split (line, " \t", tokens);
@@ -465,6 +464,13 @@ loadGrid (
     grid_values.push_back (atof (tokens[0].c_str()));
     grid_values.push_back (atof (tokens[1].c_str()));
     grid.push_back (grid_values);
+  }
+  if (! gzeof (gridStream))
+  {
+    cerr << "ERROR: can't read successfully file "
+	 << gridFile
+	 << " up to the end" << endl;
+    exit (1);
   }
   closeFile (gridFile, gridStream);
   
@@ -1847,19 +1853,24 @@ loadSamplesAllPhenos (
   vector<vector<string> > & vvSamples,
   const int & verbose)
 {
-  ifstream stream;
+  gzFile fileStream;
   string line;
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
-    getline (stream, line);
+    openFile (mPhenoPaths.find(vSubgroups[s])->second, fileStream, "rb");
+    if (! getline (fileStream, line))
+    {
+      cerr << "ERROR: problem with the header of file "
+	   << mPhenoPaths.find(vSubgroups[s])->second << endl;
+      exit (1);
+    }
     if (line.empty())
     {
       cerr << "ERROR: file " << mPhenoPaths.find(vSubgroups[s])->second
 	   << " is empty" << endl;
       exit (1);
     }
-    closeFile (mPhenoPaths.find(vSubgroups[s])->second, stream);
+    closeFile (mPhenoPaths.find(vSubgroups[s])->second, fileStream);
     if (s == 0)
     {
       split (line, " \t", vSamples);
@@ -1905,7 +1916,7 @@ loadSamplesAllGenos (
   vector<vector<string> > & vvSamples,
   const int & verbose)
 {
-  ifstream stream;
+  gzFile fileStream;
   string line, sample;
   vector<string> tokens, tokens2;
   size_t i;
@@ -1917,15 +1928,20 @@ loadSamplesAllGenos (
 	   << endl;
       exit (1);
     }
-    openFile (mGenoPaths.find(vSubgroups[s])->second, stream);
-    getline (stream, line);
+    openFile (mGenoPaths.find(vSubgroups[s])->second, fileStream, "rb");
+    if (! getline (fileStream, line))
+    {
+      cerr << "ERROR: problem with the header of file "
+	   << mGenoPaths.find(vSubgroups[s])->second << endl;
+      exit (1);
+    }
     if (line.empty())
     {
       cerr << "ERROR: file " << mGenoPaths.find(vSubgroups[s])->second
 	   << " is empty" << endl;
       exit (1);
     }
-    closeFile (mGenoPaths.find(vSubgroups[s])->second, stream);
+    closeFile (mGenoPaths.find(vSubgroups[s])->second, fileStream);
     split (line, " \t", tokens);
     
     if (tokens[0].compare("chr") == 0) // IMPUTE format
@@ -2061,15 +2077,20 @@ loadPhenos (
   if (verbose > 0)
     cout << "load phenotypes ..." << endl << flush;
   
-  ifstream phenoStream;
+  gzFile phenoStream;
   string line;
   vector<string> tokens;
   size_t nbSamples, nbLines;
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream);
-    getline (phenoStream, line); // header
+    openFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream, "rb");
+    if (! getline (phenoStream, line))
+    {
+      cerr << "ERROR: problem with the header of file "
+	   << mPhenoPaths.find(vSubgroups[s])->second << endl;
+      exit (1);
+    }
     split (line, " \t", tokens);
     if (tokens[0].compare("Id") == 0)
       nbSamples = tokens.size() - 1;
@@ -2123,6 +2144,13 @@ loadPhenos (
 	}
       }
     }
+    if (! gzeof (phenoStream))
+    {
+      cerr << "ERROR: can't read successfully file "
+	   << mPhenoPaths.find(vSubgroups[s])->second
+	   << " up to the end" << endl;
+      exit (1);
+    }
     
     closeFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream);
     if (verbose > 0)
@@ -2150,8 +2178,8 @@ loadFtrInfo (
     cout << "load feature coordinates ..." << endl << flush;
   
   // parse the BED file
-  ifstream ftrCoordsStream;
-  openFile (ftrCoordsFile, ftrCoordsStream);
+  gzFile ftrCoordsStream;
+  openFile (ftrCoordsFile, ftrCoordsStream, "rb");
   string line;
   vector<string> tokens;
   while (getline (ftrCoordsStream, line))
@@ -2167,6 +2195,13 @@ loadFtrInfo (
       mChr2VecPtFtrs.insert (make_pair (tokens[0],
 					vector<Ftr*> ()));
     mChr2VecPtFtrs[tokens[0]].push_back (&(mFtrs[tokens[3]]));
+  }
+  if (! gzeof (ftrCoordsStream))
+  {
+    cerr << "ERROR: can't read successfully file "
+	 << ftrCoordsFile
+	 << " up to the end" << endl;
+    exit (1);
   }
   closeFile (ftrCoordsFile, ftrCoordsStream);
   
@@ -2210,7 +2245,7 @@ loadGenosAndSnpInfo (
   if (verbose > 0)
     cout << "load genotypes and SNP coordinates ..." << endl << flush;
   
-  ifstream genoStream;
+  gzFile genoStream;
   string line;
   vector<string> tokens;
   size_t nbSamples, nbLines;
@@ -2218,8 +2253,13 @@ loadGenosAndSnpInfo (
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
-    openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream);
-    getline (genoStream, line); // header
+    openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream, "rb");
+    if (! getline (genoStream, line))
+    {
+      cerr << "ERROR: problem with the header of file "
+	   << mGenoPaths.find(vSubgroups[s])->second << endl;
+      exit (1);
+    }
     split (line, " \t", tokens);
     nbSamples = (size_t) (tokens.size() - 5) / 3;
     nbLines = 1;
@@ -2300,6 +2340,13 @@ loadGenosAndSnpInfo (
 	mSnps[tokens[1]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
       }
     }
+    if (! gzeof (genoStream))
+    {
+      cerr << "ERROR: can't read successfully file "
+	   << mGenoPaths.find(vSubgroups[s])->second
+	   << " up to the end" << endl;
+      exit (1);
+    }
     
     closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
@@ -2331,7 +2378,7 @@ loadGenos (
   if (verbose > 0)
     cout << "load genotypes ..." << endl << flush;
   
-  ifstream genoStream;
+  gzFile genoStream;
   string line;
   vector<string> tokens;
   size_t nbSamples, nbLines;
@@ -2340,8 +2387,13 @@ loadGenos (
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
     clock_t timeBegin = clock();
-    openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream);
-    getline (genoStream, line); // header
+    openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream, "rb");
+    if (! getline (genoStream, line))
+    {
+      cerr << "ERROR: problem with the header of file "
+	   << mGenoPaths.find(vSubgroups[s])->second << endl;
+      exit (1);
+    }
     split (line, " \t", tokens);
     if (tokens[0].compare("Id") == 0)
       nbSamples = tokens.size() - 1;
@@ -2412,6 +2464,13 @@ loadGenos (
 	mSnps[tokens[0]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
       }
     }
+    if (! gzeof (genoStream))
+    {
+      cerr << "ERROR: can't read successfully file "
+	   << mGenoPaths.find(vSubgroups[s])->second
+	   << " up to the end" << endl;
+      exit (1);
+    }
     
     closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
@@ -2441,8 +2500,8 @@ loadSnpInfo (
     cout << "load SNP coordinates ..." << endl << flush;
   
   // parse the BED file
-  ifstream snpCoordsStream;
-  openFile (snpCoordsFile, snpCoordsStream);
+  gzFile snpCoordsStream;
+  openFile (snpCoordsFile, snpCoordsStream, "rb");
   string line;
   vector<string> tokens;
   while (getline (snpCoordsStream, line))
@@ -2457,6 +2516,13 @@ loadSnpInfo (
       mChr2VecPtSnps.insert (make_pair (tokens[0],
 					vector<Snp*> ()));
     mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[3]]));
+  }
+  if (! gzeof (snpCoordsStream))
+  {
+    cerr << "ERROR: can't read successfully file "
+	 << snpCoordsFile
+	 << " up to the end" << endl;
+    exit (1);
   }
   closeFile (snpCoordsFile, snpCoordsStream);
   
@@ -2522,7 +2588,7 @@ loadCovarsFromFiles (
   const map<string, string> & mCovarPaths,
   vector<map<string, vector<double> > > & vSbgrp2Covars)
 {
-  ifstream covarStream;
+  gzFile covarStream;
   vector<string> tokens;
   string line;
   size_t nbLines = 0;
@@ -2532,10 +2598,15 @@ loadCovarsFromFiles (
     if (mCovarPaths.find(vSubgroups[s]) == mCovarPaths.end())
       continue;
     
-    openFile (mCovarPaths.find(vSubgroups[s])->second, covarStream);
+    openFile (mCovarPaths.find(vSubgroups[s])->second, covarStream, "rb");
     
     // parse the header line to get covar names and order
-    getline (covarStream, line);
+    if (! getline (covarStream, line))
+    {
+      cerr << "ERROR: problem with the header of file "
+	   << mCovarPaths.find(vSubgroups[s])->second << endl;
+      exit (1);
+    }
     if (line.empty())
     {
       cerr << "ERROR: file " << mCovarPaths.find(vSubgroups[s])->second
@@ -2582,6 +2653,13 @@ loadCovarsFromFiles (
 					  numeric_limits<double>::quiet_NaN())));
       for (size_t c = 0; c < vCovars.size(); ++c)
 	mSample2Covars[tokens[0]][c] = atof (tokens[(c+1)].c_str());
+    }
+    if (! gzeof (covarStream))
+    {
+      cerr << "ERROR: can't read successfully file "
+	   << mCovarPaths.find(vSubgroups[s])->second
+	   << " up to the end" << endl;
+      exit (1);
     }
     closeFile (mCovarPaths.find(vSubgroups[s])->second, covarStream);
     

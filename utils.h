@@ -61,6 +61,8 @@ void closeFile (const string & pathToFile, ofstream & fileStream);
 
 void closeFile (const string & pathToFile, gzFile & fileStream);
 
+int getline (gzFile & fileStream, string & line);
+
 void gzwriteLine (gzFile & fileStream, const string & line,
 		  const string & pathToFile, const size_t & lineId);
 
