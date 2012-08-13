@@ -694,8 +694,8 @@ struct Ftr
   size_t end; // idem
   vector<vector<double> > vvPhenos; // phenotypes of samples per subgroup
   vector<vector<bool> > vvIsNa; // missing values per subgroup
-  vector<Snp*> vPtCisSnps;
-  vector<ResFtrSnp> vResFtrSnps;
+  vector<Snp*> vPtCisSnps; // pointers to SNP(s) in cis
+  vector<ResFtrSnp> vResFtrSnps; // for each SNP in vPtCisSnps
   vector<double> vPermPvalsSep; // permutation P-values in each subgroup
   vector<size_t> vNbPermsSoFar; // nb of permutations in each subgroup
   vector<double> vMinTruePvals; // min true P-value over SNPs in each subgroup
@@ -1383,6 +1383,19 @@ Ftr_getCisSnps (
   }
 }
 
+size_t
+Ftr_getNbCisSnpsInGivenSubgroup (
+  const Ftr & iFtr,
+  const size_t & s)
+{
+  size_t nbCisSnps = 0;
+  for (vector<ResFtrSnp>::const_iterator itP = iFtr.vResFtrSnps.begin();
+       itP != iFtr.vResFtrSnps.end(); ++itP)
+    if (itP->vNs[s] > 2)
+      ++nbCisSnps;
+  return nbCisSnps;
+}
+
 void
 Ftr_inferAssos (
   Ftr & iFtr,
@@ -1429,17 +1442,17 @@ Ftr_findMinTrueGenoPvals (
   Ftr & iFtr,
   const size_t & s)
 {
-  if (iFtr.vResFtrSnps.size() > 0 && iFtr.vResFtrSnps[0].vNs[s] > 2)
+  iFtr.vMinTruePvals[s] = 2;
+  for (size_t snpId = 0; snpId < iFtr.vResFtrSnps.size(); ++snpId)
   {
-    iFtr.vMinTruePvals[s] =
-      iFtr.vResFtrSnps[0].vMapPredictors[s]["genotype"][2];
-    for (size_t snpId = 1; snpId < iFtr.vResFtrSnps.size(); ++snpId)
-      if (iFtr.vResFtrSnps[snpId].vNs[s] > 2 &&
-	  iFtr.vResFtrSnps[snpId].vMapPredictors[s]["genotype"][2]
-	  < iFtr.vMinTruePvals[s])
-	iFtr.vMinTruePvals[s] =
-	  iFtr.vResFtrSnps[snpId].vMapPredictors[s]["genotype"][2];
+    if (iFtr.vResFtrSnps[snpId].vNs[s] > 2 &&
+	iFtr.vResFtrSnps[snpId].vMapPredictors[s]["genotype"][2]
+	< iFtr.vMinTruePvals[s])
+      iFtr.vMinTruePvals[s] =
+	iFtr.vResFtrSnps[snpId].vMapPredictors[s]["genotype"][2];
   }
+  if (iFtr.vMinTruePvals[s] == 2)
+    iFtr.vMinTruePvals[s] = numeric_limits<double>::quiet_NaN();
 }
 
 void
@@ -1462,58 +1475,62 @@ Ftr_makePermsSepOneSubgrp (
   Snp iSnp;
   
   Ftr_findMinTrueGenoPvals (iFtr, s);
-  iFtr.vPermPvalsSep[s] = 1;
-  
-  perm = gsl_permutation_calloc (vvSampleIdxPhenos[s].size());
-  if (perm == NULL)
+  if (iFtr.vMinTruePvals[s] == iFtr.vMinTruePvals[s]) // not NaN http://www.johndcook.com/IEEE_exceptions_in_cpp.html
   {
-    cerr << "ERROR: can't allocate memory for the permutation" << endl;
-    exit (1);
-  }
-  
-  for(size_t permId = 0; permId < nbPerms; ++permId)
-  {
-    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
-    if (shuffleOnly)
-      continue;
+    iFtr.vPermPvalsSep[s] = 1;
     
-    ++(iFtr.vNbPermsSoFar[s]);
-    minPermBetaPval = 1;
-    
-    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
+    perm = gsl_permutation_calloc (vvSampleIdxPhenos[s].size());
+    if (perm == NULL)
     {
-      iSnp = *(iFtr.vPtCisSnps[snpId]);
-      ResFtrSnp iResFtrSnp;
-      ResFtrSnp_init (iResFtrSnp, iSnp.name, 1);
-      if (iFtr.vvPhenos[s].size() > 0)
-	ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, 0,
-					 vvSampleIdxPhenos,
-					 vvSampleIdxGenos,
-					 needQnorm, vSbgrp2Covars, perm);
-      if (iResFtrSnp.vNs[0] > 2 &&
-	  iResFtrSnp.vMapPredictors[0]["genotype"][2] < minPermBetaPval)
-	minPermBetaPval = iResFtrSnp.vMapPredictors[0]["genotype"][2];
+      cerr << "ERROR: can't allocate memory for the permutation" << endl;
+      exit (1);
     }
     
-    if (minPermBetaPval <= iFtr.vMinTruePvals[s])
-      ++(iFtr.vPermPvalsSep[s]);
-    if (trick != 0 && iFtr.vPermPvalsSep[s] == 11)
+    for(size_t permId = 0; permId < nbPerms; ++permId)
     {
-      if (trick == 1)
-	break;
-      else if (trick == 2)
-	shuffleOnly = true;
+      gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
+      if (shuffleOnly)
+	continue;
+      
+      ++(iFtr.vNbPermsSoFar[s]);
+      minPermBetaPval = 1;
+      
+      for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
+      {
+	iSnp = *(iFtr.vPtCisSnps[snpId]);
+	ResFtrSnp iResFtrSnp;
+	ResFtrSnp_init (iResFtrSnp, iSnp.name, 1);
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
+	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, 0,
+					   vvSampleIdxPhenos,
+					   vvSampleIdxGenos,
+					   needQnorm, vSbgrp2Covars, perm);
+	if (iResFtrSnp.vNs[0] > 2 &&
+	    iResFtrSnp.vMapPredictors[0]["genotype"][2] < minPermBetaPval)
+	  minPermBetaPval = iResFtrSnp.vMapPredictors[0]["genotype"][2];
+      }
+      
+      if (minPermBetaPval <= iFtr.vMinTruePvals[s])
+	++(iFtr.vPermPvalsSep[s]);
+      if (trick != 0 && iFtr.vPermPvalsSep[s] == 11)
+      {
+	if (trick == 1)
+	  break;
+	else if (trick == 2)
+	  shuffleOnly = true;
+      }
     }
+    
+    if (iFtr.vNbPermsSoFar[s] == nbPerms)
+      iFtr.vPermPvalsSep[s] /= (nbPerms + 1);
+    else
+      iFtr.vPermPvalsSep[s] = gsl_ran_flat (rngTrick,
+					    (11 / ((double) (iFtr.vNbPermsSoFar[s] + 2))),
+					    (11 / ((double) (iFtr.vNbPermsSoFar[s] + 1))));
+    
+    gsl_permutation_free (perm);
   }
-  
-  if (iFtr.vNbPermsSoFar[s] == nbPerms)
-    iFtr.vPermPvalsSep[s] /= (nbPerms + 1);
-  else
-    iFtr.vPermPvalsSep[s] = gsl_ran_flat (rngTrick,
-					  (11 / ((double) (iFtr.vNbPermsSoFar[s] + 2))),
-					  (11 / ((double) (iFtr.vNbPermsSoFar[s] + 1))));
-  
-  gsl_permutation_free (perm);
 //  cout << endl << setprecision(8) << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0) << endl;
 }
 
@@ -3021,16 +3038,19 @@ writeResSepPermPval (
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
 	 itF != mFtrs.end(); ++itF)
     {
-      const Ftr * ptF = &(itF->second);
-      ssTxt.str("");
-      ++lineId;
-      ssTxt << ptF->name
-	    << " " << ptF->vPtCisSnps.size()
-	    << " " << ptF->vPermPvalsSep[s]
-	    << " " << ptF->vNbPermsSoFar[s]
-	    << " " << ptF->vMinTruePvals[s]
-	    << endl;
-      gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+      if (itF->second.vMinTruePvals[s] == itF->second.vMinTruePvals[s])
+      {
+	const Ftr * ptF = &(itF->second);
+	ssTxt.str("");
+	++lineId;
+	ssTxt << ptF->name
+	      << " " << Ftr_getNbCisSnpsInGivenSubgroup (*ptF, s)
+	      << " " << ptF->vPermPvalsSep[s]
+	      << " " << ptF->vNbPermsSoFar[s]
+	      << " " << ptF->vMinTruePvals[s]
+	      << endl;
+	gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+      }
     }
     
     closeFile (ssOutFile.str(), outStream);
