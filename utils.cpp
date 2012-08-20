@@ -714,6 +714,28 @@ isDirectory (
   return res;
 }
 
+void
+createDirectory (
+  const string & dirName)
+{
+  if (mkdir (dirName.c_str(), 0774) != 0) // u=rwx g=rwx o=r--
+  {
+    cerr << "ERROR: can't create directory " << dirName << ", mkdir returned errno=" << errno << endl;
+    exit (1);
+  }
+}
+
+void
+changeDirectory (
+  const string & dirName)
+{
+  if (chdir (dirName.c_str()) != 0) // u=rwx g=rwx o=r--
+  {
+    cerr << "ERROR: can't change directory to " << dirName << ", chdir returned errno=" << errno << endl;
+    exit (1);
+  }
+}
+
 /** \brief Remove a directory even if it is not empty.
  *  \note http://stackoverflow.com/a/1149769/597069
  *  \note Don't do anything if the supplied path is empty

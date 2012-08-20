@@ -21,6 +21,7 @@
 #define UTILS_H
 
 #include <ctime>
+#include <sys/stat.h>
 
 #include <vector>
 #include <map>
@@ -99,6 +100,10 @@ bool doesFileExist (const string & filename);
 vector<string> scanInputDirectory (const string & inDir, const int & verbose);
 
 bool isDirectory (const char path[]);
+
+void createDirectory (const string & dirName);
+
+void changeDirectory (const string & dirName);
 
 int removeDir (string path);
 
