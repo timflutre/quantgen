@@ -720,7 +720,8 @@ createDirectory (
 {
   if (mkdir (dirName.c_str(), 0774) != 0) // u=rwx g=rwx o=r--
   {
-    cerr << "ERROR: can't create directory " << dirName << ", mkdir returned errno=" << errno << endl;
+    cerr << "ERROR: can't create directory " << dirName
+	 << " (errno=" << errno << ")" << endl;
     exit (1);
   }
 }
@@ -731,9 +732,25 @@ changeDirectory (
 {
   if (chdir (dirName.c_str()) != 0) // u=rwx g=rwx o=r--
   {
-    cerr << "ERROR: can't change directory to " << dirName << ", chdir returned errno=" << errno << endl;
+    cerr << "ERROR: can't change directory to " << dirName
+	 << " (errno=" << errno << ")" << endl;
     exit (1);
   }
+}
+
+string
+getCurrentDirectory (
+  void)
+{
+  char buf[FILENAME_MAX];
+  if (getcwd (buf, sizeof(buf)) == NULL)
+  {
+    cerr << "ERROR: can't get current working directory (errno="
+	 << errno << ")" << endl;
+    exit (1);
+  }
+  string cwd (buf);
+  return cwd;
 }
 
 /** \brief Remove a directory even if it is not empty.

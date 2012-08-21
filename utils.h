@@ -105,6 +105,8 @@ void createDirectory (const string & dirName);
 
 void changeDirectory (const string & dirName);
 
+string getCurrentDirectory (void);
+
 int removeDir (string path);
 
 void removeFiles (const vector<string> & vFileNames);
