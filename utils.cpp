@@ -934,6 +934,9 @@ bool isNonZero (size_t i) { return (i != 0); };
 
 bool isNonNpos (size_t i) { return (i != string::npos); };
 
+// http://www.johndcook.com/IEEE_exceptions_in_cpp.html
+bool isNan (double i) { return (! (i == i)); };
+
 double
 getMaxMemUsedByProcess (void)
 {

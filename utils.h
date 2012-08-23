@@ -124,6 +124,8 @@ bool isNonZero (size_t i);
 
 bool isNonNpos (size_t i);
 
+bool isNan (double i);
+
 double getMaxMemUsedByProcess (void);
 
 void printCmdLine (int argc, char ** argv);
