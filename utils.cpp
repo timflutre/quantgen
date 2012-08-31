@@ -286,7 +286,8 @@ gzwriteLine (
   const string & pathToFile,
   const size_t & lineId)
 {
-  if (gzprintf (fileStream, "%s", line.c_str()) <= 0)
+  // if (gzprintf (fileStream, "%s", line.c_str()) <= 0)
+  if (gzputs (fileStream, line.c_str()) < 0)
   {
     cerr << "ERROR: can't write line " << lineId
 	 << " in file " << pathToFile << endl;
