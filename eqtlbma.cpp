@@ -1343,14 +1343,23 @@ ResFtrSnp_calcAbfsAvgSubset1And2 (
     if (! isNan (iResFtrSnp.mWeightedAbfs[ssConfig.str()]))
       vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
   }
-  iResFtrSnp.mWeightedAbfs.insert (
-    make_pair ("subset1",
-	       log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
-  
-  vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs["const"]);
-  iResFtrSnp.mWeightedAbfs.insert (
-    make_pair ("subset2",
-	       log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
+  if (vL10Abfs.size() > 0)
+  {
+    iResFtrSnp.mWeightedAbfs.insert (
+      make_pair ("subset1",
+		 log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
+    vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs["const"]);
+    iResFtrSnp.mWeightedAbfs.insert (
+      make_pair ("subset2",
+		 log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
+  }
+  else
+  {
+    iResFtrSnp.mWeightedAbfs.insert (
+      make_pair ("subset1", numeric_limits<double>::quiet_NaN()));
+    iResFtrSnp.mWeightedAbfs.insert (
+      make_pair ("subset2", numeric_limits<double>::quiet_NaN()));
+  }
 }
 
 /** \brief The configuration is represented only by the index/indices
@@ -1379,8 +1388,8 @@ prepareConfig (
   }
 }
 
-/** \brief Calculate the ABF for all configurations, averaged over
- *  the small grid
+/** \brief Calculate the ABF for all configurations (except the consistent),
+ *  averaged over the small grid
  */
 void
 ResFtrSnp_calcAbfsAllConfigs (
@@ -1524,21 +1533,21 @@ ResFtrSnp_calcAbfs (
 /** \brief Calculate the ABF for the consistent configuration
  *  \note the ABFs for each grid value are averaged with equal weights
  *  \note the large grid should be used if whichPermBf is 'const' or
- *  'subset2', otherwise the the small grid if whichPermAbf is 'all'
+ *  'subset2', otherwise the small grid if whichPermAbf is 'all'
  */
 double
 ResFtrSnp_calcAbfConstForPerms (
   ResFtrSnp & iResFtrSnp,
-  const vector< vector<double> > & grid,
+  const vector< vector<double> > & vvGrid,
   const vector<vector<double> > & vvStdSstats)
 {
-  vector<double> vL10Abfs (grid.size(), 0.0);
-  for (size_t gridIdx = 0; gridIdx < grid.size(); ++gridIdx)
+  vector<double> vL10Abfs (vvGrid.size(), 0.0);
+  for (size_t gridIdx = 0; gridIdx < vvGrid.size(); ++gridIdx)
     vL10Abfs[gridIdx] = (getAbfFromStdSumStats (
-				iResFtrSnp.vNs,
-				vvStdSstats,
-				grid[gridIdx][0],
-				grid[gridIdx][1]));
+			   iResFtrSnp.vNs,
+			   vvStdSstats,
+			   vvGrid[gridIdx][0],
+			   vvGrid[gridIdx][1]));
   return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
 }
 
@@ -1701,11 +1710,14 @@ Ftr_inferAssos (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const string & whichBfs,
-  const bool & fitNull)
+  const bool & fitNull,
+  const int & verbose)
 {
   size_t nbSubgroups = iFtr.vvPhenos.size();
   for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
   {
+    if (verbose > 0)
+      cout << iFtr.name << " " << iFtr.vPtCisSnps[snpId]->name << endl;
     ResFtrSnp iResFtrSnp;
     ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
     for (size_t s = 0; s < nbSubgroups; ++s)
@@ -1713,10 +1725,6 @@ Ftr_inferAssos (
       if (iFtr.vvPhenos[s].size() > 0 &&
 	  iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
       {
-#ifdef DEBUG
-	if (verbose > 0)
-	  cout << iFtr.name << " " << iResFtrSnp.snp << " s" << (s+1) << endl;
-#endif
 	ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr,
 				     *(iFtr.vPtCisSnps[snpId]), s,
 				     vvSampleIdxPhenos, vvSampleIdxGenos,
@@ -3124,7 +3132,7 @@ inferAssos (
     {
       Ftr_inferAssos (itF->second, vvSampleIdxPhenos, vvSampleIdxGenos,
 		      whichStep, needQnorm, vSbgrp2Covars, vvGridL, vvGridS,
-		      whichBfs, fitNull);
+		      whichBfs, fitNull, verbose-1);
       nbAnalyzedPairs += itF->second.vResFtrSnps.size();
     }
   }
