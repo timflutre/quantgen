@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -g gzstream/gzstream.C utils.cpp test_eqtlbma.cpp -lgsl -lgslcblas -lz -o test_eqtlbma
+ *  g++ -Wall -Wextra -g utils.cpp test_eqtlbma.cpp -lgsl -lgslcblas -lz -o test_eqtlbma
  */
 
 #include <cmath>
@@ -50,65 +50,87 @@ test_loadSamples_prepData (
   map<string, string> & mPhenoPaths,
   vector<string> & vSubgroups)
 {
-  // samples: 1,2 in s1, 1,4 in s2, 3 w/o phenotype, 4 w/o genotype
-  nbSubgroups = 2;
-  nbSamples = 4;
-  vFileNames.push_back ("genotypes.imp");
-  vFileNames.push_back ("phenotypes_s1.txt");
-  vFileNames.push_back ("phenotypes_s2.txt");
-  
-  // write genotype file (only the header)
   ofstream stream;
-  openFile (vFileNames[0], stream);
-  stream << "chr rs coord a1 a2";
-  for (size_t i = 0; i < 3; ++i)
-    stream << " ind" << (i+1) << "_a1a1"
-	   << " ind" << (i+1) << "_a1a2"
-	   << " ind" << (i+1) << "_a2a2";
-  stream << endl;
-  stream.close();
   
-  // write phenotype files (only the header)
-  openFile (vFileNames[1], stream);
-  stream << "ind1 ind2" << endl;
-  stream.close();
-  openFile (vFileNames[2], stream);
-  stream << "ind1 ind4" << endl;
-  stream.close();
-  
-  mGenoPaths["s1"] = vFileNames[0];
-  mPhenoPaths["s1"] = vFileNames[1];
-  mPhenoPaths["s2"] = vFileNames[2];
+  nbSubgroups = 2;
   vSubgroups.push_back ("s1");
   vSubgroups.push_back ("s2");
+  
+  nbSamples = 4; // 1,2,3 in s1; 1,4 in s2, 3 w/o genotype, 4 w/o phenotype
+  
+  // write phenotype file for s1 (only the header)
+  vFileNames.push_back ("phenotypes_s1.txt");
+  mPhenoPaths["s1"] = vFileNames[0];
+  openFile (vFileNames[0], stream);
+  stream << "ind1 ind2 ind3" << endl;
+  stream.close();
+  
+  // write phenotype file for s2 (only the header)
+  vFileNames.push_back ("phenotypes_s2.txt");
+  mPhenoPaths["s2"] = vFileNames[1];
+  openFile (vFileNames[1], stream);
+  stream << "ind1" << endl;
+  stream.close();
+  
+  // write genotype file for s1 (only the header)
+  vFileNames.push_back ("genotypes_s1.imp");
+  mGenoPaths["s1"] = vFileNames[2];
+  openFile (vFileNames[2], stream);
+  stream << "chr rs coord a1 a2"
+	 << " ind1_a1a1 ind1_a1a2 ind1_a2a2"
+	 << " ind2_a1a1 ind2_a1a2 ind2_a2a2"
+	 << endl;
+  stream.close();
+  
+  // write genotype file for s1 (only the header)
+  vFileNames.push_back ("genotypes_s2.imp");
+  mGenoPaths["s2"] = vFileNames[3];
+  openFile (vFileNames[3], stream);
+  stream << "chr rs coord a1 a2"
+	 << " ind1_a1a1 ind1_a1a2 ind1_a2a2"
+	 << " ind4_a1a1 ind4_a1a2 ind4_a2a2"
+	 << endl;
+  stream.close();
 }
 
 void
 test_loadSamples_prepExp (
-  const size_t & nbSamples,
   vector<string> & vSamples_exp,
   vector<vector<size_t> > & vvSampleIdxGenos_exp,
   vector<vector<size_t> > & vvSampleIdxPhenos_exp)
 {
+  // first samples from phenotypes, then genotypes
   vSamples_exp.push_back ("ind1");
   vSamples_exp.push_back ("ind2");
-  vSamples_exp.push_back ("ind4");
   vSamples_exp.push_back ("ind3");
+  vSamples_exp.push_back ("ind4");
   
-  vvSampleIdxGenos_exp.push_back (vector<size_t> (vSamples_exp.size(),
-						  string::npos));
-  vvSampleIdxGenos_exp[0][0] = 0;
-  vvSampleIdxGenos_exp[0][1] = 1;
-  vvSampleIdxGenos_exp[0][3] = 2;
+  // vvSampleIdxPhenos[3][0] = 5 means that the 1st sample in vSamples
+  // corresponds to the 6th sample in the 4th subgroup
   
+  // samples from phenotype file for s1
   vvSampleIdxPhenos_exp.push_back (vector<size_t> (vSamples_exp.size(),
 						  string::npos));
   vvSampleIdxPhenos_exp[0][0] = 0;
   vvSampleIdxPhenos_exp[0][1] = 1;
+  vvSampleIdxPhenos_exp[0][2] = 2;
+  
+  // samples from phenotype file for s2
   vvSampleIdxPhenos_exp.push_back (vector<size_t> (vSamples_exp.size(),
 						  string::npos));
   vvSampleIdxPhenos_exp[1][0] = 0;
-  vvSampleIdxPhenos_exp[1][2] = 1;
+  
+  // samples from genotype file for s1
+  vvSampleIdxGenos_exp.push_back (vector<size_t> (vSamples_exp.size(),
+						  string::npos));
+  vvSampleIdxGenos_exp[0][0] = 0;
+  vvSampleIdxGenos_exp[0][1] = 1;
+  
+  // samples from genotype file for s2
+  vvSampleIdxGenos_exp.push_back (vector<size_t> (vSamples_exp.size(),
+						  string::npos));
+  vvSampleIdxGenos_exp[1][0] = 0;
+  vvSampleIdxGenos_exp[1][3] = 1;
 }
 
 void
@@ -199,7 +221,7 @@ test_loadSamples (const int & verbose)
   // prepare the expected outputs
   vector<string> vSamples_exp;
   vector<vector<size_t> > vvSampleIdxGenos_exp, vvSampleIdxPhenos_exp;
-  test_loadSamples_prepExp (nbSamples, vSamples_exp, vvSampleIdxGenos_exp,
+  test_loadSamples_prepExp (vSamples_exp, vvSampleIdxGenos_exp,
 			    vvSampleIdxPhenos_exp);
   
   // run the function
