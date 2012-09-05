@@ -959,6 +959,9 @@ ResFtrSnp_getSstatsOneSbgrp (
   }
 }
 
+/** \brief Compute the summary statistics for a given feature-snp pair
+ *  in a given subgroup by multiple linear regression
+ */
 void
 ResFtrSnp_getSstatsOneSbgrp (
   ResFtrSnp & iResFtrSnp,
@@ -1066,6 +1069,10 @@ ResFtrSnp_getSstatsPermOneSbgrp (
   }
 }
 
+/** \brief Compute the summary statistics for a given feature-snp pair
+ *  in a given subgroup by multiple linear regression after permuting
+ *  the phenotypes according to the given permutation
+ */
 void
 ResFtrSnp_getSstatsPermOneSbgrp (
   ResFtrSnp & iResFtrSnp,
@@ -1564,7 +1571,10 @@ ResFtrSnp_calcAbfSubset1ForPerms (
        it != iResFtrSnp.mWeightedAbfs.end(); ++it)
     if (! isNan (it->second))
       vL10Abfs.push_back (it->second);
-  return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
+  if (vL10Abfs.size() == 0)
+    return numeric_limits<double>::quiet_NaN();
+  else
+    return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
 }
 
 double
@@ -1583,7 +1593,10 @@ ResFtrSnp_calcAbfSubset2ForPerms (
        it != iResFtrSnp.mWeightedAbfs.end(); ++it)
     if (! isNan (it->second))
       vL10Abfs.push_back (it->second);
-  return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
+  if (vL10Abfs.size() == 0)
+    return numeric_limits<double>::quiet_NaN();
+  else
+    return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
 }
 
 double
@@ -1612,10 +1625,14 @@ ResFtrSnp_calcAbfAllForPerms (
 					    '1')));
     }
   
-  for (size_t i = 0; i < vWeights.size(); ++i)
-    vWeights[i] *= 1.0 / (double) vL10Abfs.size();
-  
-  return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]), vL10Abfs.size());
+  if (vL10Abfs.size() == 0)
+    return numeric_limits<double>::quiet_NaN();
+  else
+  {
+    for (size_t i = 0; i < vWeights.size(); ++i)
+      vWeights[i] *= 1.0 / (double) vL10Abfs.size();
+    return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]), vL10Abfs.size());
+  }
 }
 
 void
@@ -1893,7 +1910,8 @@ Ftr_makePermsJointAbfConst (
       ResFtrSnp iResFtrSnp;
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0)
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 					   vvSampleIdxPhenos,
 					   vvSampleIdxGenos,
@@ -1959,7 +1977,8 @@ Ftr_makePermsJointAbfSubset1 (
       ResFtrSnp iResFtrSnp;
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0)
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 					   vvSampleIdxPhenos,
 					   vvSampleIdxGenos,
@@ -2028,7 +2047,8 @@ Ftr_makePermsJointAbfSubset2 (
       ResFtrSnp iResFtrSnp;
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0)
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 					   vvSampleIdxPhenos,
 					   vvSampleIdxGenos,
@@ -2094,7 +2114,8 @@ Ftr_makePermsJointAbfAll (
       ResFtrSnp iResFtrSnp;
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0)
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
 	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
 					   vvSampleIdxPhenos,
 					   vvSampleIdxGenos,
