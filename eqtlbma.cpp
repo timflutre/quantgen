@@ -1,6 +1,6 @@
 /** \file eqtlbma.cpp
  *
- *  `eqtlbma' performs eQTL mapping via a Bayesian meta-analysis model.
+ *  `eqtlbma' performs eQTL mapping in multiple subgroups via a Bayesian model.
  *  Copyright (C) 2012 Timothee Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -57,7 +57,7 @@ using namespace std;
 void help (char ** argv)
 {
   cout << "`" << argv[0] << "'"
-       << " performs eQTL mapping via a Bayesian meta-analysis model." << endl
+       << " performs eQTL mapping in multiple subgroups via a Bayesian model." << endl
        << endl
        << "Usage: " << argv[0] << " [OPTIONS] ..." << endl
        << endl
@@ -120,10 +120,12 @@ void help (char ** argv)
        << "\t\trequired with --step 3, 4 or 5 if --bfs is subset or all" << endl
        << "      --bfs\twhich Bayes Factors to compute for the joint analysis" << endl
        << "\t\teach BF for a given configuration is the average of the BFs over one of the grids, with equal weights" << endl
-       << "\t\t'const' (default): only the consistent configuration with the large grid" << endl
+       << "\t\tonly the Laplace-approximated BF from Wen and Stephens is implemented" << endl
+       << "\t\t'gen' (default): general way to capture any level of heterogeneity" << endl
+       << "\t\t correspond to the consistent configuration with the large grid" << endl
        << "\t\t fixed-effect and maximum-heterogeneity BFs are also calculated" << endl
-       << "\t\t'subset': compute also the BF for each subgroup-specific configuration" << endl
-       << "\t\t they use the small grid while the BF for the consistent config uses both grids" << endl
+       << "\t\t'sin': compute also the BF for each singleton (subgroup-specific configuration)" << endl
+       << "\t\t they use the small grid (BFgen-sin is also reported)" << endl
        << "\t\t'all': compute also the BFs for all configurations (costly if many subgroups)" << endl
        << "\t\t all BFs use the small grid" << endl
        << "      --fitnull\testimate the variance of the errors on the null model (no genotype effect)" << endl
@@ -143,11 +145,11 @@ void help (char ** argv)
        << "\t\tif '2', all permutations are done but the test statistics are not computed" << endl
        << "\t\tallows to compare different test statistics on the same permutations" << endl
        << "      --pbf\twhich BF to use as the test statistic for the joint-analysis permutations" << endl
-       << "\t\tdefault=const/subset1/subset2/all" << endl
-       << "\t\t'const': only the consistent configuration (see --bfs above)" << endl
-    << "\t\t'subset1': average only over the subgroup-specific configurations" << endl
-       << "\t\t'subset2': average over the consistent config (large grid) and each subgroup-specific one" << endl
-       << "\t\t'all': average over all configurations (small grid only)" << endl
+       << "\t\tdefault=all/uni/uni.all/avg" << endl
+       << "\t\t'gen': general BF (see --bfs above)" << endl
+       << "\t\t'sin': average only over the singletons" << endl
+       << "\t\t'gen-sin': 0.5 BFgen + 0.5 BFsin" << endl
+       << "\t\t'all': average over all configurations" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
        << "\t\tallows to easily parallelize a whole analyzis" << endl
@@ -416,6 +418,7 @@ parseArgs (
     help (argv);
     exit (1);
   }
+  // check writing files is possible
   stringstream ssOutFile;
   ssOutFile << outPrefix << "_test.txt.gz";
   gzFile outStream;
@@ -446,11 +449,11 @@ parseArgs (
     exit (1);
   }
   if ((whichStep == 3 || whichStep == 4 || whichStep == 5)
-      && (whichBfs.compare("subset") == 0 || whichBfs.compare("all") == 0)
+      && (whichBfs.compare("sin") == 0 || whichBfs.compare("all") == 0)
       && smallGridFile.empty())
   {
     printCmdLine (argc, argv);
-    fprintf (stderr, "ERROR: missing compulsory option --gridS with --step 3, 4 or 5 and --bfs subset or all\n\n");
+    fprintf (stderr, "ERROR: missing compulsory option --gridS with --step 3, 4 or 5 and --bfs sin or all\n\n");
     help (argv);
     exit (1);
   }
@@ -461,11 +464,11 @@ parseArgs (
     help (argv);
     exit (1);
   }
-  if (whichBfs.compare("const") != 0 && whichBfs.compare("subset") != 0
+  if (whichBfs.compare("gen") != 0 && whichBfs.compare("sin") != 0
       && whichBfs.compare("all") != 0)
   {
     printCmdLine (argc, argv);
-    fprintf (stderr, "ERROR: --bf should be 'const', 'subset' or 'all'\n\n");
+    fprintf (stderr, "ERROR: --bf should be 'gen', 'sin' or 'all'\n\n");
     help (argv);
     exit (1);
   }
@@ -483,19 +486,19 @@ parseArgs (
     help (argv);
     exit (1);
   }
-  if ((whichStep == 4 || whichStep == 5) && whichBfs.compare("const") == 0
-      && whichPermBf.compare("const") != 0)
+  if ((whichStep == 4 || whichStep == 5) && whichBfs.compare("gen") == 0
+      && whichPermBf.compare("gen") != 0)
   {
     printCmdLine (argc, argv);
-    fprintf (stderr, "ERROR: if --bfs const, then --pbf should be const\n\n");
+    fprintf (stderr, "ERROR: if --bfs gen, then --pbf should be 'gen' too\n\n");
     help (argv);
     exit (1);
   }
-  if ((whichStep == 4 || whichStep == 5) && whichBfs.compare("subset") == 0
+  if ((whichStep == 4 || whichStep == 5) && whichBfs.compare("sin") == 0
       && whichPermBf.compare("all") == 0)
   {
     printCmdLine (argc, argv);
-    fprintf (stderr, "ERROR: if --bfs subset, then --pbf should be const or subset\n\n");
+    fprintf (stderr, "ERROR: if --bfs sin, then --pbf should be 'gen', 'sin' or 'gen-sin'\n\n");
     help (argv);
     exit (1);
   }
@@ -683,6 +686,7 @@ fitMultipleLinearRegression (
 /** \brief Fit a multiple linear regression model.
  *  \note y_i = beta_0 + beta_1 * g_i + beta_2 * c_i + ... + e_i with e_i ~ N(0,sigma^2)
  *  \note missing values should have been already filtered out
+ *  \note allow to estimate the error variance on the null model
  */
 void
 fitMultipleLinearRegression (
@@ -815,8 +819,12 @@ struct ResFtrSnp
   // 0:betahat ; 1:sebetahat ; 2:betaPval
   vector<map<string, vector<double> > > vMapPredictors;
   
-  // ABFs (raw and averaged over a grid)
+  // raw ABFs
+  // keys: 'gen', 'gen-fix', 'gen-maxh', '1-2-3', '1', '2', etc
   map<string, vector<double> > mUnweightedAbfs;
+  
+  // averaged ABFs (over a grid for all, over configurations for some)
+  // keys: same as above
   map<string, double> mWeightedAbfs;
 };
 
@@ -916,6 +924,9 @@ ResFtrSnp_init (
 			   numeric_limits<double>::quiet_NaN());
 }
 
+/** \brief Compute the summary statistics for a given feature-snp pair
+ *  in a given subgroup by simple linear regression
+ */
 void
 ResFtrSnp_getSstatsOneSbgrp (
   ResFtrSnp & iResFtrSnp,
@@ -1024,6 +1035,10 @@ ResFtrSnp_getSstatsOneSbgrp (
   }
 }
 
+/** \brief Compute the summary statistics for a given feature-snp pair
+ *  in a given subgroup by simple linear regression after permuting
+ *  the phenotypes according to the given permutation
+ */
 void
 ResFtrSnp_getSstatsPermOneSbgrp (
   ResFtrSnp & iResFtrSnp,
@@ -1187,10 +1202,10 @@ ResFtrSnp_getStdStatsAndCorrSmallSampleSize (
 }
 
 /** \brief Calculate the ABF for the consistent configuration,
- *  averaged over the large grid, for the general model, the fixed-effect
+ *  averaged over the large grid for the general model, the fixed-effect
  *  model and the maximum-heterogeneity model
- *  \note the configuration is represented by 'const', 'const-fix'
- *  and 'const-maxh'
+ *  \note the configuration is represented by 'gen', 'gen-fix'
+ *  and 'gen-maxh'
  */
 void
 ResFtrSnp_calcAbfsConstLargeGrid (
@@ -1222,22 +1237,22 @@ ResFtrSnp_calcAbfsConstLargeGrid (
 				    + vvGridL[gridIdx][1],
 				    0));
   }
-  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("const",
+  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen",
 						vL10AbfsConst));
-  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("const-fix",
+  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen-fix",
 						vL10AbfsConstFix));
   iResFtrSnp.mUnweightedAbfs.insert (make_pair ("const-maxh",
 						vL10AbfsConstMaxh));
   
-  iResFtrSnp.mWeightedAbfs.insert (make_pair ("const",
+  iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen",
 					      log10_weighted_sum (
 						&(vL10AbfsConst[0]),
 						vvGridL.size())));
-  iResFtrSnp.mWeightedAbfs.insert (make_pair ("const-fix",
+  iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen-fix",
 					      log10_weighted_sum (
 						&(vL10AbfsConstFix[0]),
 						vvGridL.size())));
-  iResFtrSnp.mWeightedAbfs.insert (make_pair ("const-maxh",
+  iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen-maxh",
 					      log10_weighted_sum (
 						&(vL10AbfsConstMaxh[0]),
 						vvGridL.size())));
@@ -1246,7 +1261,8 @@ ResFtrSnp_calcAbfsConstLargeGrid (
 /** \brief Calculate the ABF for the consistent configuration,
  *  averaged over the small grid
  *  \note the configuration is represented by the indices
- *  of all subgroup (eg. '1-2-3-4' if there are 4 subgroups)
+ *  of all subgroup (eg. '1-2-3-4-5' if there are 5 subgroups)
+ *  to distinguish it from 'gen' (large grid)
  */
 void
 ResFtrSnp_calcAbfsConstSmallGrid (
@@ -1272,18 +1288,19 @@ ResFtrSnp_calcAbfsConstSmallGrid (
 						vvGridS.size())));
 }
 
-/** \brief Calculate the ABF for each subgroup-specific configuration,
- *  averaged over the small grid
+/** \brief Calculate the ABF for each singleton, averaged over the small grid
+ *  \note the configuration is represented by the index of the given subgroup
+ *  (eg. '1' if in the first subgroup)
  */
 void
-ResFtrSnp_calcAbfsSpecific (
+ResFtrSnp_calcAbfsSingletons (
   ResFtrSnp & iResFtrSnp,
   const vector< vector<double> > & vvGridS,
   const vector<vector<double> > & vvStdSstatsAll)
 {
   stringstream ssConfig;
   vector<size_t> vNs (iResFtrSnp.vNs.size(), 0);
-  vector< vector<double> > vvStdSstatsSubset;
+  vector< vector<double> > vvStdSstatsSingletons;
   vector<double> vL10Abfs;
   
   for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
@@ -1293,25 +1310,25 @@ ResFtrSnp_calcAbfsSpecific (
     
     if (iResFtrSnp.vNs[s] > 2)
     {
-      vvStdSstatsSubset.clear ();
+      vvStdSstatsSingletons.clear ();
       for (size_t i = 0; i < iResFtrSnp.vNs.size(); ++i)
       {
 	if (s == i)
 	{
 	  vNs[i] = iResFtrSnp.vNs[i];
-	  vvStdSstatsSubset.push_back (vvStdSstatsAll[i]);
+	  vvStdSstatsSingletons.push_back (vvStdSstatsAll[i]);
 	}
 	else
 	{
 	  vNs[i] = 0;
-	  vvStdSstatsSubset.push_back (vector<double> (3, 0));
+	  vvStdSstatsSingletons.push_back (vector<double> (3, 0));
 	}
       }
       
       vL10Abfs.assign (vvGridS.size(), 0);
       for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
 	vL10Abfs[gridIdx] = getAbfFromStdSumStats (vNs,
-						   vvStdSstatsSubset,
+						   vvStdSstatsSingletons,
 						   vvGridS[gridIdx][0],
 						   vvGridS[gridIdx][1]);
       iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
@@ -1335,37 +1352,48 @@ ResFtrSnp_calcAbfsSpecific (
   }
 }
 
-/** \brief Calculate the two averaged ABFs 'subset1' and 'subset2'
+/** \brief Calculate the two averaged ABFs 'sin' and 'gen-sin'
  */
 void
-ResFtrSnp_calcAbfsAvgSubset1And2 (
+ResFtrSnp_calcAbfsAvgSinAndGenSin (
   ResFtrSnp & iResFtrSnp)
 {
   stringstream ssConfig;
-  vector<double> vL10Abfs;
+  vector<double> vL10Abfs, vWeights;
   for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
   {
     ssConfig.str("");
     ssConfig << (s+1);
     if (! isNan (iResFtrSnp.mWeightedAbfs[ssConfig.str()]))
+    {
       vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
+      vWeights.push_back (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(),
+      			    1));
+      // vWeights.push_back (1.0); // old weights
+    }
   }
+  
   if (vL10Abfs.size() > 0)
   {
     iResFtrSnp.mWeightedAbfs.insert (
-      make_pair ("subset1",
+      make_pair ("sin",
 		 log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
-    vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs["const"]);
+    
+    for (size_t i = 0; i < vWeights.size(); ++i)
+      vWeights[i] *= 1.0 / 2.0;
+    vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs["gen"]);
+    vWeights.push_back (1.0 / 2.0);
     iResFtrSnp.mWeightedAbfs.insert (
-      make_pair ("subset2",
-		 log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
+      make_pair ("gen-sin",
+		 log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]),
+				     vL10Abfs.size())));
   }
   else
   {
     iResFtrSnp.mWeightedAbfs.insert (
-      make_pair ("subset1", numeric_limits<double>::quiet_NaN()));
+      make_pair ("sin", numeric_limits<double>::quiet_NaN()));
     iResFtrSnp.mWeightedAbfs.insert (
-      make_pair ("subset2", numeric_limits<double>::quiet_NaN()));
+      make_pair ("gen-sin", numeric_limits<double>::quiet_NaN()));
   }
 }
 
@@ -1411,7 +1439,7 @@ ResFtrSnp_calcAbfsAllConfigs (
   vector<vector<double> > vvStdSstatsSubset;
   vector<double> vL10Abfs;
   
-  for (size_t k = 1; k < iResFtrSnp.vNs.size(); ++k) // <: skip full config
+  for (size_t k = 1; k <= iResFtrSnp.vNs.size(); ++k)
   {
     comb = gsl_combination_calloc (iResFtrSnp.vNs.size(), k);
     if (comb == NULL)
@@ -1470,15 +1498,15 @@ ResFtrSnp_calcAbfsAllConfigs (
  *  each being itself averaged over the small grid
  */
 void
-ResFtrSnp_calcAbfsAvgAll (
+ResFtrSnp_calcAbfAvgAll (
   ResFtrSnp & iResFtrSnp)
 {
   gsl_combination * comb;
   stringstream ssConfig;
   vector<bool> vIsEqtlInConfig; // T,T,F if S=3 and config="1-2"
-  vector<double> vL10Abfs;
+  vector<double> vL10Abfs, vWeights;
   
-  for (size_t k = 1; k <= iResFtrSnp.vNs.size(); ++k) // <=: get full config
+  for (size_t k = 1; k <= iResFtrSnp.vNs.size(); ++k)
   {
     comb = gsl_combination_calloc (iResFtrSnp.vNs.size(), k);
     if (comb == NULL)
@@ -1489,16 +1517,27 @@ ResFtrSnp_calcAbfsAvgAll (
     while (true)
     {
       prepareConfig (ssConfig, vIsEqtlInConfig, comb);
-      vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
+      if (! isNan (iResFtrSnp.mWeightedAbfs[ssConfig.str()]))
+      {
+	vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
+	vWeights.push_back ((1.0 / (double) iResFtrSnp.vNs.size()) *
+			    (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(), k)));
+	// vWeights.push_back (1.0); // old weights
+      }
       if (gsl_combination_next (comb) != GSL_SUCCESS)
 	break;
     }
     gsl_combination_free (comb);
   }
   
-  iResFtrSnp.mWeightedAbfs.insert (
-    make_pair ("all",
-	       log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
+  if (vL10Abfs.size() > 0)
+    iResFtrSnp.mWeightedAbfs.insert (
+      make_pair ("all",
+		 log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]),
+				     vL10Abfs.size())));
+  else
+    iResFtrSnp.mWeightedAbfs.insert (
+      make_pair ("all", numeric_limits<double>::quiet_NaN()));
 }
 
 /** \brief Calculate the ABFs for a given feature-SNP pair
@@ -1522,25 +1561,23 @@ ResFtrSnp_calcAbfs (
   ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 					       vvStdSstats);
   ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
-  if (vvGridS.size() > 0)
-    ResFtrSnp_calcAbfsConstSmallGrid (iResFtrSnp, vvGridS, vvStdSstats);
-  if (whichBfs.compare("subset") == 0)
+  if (whichBfs.compare("sin") == 0)
   {
-    ResFtrSnp_calcAbfsSpecific (iResFtrSnp, vvGridS, vvStdSstats);
-    ResFtrSnp_calcAbfsAvgSubset1And2 (iResFtrSnp);
+    ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+    ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
   }
   else if (whichBfs.compare("all") == 0)
   {
     ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
-    ResFtrSnp_calcAbfsAvgSubset1And2 (iResFtrSnp);
-    ResFtrSnp_calcAbfsAvgAll (iResFtrSnp);
+    ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+    ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
   }
 }
 
 /** \brief Calculate the ABF for the consistent configuration
  *  \note the ABFs for each grid value are averaged with equal weights
- *  \note the large grid should be used if whichPermBf is 'const' or
- *  'subset2', otherwise the small grid if whichPermAbf is 'all'
+ *  \note the large grid should be used if whichPermBf is 'gen' or
+ *  'gen-sin', otherwise the small grid if whichPermAbf is 'all'
  */
 double
 ResFtrSnp_calcAbfConstForPerms (
@@ -1559,18 +1596,21 @@ ResFtrSnp_calcAbfConstForPerms (
 }
 
 double
-ResFtrSnp_calcAbfSubset1ForPerms (
+ResFtrSnp_calcAbfSinForPerms (
   ResFtrSnp & iResFtrSnp,
   const vector<vector<double> > & vvGridS,
   const vector<vector<double> > & vvStdSstats)
 {
   vector<double> vL10Abfs;
-  ResFtrSnp_calcAbfsSpecific (iResFtrSnp, vvGridS, vvStdSstats);
+  
+  ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+  
   for (map<string, double>::const_iterator it =
 	 iResFtrSnp.mWeightedAbfs.begin();
        it != iResFtrSnp.mWeightedAbfs.end(); ++it)
     if (! isNan (it->second))
       vL10Abfs.push_back (it->second);
+  
   if (vL10Abfs.size() == 0)
     return numeric_limits<double>::quiet_NaN();
   else
@@ -1578,25 +1618,35 @@ ResFtrSnp_calcAbfSubset1ForPerms (
 }
 
 double
-ResFtrSnp_calcAbfSubset2ForPerms (
+ResFtrSnp_calcAbfGenSinForPerms (
   ResFtrSnp & iResFtrSnp,
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const vector<vector<double> > & vvStdSstats)
 {
-  vector<double> vL10Abfs;
+  vector<double> vL10Abfs, vWeights;
+  
   vL10Abfs.push_back (ResFtrSnp_calcAbfConstForPerms (iResFtrSnp, vvGridL,
 						      vvStdSstats));
-  ResFtrSnp_calcAbfsSpecific (iResFtrSnp, vvGridS, vvStdSstats);
+  vWeights.push_back (1.0 / 2.0);
+  
+  ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
   for (map<string, double>::const_iterator it =
 	 iResFtrSnp.mWeightedAbfs.begin();
        it != iResFtrSnp.mWeightedAbfs.end(); ++it)
     if (! isNan (it->second))
+    {
       vL10Abfs.push_back (it->second);
+      vWeights.push_back ((1.0 / 2.0) *
+			  (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(), 1)));
+      // vWeights.push_back (1.0); // old weights
+    }
+  
   if (vL10Abfs.size() == 0)
     return numeric_limits<double>::quiet_NaN();
   else
-    return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
+    return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]),
+			       vL10Abfs.size());
 }
 
 double
@@ -1607,32 +1657,28 @@ ResFtrSnp_calcAbfAllForPerms (
 {
   vector<double> vL10Abfs, vWeights;
   
-  vL10Abfs.push_back (ResFtrSnp_calcAbfConstForPerms (iResFtrSnp, vvGridS,
-						      vvStdSstats));
-  vWeights.push_back (1);
-  
   ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
+  
   for (map<string, double>::const_iterator it =
 	 iResFtrSnp.mWeightedAbfs.begin();
        it != iResFtrSnp.mWeightedAbfs.end(); ++it)
     if (! isNan (it->second))
     {
       vL10Abfs.push_back (it->second);
-      vWeights.push_back (1.0 / gsl_sf_choose (
-			    iResFtrSnp.vNs.size(),
-			    (size_t) count (it->first.begin(),
-					    it->first.end(),
-					    '1')));
+      vWeights.push_back ((1.0 / (double) iResFtrSnp.vNs.size()) *
+			  (1.0 / gsl_sf_choose (
+      			    iResFtrSnp.vNs.size(),
+      			    (size_t) count (it->first.begin(),
+      					    it->first.end(),
+      					    '1'))));
+      // vWeights.push_back (1.0); // old weights
     }
   
   if (vL10Abfs.size() == 0)
     return numeric_limits<double>::quiet_NaN();
   else
-  {
-    for (size_t i = 0; i < vWeights.size(); ++i)
-      vWeights[i] *= 1.0 / (double) vL10Abfs.size();
-    return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]), vL10Abfs.size());
-  }
+    return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]),
+			       vL10Abfs.size());
 }
 
 void
@@ -1858,7 +1904,7 @@ Ftr_makePermsSepOneSubgrp (
 }
 
 /** \brief Retrieve the highest log10(ABF) over SNPs of the given feature
- *  \note whichPermBf is 'const', 'subset1', 'subset2' or 'all'
+ *  \note whichPermBf is 'gen', 'sin', 'gen-sin' or 'all'
  */
 void
 Ftr_findMaxL10TrueAbf (
@@ -1872,10 +1918,11 @@ Ftr_findMaxL10TrueAbf (
 }
 
 /** \brief Make permutations for the joint analysis for a given feature
- *  using the BF for the consistent configuration as a test statistic
+ *  using the general BF (consistent configuration + large grid)
+ *  as a test statistic
  */
 void
-Ftr_makePermsJointAbfConst (
+Ftr_makePermsJointAbfGen (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1893,7 +1940,7 @@ Ftr_makePermsJointAbfConst (
   bool shuffleOnly = false;
   Snp iSnp;
   
-  Ftr_findMaxL10TrueAbf (iFtr, "const");
+  Ftr_findMaxL10TrueAbf (iFtr, "gen");
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1938,11 +1985,10 @@ Ftr_makePermsJointAbfConst (
 }
 
 /** \brief Make permutations for the joint analysis for a given feature
- *  averaging the BFs over all subgroup-specific configurations
- *  as a test statistic
+ *  averaging the BFs over all singletons as a test statistic
  */
 void
-Ftr_makePermsJointAbfSubset1 (
+Ftr_makePermsJointAbfSin (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -1960,7 +2006,7 @@ Ftr_makePermsJointAbfSubset1 (
   bool shuffleOnly = false;
   Snp iSnp;
   
-  Ftr_findMaxL10TrueAbf (iFtr, "subset1");
+  Ftr_findMaxL10TrueAbf (iFtr, "sin");
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1986,8 +2032,8 @@ Ftr_makePermsJointAbfSubset1 (
       vector<vector<double> > vvStdSstats;
       ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 						   vvStdSstats);
-      l10Abf = ResFtrSnp_calcAbfSubset1ForPerms (iResFtrSnp, vvGridS,
-						 vvStdSstats);
+      l10Abf = ResFtrSnp_calcAbfSinForPerms (iResFtrSnp, vvGridS,
+					     vvStdSstats);
       if (l10Abf > maxL10PermAbf)
 	maxL10PermAbf = l10Abf;
     }
@@ -2011,7 +2057,7 @@ Ftr_makePermsJointAbfSubset1 (
  *  the BFs for the subgroup-specific configuration uses the small grid
  */
 void
-Ftr_makePermsJointAbfSubset2 (
+Ftr_makePermsJointAbfGenSin (
   Ftr & iFtr,
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -2030,7 +2076,7 @@ Ftr_makePermsJointAbfSubset2 (
   bool shuffleOnly = false;
   Snp iSnp;
   
-  Ftr_findMaxL10TrueAbf (iFtr, "subset2");
+  Ftr_findMaxL10TrueAbf (iFtr, "gen-sin");
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -2056,8 +2102,8 @@ Ftr_makePermsJointAbfSubset2 (
       vector<vector<double> > vvStdSstats;
       ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 						   vvStdSstats);
-      l10Abf = ResFtrSnp_calcAbfSubset2ForPerms (iResFtrSnp, vvGridL,
-						 vvGridS, vvStdSstats);
+      l10Abf = ResFtrSnp_calcAbfGenSinForPerms (iResFtrSnp, vvGridL,
+						vvGridS, vvStdSstats);
       if (l10Abf > maxL10PermAbf)
 	maxL10PermAbf = l10Abf;
     }
@@ -2171,21 +2217,21 @@ Ftr_makePermsJoint (
   iFtr.jointPermPval = 1;
   iFtr.nbPermsSoFar = 0;
   
-  if (whichPermBf.compare("const") == 0)
-    Ftr_makePermsJointAbfConst (iFtr, vvSampleIdxPhenos,
-				vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-				vvGridL, fitNull, nbPerms, trick, rngPerm,
-				perm);
-  else if (whichPermBf.compare("subset1") == 0)
-    Ftr_makePermsJointAbfSubset1 (iFtr, vvSampleIdxPhenos,
-				  vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-				  vvGridS, fitNull, nbPerms, trick, rngPerm,
-				  perm);
-  else if (whichPermBf.compare("subset2") == 0)
-    Ftr_makePermsJointAbfSubset2 (iFtr, vvSampleIdxPhenos,
-				  vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-				  vvGridL, vvGridS, fitNull, nbPerms, trick,
-				  rngPerm, perm);
+  if (whichPermBf.compare("gen") == 0)
+    Ftr_makePermsJointAbfGen (iFtr, vvSampleIdxPhenos,
+			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+			      vvGridL, fitNull, nbPerms, trick, rngPerm,
+			      perm);
+  else if (whichPermBf.compare("sin") == 0)
+    Ftr_makePermsJointAbfSin (iFtr, vvSampleIdxPhenos,
+			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+			      vvGridS, fitNull, nbPerms, trick, rngPerm,
+			      perm);
+  else if (whichPermBf.compare("gen-sin") == 0)
+    Ftr_makePermsJointAbfGenSin (iFtr, vvSampleIdxPhenos,
+				 vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
+				 vvGridL, vvGridS, fitNull, nbPerms, trick,
+				 rngPerm, perm);
   else if (whichPermBf.compare("all") == 0)
     Ftr_makePermsJointAbfAll (iFtr, vvSampleIdxPhenos,
 			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
@@ -3476,67 +3522,43 @@ writeResAbfsRaw (
     for (vector<ResFtrSnp>::const_iterator itP = ptF->vResFtrSnps.begin();
 	 itP != ptF->vResFtrSnps.end(); ++itP)
     {
-      // write const BFs (large grid)
+      // write gen BFs (large grid)
       ssTxt.str("");
       ssTxt << ptF->name
 	    << " " << itP->snp
-	    << " const";
+	    << " gen";
       for (size_t i = 0; i < vvGridL.size(); ++i)
-	ssTxt << " " << itP->mUnweightedAbfs.find("const")->second[i];
+	ssTxt << " " << itP->mUnweightedAbfs.find("gen")->second[i];
       ssTxt << endl;
       ++lineId;
       gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
       
-      // write const-fix BFs (large grid)
+      // write gen-fix BFs (large grid)
       ssTxt.str("");
       ssTxt << ptF->name
 	    << " " << itP->snp
-	    << " const-fix";
+	    << " gen-fix";
       for (size_t i = 0; i < vvGridL.size(); ++i)
-	ssTxt << " " << itP->mUnweightedAbfs.find("const-fix")->second[i];
+	ssTxt << " " << itP->mUnweightedAbfs.find("gen-fix")->second[i];
       ssTxt << endl;
       ++lineId;
       gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
       
-      // write const-maxh BFs (large grid)
+      // write gen-maxh BFs (large grid)
       ssTxt.str("");
       ssTxt << ptF->name
 	    << " " << itP->snp
-	    << " const-maxh";
+	    << " gen-maxh";
       for (size_t i = 0; i < vvGridL.size(); ++i)
-	ssTxt << " " << itP->mUnweightedAbfs.find("const-maxh")->second[i];
+	ssTxt << " " << itP->mUnweightedAbfs.find("gen-maxh")->second[i];
       ssTxt << endl;
       ++lineId;
       gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
       
-      // write const BFs (small grid)
-      if (vvGridS.size() > 0)
-      {
-	ssTxt.str("");
-	ssTxt << ptF->name
-	      << " " << itP->snp;
-	ssConfig.str("");
-	ssConfig << "1";
-	for (size_t s = 1; s < itP->vNs.size(); ++s)
-	  ssConfig << "-" << (s+1);
-	ssTxt << " " << ssConfig.str();
-	for (size_t i = 0; i < vvGridL.size(); ++i)
-	{
-	  if (i < vvGridS.size())
-	    ssTxt << " " << itP->mUnweightedAbfs.find(ssConfig.str())->
-	      second[i];
-	  else
-	    ssTxt << " " << numeric_limits<double>::quiet_NaN();
-	}
-	ssTxt << endl;
-	++lineId;
-	gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
-      }
-      
-      if (whichBfs.compare("const") != 0)
+      if (whichBfs.compare("gen") != 0)
       {
 	// write the BFs for each config (small grid)
-	for (size_t k = 1; k < nbSubgroups; ++k)
+	for (size_t k = 1; k <= nbSubgroups; ++k)
 	{
 	  comb = gsl_combination_calloc (nbSubgroups, k);
 	  if (comb == NULL)
@@ -3570,7 +3592,7 @@ writeResAbfsRaw (
 	    if (gsl_combination_next (comb) != GSL_SUCCESS)
 	      break;
 	  }
-	  if (whichBfs.compare("subset") == 0)
+	  if (whichBfs.compare("sin") == 0)
 	    break;
 	}
       }
@@ -3585,7 +3607,6 @@ writeResAbfsAvgGrids (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
   const size_t & nbSubgroups,
-  const vector<vector<double> > & vvGridS,
   const string & whichBfs,
   const int & verbose)
 {
@@ -3603,22 +3624,14 @@ writeResAbfsAvgGrids (
   
   // write header line
   ssTxt << "ftr snp nb.subgroups nb.samples"
-	<< " l10abf.const l10abf.const.fix l10abf.const.maxh";
-  if (whichBfs.compare("subset") == 0 || whichBfs.compare("all") == 0)
-    ssTxt << " l10abf.subset1 l10abf.subset2";
+	<< " l10abf.gen l10abf.gen.fix l10abf.gen.maxh";
+  if (whichBfs.compare("sin") == 0 || whichBfs.compare("all") == 0)
+    ssTxt << " l10abf.sin l10abf.gen.sin";
   if (whichBfs.compare("all") == 0)
     ssTxt << " l10abf.all";
-  if (vvGridS.size() > 0)
+  if (whichBfs.compare("gen") != 0)
   {
-    ssConfig.str("");
-    ssConfig << "1";
-    for (size_t s = 1; s < nbSubgroups; ++s)
-      ssConfig << "-" << (s+1);
-    ssTxt << " l10abf." << ssConfig.str();
-  }
-  if (whichBfs.compare("const") != 0)
-  {
-    for (size_t k = 1; k < nbSubgroups; ++k)
+    for (size_t k = 1; k <= nbSubgroups; ++k)
     {
       comb = gsl_combination_calloc (nbSubgroups, k);
       if (comb == NULL)
@@ -3635,7 +3648,7 @@ writeResAbfsAvgGrids (
 	if (gsl_combination_next (comb) != GSL_SUCCESS)
 	  break;
       }
-      if (whichBfs.compare("subset") == 0)
+      if (whichBfs.compare("sin") == 0)
 	break;
     }
   }
@@ -3660,25 +3673,17 @@ writeResAbfsAvgGrids (
 	      << " " << itP->snp
 	      << " " << count_if (itP->vNs.begin(), itP->vNs.end(), isNonZero)
 	      << " " << n
-	      << " " << itP->mWeightedAbfs.find("const")->second
-	      << " " << itP->mWeightedAbfs.find("const-fix")->second
-	      << " " << itP->mWeightedAbfs.find("const-maxh")->second;
-	if (whichBfs.compare("subset") == 0 || whichBfs.compare("all") == 0)
-	  ssTxt << " " << itP->mWeightedAbfs.find("subset1")->second
-		<< " " << itP->mWeightedAbfs.find("subset2")->second;
+	      << " " << itP->mWeightedAbfs.find("gen")->second
+	      << " " << itP->mWeightedAbfs.find("gen-fix")->second
+	      << " " << itP->mWeightedAbfs.find("gen-maxh")->second;
+	if (whichBfs.compare("sin") == 0 || whichBfs.compare("all") == 0)
+	  ssTxt << " " << itP->mWeightedAbfs.find("sin")->second
+		<< " " << itP->mWeightedAbfs.find("gen-sin")->second;
 	if (whichBfs.compare("all") == 0)
 	  ssTxt << " " << itP->mWeightedAbfs.find("all")->second;
-	if (vvGridS.size() > 0)
+	if (whichBfs.compare("gen") != 0)
 	{
-	  ssConfig.str("");
-	  ssConfig << "1";
-	  for (size_t s = 1; s < nbSubgroups; ++s)
-	    ssConfig << "-" << (s+1);
-	  ssTxt << " " << itP->mWeightedAbfs.find(ssConfig.str())->second;
-	}
-	if (whichBfs.compare("const") != 0)
-	{
-	  for (size_t k = 1; k < nbSubgroups; ++k)
+	  for (size_t k = 1; k <= nbSubgroups; ++k)
 	  {
 	    comb = gsl_combination_calloc (nbSubgroups, k);
 	    if (comb == NULL)
@@ -3699,7 +3704,7 @@ writeResAbfsAvgGrids (
 	      if (gsl_combination_next (comb) != GSL_SUCCESS)
 		break;
 	    }
-	    if (whichBfs.compare("subset") == 0)
+	    if (whichBfs.compare("sin") == 0)
 	      break;
 	  }
 	}
@@ -3776,8 +3781,8 @@ writeRes (
     if (outRaw)
       writeResAbfsRaw (outPrefix, mFtrs, vSubgroups.size(), vvGridL, vvGridS,
 		       whichBfs, verbose);
-    writeResAbfsAvgGrids (outPrefix, mFtrs, vSubgroups.size(), vvGridS,
-			  whichBfs, verbose);
+    writeResAbfsAvgGrids (outPrefix, mFtrs, vSubgroups.size(), whichBfs,
+			  verbose);
   }
   
   if (whichStep == 4 || whichStep == 5)
@@ -3865,7 +3870,7 @@ int main (int argc, char ** argv)
   bool outRaw = false, needQnorm = false, fitNull = false;
   string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
     anchor = "FSS", outPrefix, covarPathsFile, largeGridFile, smallGridFile,
-    whichBfs = "const", whichPermBf = "const", ftrsToKeepFile, snpsToKeepFile;
+    whichBfs = "gen", whichPermBf = "gen", ftrsToKeepFile, snpsToKeepFile;
   
   parseArgs (argc, argv, genoPathsFile, snpCoordFile, phenoPathsFile,
 	     ftrCoordsFile, anchor, lenCis, outPrefix, outRaw, whichStep,
