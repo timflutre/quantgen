@@ -1241,7 +1241,7 @@ ResFtrSnp_calcAbfsConstLargeGrid (
 						vL10AbfsConst));
   iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen-fix",
 						vL10AbfsConstFix));
-  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("const-maxh",
+  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen-maxh",
 						vL10AbfsConstMaxh));
   
   iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen",
