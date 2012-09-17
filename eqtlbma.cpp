@@ -1258,36 +1258,6 @@ ResFtrSnp_calcAbfsConstLargeGrid (
 						vvGridL.size())));
 }
 
-/** \brief Calculate the ABF for the consistent configuration,
- *  averaged over the small grid
- *  \note the configuration is represented by the indices
- *  of all subgroup (eg. '1-2-3-4-5' if there are 5 subgroups)
- *  to distinguish it from 'gen' (large grid)
- */
-void
-ResFtrSnp_calcAbfsConstSmallGrid (
-  ResFtrSnp & iResFtrSnp,
-  const vector< vector<double> > & vvGridS,
-  const vector<vector<double> > & vvStdSstats)
-{
-  vector<double> vL10Abfs (vvGridS.size(), 0.0);
-  for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
-    vL10Abfs[gridIdx] = (getAbfFromStdSumStats (
-			   iResFtrSnp.vNs,
-			   vvStdSstats,
-			   vvGridS[gridIdx][0],
-			   vvGridS[gridIdx][1]));
-  stringstream ssConfig;
-  ssConfig << "1";
-  for (size_t s = 1; s < iResFtrSnp.vNs.size(); ++s)
-    ssConfig << "-" << (s+1);
-  iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(), vL10Abfs));
-  iResFtrSnp.mWeightedAbfs.insert (make_pair (ssConfig.str(),
-					      log10_weighted_sum (
-						&(vL10Abfs[0]),
-						vvGridS.size())));
-}
-
 /** \brief Calculate the ABF for each singleton, averaged over the small grid
  *  \note the configuration is represented by the index of the given subgroup
  *  (eg. '1' if in the first subgroup)
@@ -1367,8 +1337,8 @@ ResFtrSnp_calcAbfsAvgSinAndGenSin (
     if (! isNan (iResFtrSnp.mWeightedAbfs[ssConfig.str()]))
     {
       vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
-      vWeights.push_back (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(),
-      			    1));
+      vWeights.push_back ((1.0 / 2.0) *
+			  (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(), 1)));
       // vWeights.push_back (1.0); // old weights
     }
   }
@@ -1379,8 +1349,6 @@ ResFtrSnp_calcAbfsAvgSinAndGenSin (
       make_pair ("sin",
 		 log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())));
     
-    for (size_t i = 0; i < vWeights.size(); ++i)
-      vWeights[i] *= 1.0 / 2.0;
     vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs["gen"]);
     vWeights.push_back (1.0 / 2.0);
     iResFtrSnp.mWeightedAbfs.insert (
@@ -1423,8 +1391,8 @@ prepareConfig (
   }
 }
 
-/** \brief Calculate the ABF for all configurations (except the consistent),
- *  averaged over the small grid
+/** \brief Calculate the ABF for all configurations, averaged over
+ *  the small grid
  */
 void
 ResFtrSnp_calcAbfsAllConfigs (
@@ -1572,113 +1540,6 @@ ResFtrSnp_calcAbfs (
     ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
     ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
   }
-}
-
-/** \brief Calculate the ABF for the consistent configuration
- *  \note the ABFs for each grid value are averaged with equal weights
- *  \note the large grid should be used if whichPermBf is 'gen' or
- *  'gen-sin', otherwise the small grid if whichPermAbf is 'all'
- */
-double
-ResFtrSnp_calcAbfConstForPerms (
-  ResFtrSnp & iResFtrSnp,
-  const vector< vector<double> > & vvGrid,
-  const vector<vector<double> > & vvStdSstats)
-{
-  vector<double> vL10Abfs (vvGrid.size(), 0.0);
-  for (size_t gridIdx = 0; gridIdx < vvGrid.size(); ++gridIdx)
-    vL10Abfs[gridIdx] = (getAbfFromStdSumStats (
-			   iResFtrSnp.vNs,
-			   vvStdSstats,
-			   vvGrid[gridIdx][0],
-			   vvGrid[gridIdx][1]));
-  return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
-}
-
-double
-ResFtrSnp_calcAbfSinForPerms (
-  ResFtrSnp & iResFtrSnp,
-  const vector<vector<double> > & vvGridS,
-  const vector<vector<double> > & vvStdSstats)
-{
-  vector<double> vL10Abfs;
-  
-  ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
-  
-  for (map<string, double>::const_iterator it =
-	 iResFtrSnp.mWeightedAbfs.begin();
-       it != iResFtrSnp.mWeightedAbfs.end(); ++it)
-    if (! isNan (it->second))
-      vL10Abfs.push_back (it->second);
-  
-  if (vL10Abfs.size() == 0)
-    return numeric_limits<double>::quiet_NaN();
-  else
-    return log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
-}
-
-double
-ResFtrSnp_calcAbfGenSinForPerms (
-  ResFtrSnp & iResFtrSnp,
-  const vector<vector<double> > & vvGridL,
-  const vector<vector<double> > & vvGridS,
-  const vector<vector<double> > & vvStdSstats)
-{
-  vector<double> vL10Abfs, vWeights;
-  
-  vL10Abfs.push_back (ResFtrSnp_calcAbfConstForPerms (iResFtrSnp, vvGridL,
-						      vvStdSstats));
-  vWeights.push_back (1.0 / 2.0);
-  
-  ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
-  for (map<string, double>::const_iterator it =
-	 iResFtrSnp.mWeightedAbfs.begin();
-       it != iResFtrSnp.mWeightedAbfs.end(); ++it)
-    if (! isNan (it->second))
-    {
-      vL10Abfs.push_back (it->second);
-      vWeights.push_back ((1.0 / 2.0) *
-			  (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(), 1)));
-      // vWeights.push_back (1.0); // old weights
-    }
-  
-  if (vL10Abfs.size() == 0)
-    return numeric_limits<double>::quiet_NaN();
-  else
-    return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]),
-			       vL10Abfs.size());
-}
-
-double
-ResFtrSnp_calcAbfAllForPerms (
-  ResFtrSnp & iResFtrSnp,
-  const vector< vector<double> > & vvGridS,
-  const vector<vector<double> > & vvStdSstats)
-{
-  vector<double> vL10Abfs, vWeights;
-  
-  ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
-  
-  for (map<string, double>::const_iterator it =
-	 iResFtrSnp.mWeightedAbfs.begin();
-       it != iResFtrSnp.mWeightedAbfs.end(); ++it)
-    if (! isNan (it->second))
-    {
-      vL10Abfs.push_back (it->second);
-      vWeights.push_back ((1.0 / (double) iResFtrSnp.vNs.size()) *
-			  (1.0 / gsl_sf_choose (
-      			    iResFtrSnp.vNs.size(),
-      			    (size_t) count (it->first.begin(),
-      					    it->first.end(),
-      					    '1'))));
-      // vWeights.push_back (1.0); // old weights
-    }
-  
-  if (vL10Abfs.size() == 0)
-    return numeric_limits<double>::quiet_NaN();
-  else
-    return log10_weighted_sum (&(vL10Abfs[0]), &(vWeights[0]),
-			       vL10Abfs.size());
 }
 
 void
@@ -1966,8 +1827,8 @@ Ftr_makePermsJointAbfGen (
       vector<vector<double> > vvStdSstats;
       ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 						   vvStdSstats);
-      l10Abf = ResFtrSnp_calcAbfConstForPerms (iResFtrSnp, vvGridL,
-					       vvStdSstats);
+      ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
+      l10Abf = iResFtrSnp.mWeightedAbfs["gen"];
       if (l10Abf > maxL10PermAbf)
 	maxL10PermAbf = l10Abf;
     }
@@ -2032,8 +1893,9 @@ Ftr_makePermsJointAbfSin (
       vector<vector<double> > vvStdSstats;
       ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 						   vvStdSstats);
-      l10Abf = ResFtrSnp_calcAbfSinForPerms (iResFtrSnp, vvGridS,
-					     vvStdSstats);
+      ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+      ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+      l10Abf = iResFtrSnp.mWeightedAbfs["sin"];
       if (l10Abf > maxL10PermAbf)
 	maxL10PermAbf = l10Abf;
     }
@@ -2102,8 +1964,10 @@ Ftr_makePermsJointAbfGenSin (
       vector<vector<double> > vvStdSstats;
       ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 						   vvStdSstats);
-      l10Abf = ResFtrSnp_calcAbfGenSinForPerms (iResFtrSnp, vvGridL,
-						vvGridS, vvStdSstats);
+      ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
+      ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+      ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+      l10Abf = iResFtrSnp.mWeightedAbfs["gen-sin"];
       if (l10Abf > maxL10PermAbf)
 	maxL10PermAbf = l10Abf;
     }
@@ -2169,7 +2033,9 @@ Ftr_makePermsJointAbfAll (
       vector<vector<double> > vvStdSstats;
       ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
 						   vvStdSstats);
-      l10Abf = ResFtrSnp_calcAbfAllForPerms (iResFtrSnp, vvGridS, vvStdSstats);
+      ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
+      ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
+      l10Abf = iResFtrSnp.mWeightedAbfs["all"];
       if (l10Abf > maxL10PermAbf)
 	maxL10PermAbf = l10Abf;
     }
