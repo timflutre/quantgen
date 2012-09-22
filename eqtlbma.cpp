@@ -843,7 +843,7 @@ struct Ftr
   vector<double> vMinTruePvals; // min true P-value over SNPs in each subgroup
   double jointPermPval; // permutation P-value of the joint analysis
   size_t nbPermsSoFar;
-  double maxL10TrueAbf;
+  double avgL10TrueAbf;
 };
 
 void
@@ -1564,7 +1564,7 @@ Ftr_init (
   iFtr.vMinTruePvals.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
   iFtr.jointPermPval = numeric_limits<double>::quiet_NaN();
   iFtr.nbPermsSoFar = 0;
-  iFtr.maxL10TrueAbf = numeric_limits<double>::quiet_NaN();
+  iFtr.avgL10TrueAbf = numeric_limits<double>::quiet_NaN();
 }
 
 // assume both features are on the same chromosome
@@ -1698,7 +1698,6 @@ Ftr_makePermsSepOneSubgrp (
   const gsl_rng * & rngPerm,
   const gsl_rng * & rngTrick)
 {
-//  clock_t timeBegin = clock();
   gsl_permutation * perm = NULL;
   double minPermBetaPval;
   bool shuffleOnly = false;
@@ -1761,295 +1760,21 @@ Ftr_makePermsSepOneSubgrp (
     
     gsl_permutation_free (perm);
   }
-//  cout << endl << setprecision(8) << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0) << endl;
 }
 
-/** \brief Retrieve the highest log10(ABF) over SNPs of the given feature
+/** \brief Average the log10(ABF) over SNPs of the given feature
  *  \note whichPermBf is 'gen', 'sin', 'gen-sin' or 'all'
  */
 void
-Ftr_findMaxL10TrueAbf (
+Ftr_avgL10TrueAbfs (
   Ftr & iFtr,
   const string & whichPermBf)
 {
-  iFtr.maxL10TrueAbf = - numeric_limits<double>::infinity();
+  vector<double> vL10Abfs;
   for (size_t snpId = 0; snpId < iFtr.vResFtrSnps.size(); ++snpId)
-    if (iFtr.vResFtrSnps[snpId].mWeightedAbfs[whichPermBf] > iFtr.maxL10TrueAbf)
-      iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs[whichPermBf];
-}
-
-/** \brief Make permutations for the joint analysis for a given feature
- *  using the general BF (consistent configuration + large grid)
- *  as a test statistic
- */
-void
-Ftr_makePermsJointAbfGen (
-  Ftr & iFtr,
-  const vector<vector<size_t> > & vvSampleIdxPhenos,
-  const vector<vector<size_t> > & vvSampleIdxGenos,
-  const bool & needQnorm,
-  const vector<map<string, vector<double> > > & vSbgrp2Covars,
-  const vector<vector<double> > & vvGridL,
-  const bool & fitNull,
-  const size_t & nbPerms,
-  const int & trick,
-  const gsl_rng * & rngPerm,
-  const gsl_permutation * perm)
-{
-  size_t nbSubgroups = iFtr.vvPhenos.size();
-  double maxL10PermAbf, l10Abf;
-  bool shuffleOnly = false;
-  Snp iSnp;
-  
-  Ftr_findMaxL10TrueAbf (iFtr, "gen");
-  
-  for(size_t permId = 0; permId < nbPerms; ++permId)
-  {
-    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
-    if (shuffleOnly)
-      continue;
-    
-    ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = - numeric_limits<double>::infinity();
-    
-    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
-    {
-      iSnp = *(iFtr.vPtCisSnps[snpId]);
-      ResFtrSnp iResFtrSnp;
-      ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
-      for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0 &&
-	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-					   vvSampleIdxPhenos,
-					   vvSampleIdxGenos,
-					   needQnorm, vSbgrp2Covars, perm);
-      vector<vector<double> > vvStdSstats;
-      ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
-						   vvStdSstats);
-      ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
-      l10Abf = iResFtrSnp.mWeightedAbfs["gen"];
-      if (l10Abf > maxL10PermAbf)
-	maxL10PermAbf = l10Abf;
-    }
-    
-    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
-      ++iFtr.jointPermPval;
-    if (trick != 0 && iFtr.jointPermPval == 11)
-    {
-      if (trick == 1)
-	break;
-      else if (trick == 2)
-	shuffleOnly = true;
-    }
-  }
-}
-
-/** \brief Make permutations for the joint analysis for a given feature
- *  averaging the BFs over all singletons as a test statistic
- */
-void
-Ftr_makePermsJointAbfSin (
-  Ftr & iFtr,
-  const vector<vector<size_t> > & vvSampleIdxPhenos,
-  const vector<vector<size_t> > & vvSampleIdxGenos,
-  const bool & needQnorm,
-  const vector<map<string, vector<double> > > & vSbgrp2Covars,
-  const vector<vector<double> > & vvGridS,
-  const bool & fitNull,
-  const size_t & nbPerms,
-  const int & trick,
-  const gsl_rng * & rngPerm,
-  const gsl_permutation * perm)
-{
-  size_t nbSubgroups = iFtr.vvPhenos.size();
-  double maxL10PermAbf, l10Abf;
-  bool shuffleOnly = false;
-  Snp iSnp;
-  
-  Ftr_findMaxL10TrueAbf (iFtr, "sin");
-  
-  for(size_t permId = 0; permId < nbPerms; ++permId)
-  {
-    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
-    if (shuffleOnly)
-      continue;
-    
-    ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = - numeric_limits<double>::infinity();
-    
-    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
-    {
-      iSnp = *(iFtr.vPtCisSnps[snpId]);
-      ResFtrSnp iResFtrSnp;
-      ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
-      for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0 &&
-	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-					   vvSampleIdxPhenos,
-					   vvSampleIdxGenos,
-					   needQnorm, vSbgrp2Covars, perm);
-      vector<vector<double> > vvStdSstats;
-      ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
-						   vvStdSstats);
-      ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
-      ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
-      l10Abf = iResFtrSnp.mWeightedAbfs["sin"];
-      if (l10Abf > maxL10PermAbf)
-	maxL10PermAbf = l10Abf;
-    }
-    
-    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
-      ++iFtr.jointPermPval;
-    if (trick != 0 && iFtr.jointPermPval == 11)
-    {
-      if (trick == 1)
-	break;
-      else if (trick == 2)
-	shuffleOnly = true;
-    }
-  }
-}
-
-/** \brief Make permutations for the joint analysis for a given feature
- *  averaging the BFs over the consistent configuration and each
- *  subgroup-specific configuration as a test statistic
- *  \note the BF for the consistent configuration uses the large grid, but
- *  the BFs for the subgroup-specific configuration uses the small grid
- */
-void
-Ftr_makePermsJointAbfGenSin (
-  Ftr & iFtr,
-  const vector<vector<size_t> > & vvSampleIdxPhenos,
-  const vector<vector<size_t> > & vvSampleIdxGenos,
-  const bool & needQnorm,
-  const vector<map<string, vector<double> > > & vSbgrp2Covars,
-  const vector<vector<double> > & vvGridL,
-  const vector<vector<double> > & vvGridS,
-  const bool & fitNull,
-  const size_t & nbPerms,
-  const int & trick,
-  const gsl_rng * & rngPerm,
-  const gsl_permutation * perm)
-{
-  size_t nbSubgroups = iFtr.vvPhenos.size();
-  double maxL10PermAbf, l10Abf;
-  bool shuffleOnly = false;
-  Snp iSnp;
-  
-  Ftr_findMaxL10TrueAbf (iFtr, "gen-sin");
-  
-  for(size_t permId = 0; permId < nbPerms; ++permId)
-  {
-    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
-    if (shuffleOnly)
-      continue;
-    
-    ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = - numeric_limits<double>::infinity();
-    
-    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
-    {
-      iSnp = *(iFtr.vPtCisSnps[snpId]);
-      ResFtrSnp iResFtrSnp;
-      ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
-      for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0 &&
-	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-					   vvSampleIdxPhenos,
-					   vvSampleIdxGenos,
-					   needQnorm, vSbgrp2Covars, perm);
-      vector<vector<double> > vvStdSstats;
-      ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
-						   vvStdSstats);
-      ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
-      ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
-      ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
-      l10Abf = iResFtrSnp.mWeightedAbfs["gen-sin"];
-      if (l10Abf > maxL10PermAbf)
-	maxL10PermAbf = l10Abf;
-    }
-    
-    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
-      ++iFtr.jointPermPval;
-    if (trick != 0 && iFtr.jointPermPval == 11)
-    {
-      if (trick == 1)
-	break;
-      else if (trick == 2)
-	shuffleOnly = true;
-    }
-  }
-}
-
-/** \brief Make permutations for the joint analysis for a given feature
- *  averaging the BFs over all configurations as a test statistic
- *  \note all BFs are averaged over the small grid
- */
-void
-Ftr_makePermsJointAbfAll (
-  Ftr & iFtr,
-  const vector<vector<size_t> > & vvSampleIdxPhenos,
-  const vector<vector<size_t> > & vvSampleIdxGenos,
-  const bool & needQnorm,
-  const vector<map<string, vector<double> > > & vSbgrp2Covars,
-  const vector<vector<double> > & vvGridS,
-  const bool & fitNull,
-  const size_t & nbPerms,
-  const int & trick,
-  const gsl_rng * & rngPerm,
-  const gsl_permutation * perm)
-{
-  size_t nbSubgroups = iFtr.vvPhenos.size();
-  double maxL10PermAbf, l10Abf;
-  bool shuffleOnly = false;
-  Snp iSnp;
-  
-  Ftr_findMaxL10TrueAbf (iFtr, "all");
-  
-  for(size_t permId = 0; permId < nbPerms; ++permId)
-  {
-    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
-    if (shuffleOnly)
-      continue;
-    
-    ++iFtr.nbPermsSoFar;
-    maxL10PermAbf = - numeric_limits<double>::infinity();
-    
-    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
-    {
-      iSnp = *(iFtr.vPtCisSnps[snpId]);
-      ResFtrSnp iResFtrSnp;
-      ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
-      for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0 &&
-	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-					   vvSampleIdxPhenos,
-					   vvSampleIdxGenos,
-					   needQnorm, vSbgrp2Covars, perm);
-      vector<vector<double> > vvStdSstats;
-      ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
-						   vvStdSstats);
-      ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
-      ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
-      l10Abf = iResFtrSnp.mWeightedAbfs["all"];
-      if (l10Abf > maxL10PermAbf)
-	maxL10PermAbf = l10Abf;
-    }
-    
-    if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
-      ++iFtr.jointPermPval;
-    if (trick != 0 && iFtr.jointPermPval == 11)
-    {
-      if (trick == 1)
-	break;
-      else if (trick == 2)
-	shuffleOnly = true;
-    }
-  }
+    if (! isNan (iFtr.vResFtrSnps[snpId].mWeightedAbfs[whichPermBf]))
+      vL10Abfs.push_back (iFtr.vResFtrSnps[snpId].mWeightedAbfs[whichPermBf]);
+  iFtr.avgL10TrueAbf = log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size());
 }
 
 /** \brief Make permutations for the joint analysis for a given feature
@@ -2083,25 +1808,69 @@ Ftr_makePermsJoint (
   iFtr.jointPermPval = 1;
   iFtr.nbPermsSoFar = 0;
   
-  if (whichPermBf.compare("gen") == 0)
-    Ftr_makePermsJointAbfGen (iFtr, vvSampleIdxPhenos,
-			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-			      vvGridL, fitNull, nbPerms, trick, rngPerm,
-			      perm);
-  else if (whichPermBf.compare("sin") == 0)
-    Ftr_makePermsJointAbfSin (iFtr, vvSampleIdxPhenos,
-			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-			      vvGridS, fitNull, nbPerms, trick, rngPerm,
-			      perm);
-  else if (whichPermBf.compare("gen-sin") == 0)
-    Ftr_makePermsJointAbfGenSin (iFtr, vvSampleIdxPhenos,
-				 vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-				 vvGridL, vvGridS, fitNull, nbPerms, trick,
-				 rngPerm, perm);
-  else if (whichPermBf.compare("all") == 0)
-    Ftr_makePermsJointAbfAll (iFtr, vvSampleIdxPhenos,
-			      vvSampleIdxGenos, needQnorm, vSbgrp2Covars,
-			      vvGridS, fitNull, nbPerms, trick, rngPerm,perm);
+  size_t nbSubgroups = iFtr.vvPhenos.size();
+  vector<double> vL10Abfs;
+  bool shuffleOnly = false;
+  Snp iSnp;
+  
+  Ftr_avgL10TrueAbfs (iFtr, whichPermBf);
+  
+  for(size_t permId = 0; permId < nbPerms; ++permId)
+  {
+    gsl_ran_shuffle (rngPerm, perm->data, perm->size, sizeof(size_t));
+    if (shuffleOnly)
+      continue;
+    
+    ++iFtr.nbPermsSoFar;
+    vL10Abfs.clear ();
+    
+    for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
+    {
+      iSnp = *(iFtr.vPtCisSnps[snpId]);
+      ResFtrSnp iResFtrSnp;
+      ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
+      for (size_t s = 0; s < nbSubgroups; ++s)
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
+	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
+					   vvSampleIdxPhenos,
+					   vvSampleIdxGenos,
+					   needQnorm, vSbgrp2Covars, perm);
+      vector<vector<double> > vvStdSstats;
+      ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
+						   vvStdSstats);
+      if (whichPermBf.compare("gen") == 0)
+      	ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
+      else if (whichPermBf.compare("sin") == 0)
+      {
+      	ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+      	ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+      }
+      else if (whichPermBf.compare("gen-sin") == 0)
+      {
+      	ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
+      	ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+      	ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+      }
+      else if (whichPermBf.compare("all") == 0)
+      {
+	ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
+	ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
+      }
+      vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[whichPermBf]);
+    }
+    
+    if (log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())
+    	>= iFtr.avgL10TrueAbf)
+      ++iFtr.jointPermPval;
+    if (trick != 0 && iFtr.jointPermPval == 11)
+    {
+      if (trick == 1)
+	break;
+      else if (trick == 2)
+	shuffleOnly = true;
+    }
+  }
   
   if (iFtr.nbPermsSoFar == nbPerms)
     iFtr.jointPermPval /= (nbPerms + 1);
@@ -3601,7 +3370,7 @@ writeResJointPermPval (
   gzFile outStream;
   openFile (ssOutFile.str(), outStream, "wb");
   
-  ssTxt << "ftr nbSnps jointPermPval nbPerms maxL10TrueAbf" << endl;
+  ssTxt << "ftr nbSnps jointPermPval nbPerms avgL10TrueAbf" << endl;
   size_t lineId = 1;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
@@ -3614,7 +3383,7 @@ writeResJointPermPval (
 	  << " " << itF->second.vPtCisSnps.size()
 	  << " " << itF->second.jointPermPval
 	  << " " << itF->second.nbPermsSoFar
-	  << " " << itF->second.maxL10TrueAbf
+	  << " " << itF->second.avgL10TrueAbf
 	  << endl;
     gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   }
