@@ -52,6 +52,10 @@ using namespace std;
 
 #include "utils.h"
 
+#ifdef LIB_MVLR
+#include "MVLR.h"
+#endif
+
 /** \brief Display the help on stdout.
  */
 void help (char ** argv)
@@ -128,6 +132,11 @@ void help (char ** argv)
        << "\t\t they use the small grid (BFgen-sin is also reported)" << endl
        << "\t\t'all': compute also the BFs for all configurations (costly if many subgroups)" << endl
        << "\t\t all BFs use the small grid" << endl
+       << "      --mltvr\tuse the multivariate version of the ABF" << endl
+       << "\t\tallows for correlation between samples in the errors" << endl
+       << "\t\tespecially useful when subgroups come from same individuals" << endl
+       << "\t\trequires --fitnull as the small sample size correction works only for univariate ABF" << endl
+       << "\t\tcurrently only works with --step 3" << endl
        << "      --fitnull\testimate the variance of the errors on the null model (no genotype effect)" << endl
        << "\t\tgood accuracy if SNPs have very small effect sizes" << endl
        << "      --nperm\tnumber of permutations" << endl
@@ -150,6 +159,8 @@ void help (char ** argv)
        << "\t\t'sin': average only over the singletons" << endl
        << "\t\t'gen-sin': 0.5 BFgen + 0.5 BFsin" << endl
        << "\t\t'all': average over all configurations" << endl
+       << "      --maxbf\tuse the maximum ABF over SNPs as test statistic for permutations" << endl
+       << "\t\totherwise the average ABF over SNPs is used (more Bayesian)" << endl
        << "  -f, --ftr\tfile with a list of features to analyze" << endl
        << "\t\tone feature name per line" << endl
        << "\t\tallows to easily parallelize a whole analyzis" << endl
@@ -193,11 +204,13 @@ parseArgs (
   string & largeGridFile,
   string & smallGridFile,
   string & whichBfs,
+  bool & mltvr,
   bool & fitNull,
   size_t & nbPerms,
   size_t & seed,
   int & trick,
   string & whichPermBf,
+  bool & useMaxBfOverSnps,
   string & ftrsToKeepFile,
   string & snpsToKeepFile,
   int & verbose)
@@ -224,11 +237,13 @@ parseArgs (
 	{"gridL", required_argument, 0, 0},
 	{"gridS", required_argument, 0, 0},
 	{"bfs", required_argument, 0, 0},
+	{"mltvr", no_argument, 0, 0},
 	{"fitnull", no_argument, 0, 0},
 	{"nperm", required_argument, 0, 0},
 	{"seed", required_argument, 0, 0},
 	{"trick", required_argument, 0, 0},
 	{"pbf", required_argument, 0, 0},
+	{"maxbf", no_argument, 0, 0},
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
 	{0, 0, 0, 0}
@@ -298,6 +313,11 @@ parseArgs (
 	whichBfs = optarg;
 	break;
       }
+      if (strcmp(long_options[option_index].name, "mltvr") == 0)
+      {
+	mltvr = true;
+	break;
+      }
       if (strcmp(long_options[option_index].name, "fitnull") == 0)
       {
 	fitNull = true;
@@ -321,6 +341,11 @@ parseArgs (
       if (strcmp(long_options[option_index].name, "pbf") == 0)
       {
 	whichPermBf = optarg;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "maxbf") == 0)
+      {
+	useMaxBfOverSnps = true;
 	break;
       }
     case 'h':
@@ -357,63 +382,63 @@ parseArgs (
   }
   if (genoPathsFile.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: missing compulsory option -g\n\n");
     help (argv);
     exit (1);
   }
   if (! doesFileExist (genoPathsFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't file '%s'\n\n", genoPathsFile.c_str());
     help (argv);
     exit (1);
   }
   if (! snpCoordsFile.empty() && ! doesFileExist (snpCoordsFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't file '%s'\n\n", snpCoordsFile.c_str());
     help (argv);
     exit (1);
   }
   if (phenoPathsFile.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: missing compulsory option -p\n\n");
     help (argv);
     exit (1);
   }
   if (! doesFileExist (phenoPathsFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't find '%s'\n\n", phenoPathsFile.c_str());
     help (argv);
     exit (1);
   }
   if (ftrCoordsFile.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: missing compulsory option --fcoord\n\n");
     help (argv);
     exit (1);
   }
   if (! doesFileExist (ftrCoordsFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't find '%s'\n\n", ftrCoordsFile.c_str());
     help (argv);
     exit (1);
   }
   if (anchor.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: SNPs in trans not yet implemented, see --anchor and --cis\n\n");
     help (argv);
     exit (1);
   }
   if (outPrefix.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: missing compulsory option -o\n\n");
     help (argv);
     exit (1);
@@ -428,7 +453,7 @@ parseArgs (
   if (whichStep != 1 && whichStep != 2 && whichStep != 3 && whichStep != 4
       && whichStep != 5)
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: --step should be 1, 2, 3, 4 or 5\n\n");
     help (argv);
     exit (1);
@@ -436,14 +461,14 @@ parseArgs (
   if ((whichStep == 3 || whichStep == 4 || whichStep == 5)
       && largeGridFile.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: missing compulsory option --gridL with --step 3, 4 or 5\n\n");
     help (argv);
     exit (1);
   }
   if (! largeGridFile.empty() && ! doesFileExist (largeGridFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't find '%s'\n\n", largeGridFile.c_str());
     help (argv);
     exit (1);
@@ -452,14 +477,14 @@ parseArgs (
       && (whichBfs.compare("sin") == 0 || whichBfs.compare("all") == 0)
       && smallGridFile.empty())
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: missing compulsory option --gridS with --step 3, 4 or 5 and --bfs sin or all\n\n");
     help (argv);
     exit (1);
   }
   if (! smallGridFile.empty() && ! doesFileExist (smallGridFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't find '%s'\n\n", smallGridFile.c_str());
     help (argv);
     exit (1);
@@ -467,21 +492,35 @@ parseArgs (
   if (whichBfs.compare("gen") != 0 && whichBfs.compare("sin") != 0
       && whichBfs.compare("all") != 0)
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: --bf should be 'gen', 'sin' or 'all'\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (mltvr && ! fitNull)
+  {
+    printCmdLine (cerr, argc, argv);
+    fprintf (stderr, "ERROR: --mltvr requires --fitnull\n\n");
+    help (argv);
+    exit (1);
+  }
+  if (mltvr && whichStep != 3)
+  {
+    printCmdLine (cerr, argc, argv);
+    fprintf (stderr, "ERROR: --mltvr currently only works with --step 3\n\n");
     help (argv);
     exit (1);
   }
   if ((whichStep == 2 || whichStep == 4 || whichStep == 5) && nbPerms == 0)
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: --step %i but nbPerms = 0, see --nperm\n\n", whichStep);
     help (argv);
     exit (1);
   }
   if (trick != 0 && trick != 1 && trick != 2)
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: --trick should be 0, 1 or 2\n\n");
     help (argv);
     exit (1);
@@ -489,7 +528,7 @@ parseArgs (
   if ((whichStep == 4 || whichStep == 5) && whichBfs.compare("gen") == 0
       && whichPermBf.compare("gen") != 0)
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: if --bfs gen, then --pbf should be 'gen' too\n\n");
     help (argv);
     exit (1);
@@ -497,21 +536,21 @@ parseArgs (
   if ((whichStep == 4 || whichStep == 5) && whichBfs.compare("sin") == 0
       && whichPermBf.compare("all") == 0)
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: if --bfs sin, then --pbf should be 'gen', 'sin' or 'gen-sin'\n\n");
     help (argv);
     exit (1);
   }
   if (! ftrsToKeepFile.empty() && ! doesFileExist (ftrsToKeepFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't find '%s'\n\n", ftrsToKeepFile.c_str());
     help (argv);
     exit (1);
   }
   if (! snpsToKeepFile.empty() && ! doesFileExist (snpsToKeepFile))
   {
-    printCmdLine (argc, argv);
+    printCmdLine (cerr, argc, argv);
     fprintf (stderr, "ERROR: can't find '%s'\n\n", snpsToKeepFile.c_str());
     help (argv);
     exit (1);
@@ -843,6 +882,7 @@ struct Ftr
   vector<double> vMinTruePvals; // min true P-value over SNPs in each subgroup
   double jointPermPval; // permutation P-value of the joint analysis
   size_t nbPermsSoFar;
+  double maxL10TrueAbf;
   double avgL10TrueAbf;
 };
 
@@ -1564,6 +1604,7 @@ Ftr_init (
   iFtr.vMinTruePvals.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
   iFtr.jointPermPval = numeric_limits<double>::quiet_NaN();
   iFtr.nbPermsSoFar = 0;
+  iFtr.maxL10TrueAbf = numeric_limits<double>::quiet_NaN();
   iFtr.avgL10TrueAbf = numeric_limits<double>::quiet_NaN();
 }
 
@@ -1634,30 +1675,87 @@ Ftr_inferAssos (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const string & whichBfs,
+  const bool & mltvr,
   const bool & fitNull,
   const int & verbose)
 {
   size_t nbSubgroups = iFtr.vvPhenos.size();
+  Snp iSnp;
   for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
   {
     if (verbose > 0)
       cout << iFtr.name << " " << iFtr.vPtCisSnps[snpId]->name << endl;
-    ResFtrSnp iResFtrSnp;
-    ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
-    for (size_t s = 0; s < nbSubgroups; ++s)
+    if (! mltvr) // univariate model
     {
-      if (iFtr.vvPhenos[s].size() > 0 &&
-	  iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
+      ResFtrSnp iResFtrSnp;
+      ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
+      for (size_t s = 0; s < nbSubgroups; ++s)
       {
-	ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr,
-				     *(iFtr.vPtCisSnps[snpId]), s,
-				     vvSampleIdxPhenos, vvSampleIdxGenos,
-				     needQnorm, vSbgrp2Covars, fitNull);
+	if (iFtr.vvPhenos[s].size() > 0 &&
+	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
+	{
+	  ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr,
+				       *(iFtr.vPtCisSnps[snpId]), s,
+				       vvSampleIdxPhenos, vvSampleIdxGenos,
+				       needQnorm, vSbgrp2Covars, fitNull);
+	}
       }
+      if (whichStep == 3 || whichStep == 4 || whichStep == 5)
+	ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
+      iFtr.vResFtrSnps.push_back (iResFtrSnp);
     }
-    if (whichStep == 3 || whichStep == 4 || whichStep == 5)
-      ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
-    iFtr.vResFtrSnps.push_back (iResFtrSnp);
+    else // multivariate model
+    {
+      vector<vector<double> > Y (nbSubgroups, vector<double> ()),
+	Xg (nbSubgroups, vector<double> ()),
+	Xc (nbSubgroups, vector<double> ());
+      for (size_t s = 0; s < nbSubgroups; ++s)
+      {
+	size_t idxPheno, idxGeno;
+	for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
+	{
+	  idxPheno = vvSampleIdxPhenos[s][i];
+	  idxGeno = vvSampleIdxGenos[s][i];
+	  if (idxPheno != string::npos
+	      && idxGeno != string::npos
+	      && ! iFtr.vvIsNa[s][idxPheno]
+	      && ! iFtr.vPtCisSnps[snpId]->vvIsNa[s][idxGeno])
+	  {
+	    Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
+	    Xg[s].push_back (iFtr.vPtCisSnps[snpId]->vvGenos[s][idxGeno]);
+	    for (map<string, vector<double> >::const_iterator it =
+		   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+	      Xc[s].push_back (it->second[i]);
+	  }
+	}
+      }
+      ResFtrSnp iResFtrSnp;
+      iResFtrSnp.snp = iFtr.vPtCisSnps[snpId]->name;
+      iResFtrSnp.vNs.assign (nbSubgroups, Y.size());
+      iResFtrSnp.mUnweightedAbfs["gen"] =
+	vector<double> (vvGridL.size(), numeric_limits<double>::quiet_NaN());
+#ifdef LIB_MVLR
+      MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
+      vector<vector<int> > vvGamma (1, vector<int> ()); // configurations
+      
+      // compute ABF general (consistent + large grid)
+      for(size_t s = 0; s < nbSubgroups; ++s)
+	vvGamma[0].push_back (1);
+      for (size_t gridIdx = 0; gridIdx < vvGridL.size(); ++gridIdx)
+	iResFtrSnp.mUnweightedAbfs["gen"][gridIdx] =
+	  iMvlr.compute_log10_ABF (vvGridL[gridIdx][0],
+				   vvGridL[gridIdx][1],
+				   vvGamma);
+      iResFtrSnp.mWeightedAbfs["gen"] =
+	log10_weighted_sum (&(iResFtrSnp.mUnweightedAbfs["gen"][0]),
+			    vvGridL.size());
+      
+      // compute ABF sin
+      // TODO
+      
+      iFtr.vResFtrSnps.push_back (iResFtrSnp);
+#endif
+    }
   }
 }
 
@@ -1762,6 +1860,20 @@ Ftr_makePermsSepOneSubgrp (
   }
 }
 
+/** \brief Retrieve the highest log10(ABF) over SNPs of the given feature
+ *  \note whichPermBf is 'gen', 'sin', 'gen-sin' or 'all'
+ */
+void
+Ftr_findMaxL10TrueAbf (
+ Ftr & iFtr,
+  const string & whichPermBf)
+{
+  iFtr.maxL10TrueAbf = - numeric_limits<double>::infinity();
+  for (size_t snpId = 0; snpId < iFtr.vResFtrSnps.size(); ++snpId)
+    if (iFtr.vResFtrSnps[snpId].mWeightedAbfs[whichPermBf] > iFtr.maxL10TrueAbf)
+      iFtr.maxL10TrueAbf = iFtr.vResFtrSnps[snpId].mWeightedAbfs[whichPermBf];
+}
+
 /** \brief Average the log10(ABF) over SNPs of the given feature
  *  \note whichPermBf is 'gen', 'sin', 'gen-sin' or 'all'
  */
@@ -1793,6 +1905,7 @@ Ftr_makePermsJoint (
   const size_t & nbPerms,
   const int & trick,
   const string & whichPermBf,
+  const bool & useMaxBfOverSnps,
   const gsl_rng * & rngPerm,
   const gsl_rng * & rngTrick)
 {
@@ -1809,11 +1922,15 @@ Ftr_makePermsJoint (
   iFtr.nbPermsSoFar = 0;
   
   size_t nbSubgroups = iFtr.vvPhenos.size();
+  double maxL10PermAbf, l10Abf;
   vector<double> vL10Abfs;
   bool shuffleOnly = false;
   Snp iSnp;
   
-  Ftr_avgL10TrueAbfs (iFtr, whichPermBf);
+  if (useMaxBfOverSnps)
+    Ftr_findMaxL10TrueAbf (iFtr, whichPermBf);
+  else
+    Ftr_avgL10TrueAbfs (iFtr, whichPermBf);
   
   for(size_t permId = 0; permId < nbPerms; ++permId)
   {
@@ -1822,7 +1939,8 @@ Ftr_makePermsJoint (
       continue;
     
     ++iFtr.nbPermsSoFar;
-    vL10Abfs.clear ();
+    maxL10PermAbf = - numeric_limits<double>::infinity(); // if max over SNPs
+    vL10Abfs.clear (); // if avg over SNPs
     
     for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
     {
@@ -1857,11 +1975,20 @@ Ftr_makePermsJoint (
 	ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
 	ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
       }
-      vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[whichPermBf]);
+      if (useMaxBfOverSnps)
+      {
+	l10Abf = iResFtrSnp.mWeightedAbfs[whichPermBf];
+	if (l10Abf > maxL10PermAbf)
+	  maxL10PermAbf = l10Abf;
+      }
+      else
+	vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[whichPermBf]);
     }
     
-    if (log10_weighted_sum (&(vL10Abfs[0]), vL10Abfs.size())
-    	>= iFtr.avgL10TrueAbf)
+    if ((useMaxBfOverSnps && maxL10PermAbf >= iFtr.maxL10TrueAbf)
+	|| (! useMaxBfOverSnps && log10_weighted_sum (&(vL10Abfs[0]),
+						      vL10Abfs.size())
+	    >= iFtr.avgL10TrueAbf))
       ++iFtr.jointPermPval;
     if (trick != 0 && iFtr.jointPermPval == 11)
     {
@@ -2809,6 +2936,7 @@ inferAssos (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const string & whichBfs,
+  const bool & mltvr,
   const bool & fitNull,
   const int & verbose)
 {
@@ -2834,7 +2962,7 @@ inferAssos (
     {
       Ftr_inferAssos (itF->second, vvSampleIdxPhenos, vvSampleIdxGenos,
 		      whichStep, needQnorm, vSbgrp2Covars, vvGridL, vvGridS,
-		      whichBfs, fitNull, verbose-1);
+		      whichBfs, mltvr, fitNull, verbose-1);
       nbAnalyzedPairs += itF->second.vResFtrSnps.size();
     }
   }
@@ -2912,6 +3040,7 @@ makePermsJoint (
   const size_t & seed,
   const int & trick,
   const string & whichPermBf,
+  const bool & useMaxBfOverSnps,
   const gsl_rng * rngPerm,
   const gsl_rng * rngTrick,
   const int & verbose)
@@ -2931,7 +3060,7 @@ makePermsJoint (
       Ftr_makePermsJoint (itF->second, vvSampleIdxPhenos,
 			  vvSampleIdxGenos, needQnorm, vSbgrp2Covars, vvGridL,
 			  vvGridS, fitNull, nbPerms, trick, whichPermBf,
-			  rngPerm, rngTrick);
+			  useMaxBfOverSnps, rngPerm, rngTrick);
   }
   if (verbose == 1)
     cout << " (" << setprecision(8) << (clock() - timeBegin) /
@@ -2955,6 +3084,7 @@ makePerms (
   const size_t & seed,
   const int & trick,
   const string & whichPermBf,
+  const bool & useMaxBfOverSnps,
   const int & verbose)
 {
   if (verbose > 0)
@@ -2990,8 +3120,8 @@ makePerms (
   if (whichStep == 4 || whichStep == 5)
     makePermsJoint (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
 		    needQnorm, vSbgrp2Covars, vvGridL, vvGridS, fitNull,
-		    nbPerms, seed, trick, whichPermBf, rngPerm, rngTrick,
-		    verbose);
+		    nbPerms, seed, trick, whichPermBf, useMaxBfOverSnps,
+		    rngPerm, rngTrick, verbose);
   
   gsl_rng_free (rngPerm);
   if (trick != 0)
@@ -3370,7 +3500,7 @@ writeResJointPermPval (
   gzFile outStream;
   openFile (ssOutFile.str(), outStream, "wb");
   
-  ssTxt << "ftr nbSnps jointPermPval nbPerms avgL10TrueAbf" << endl;
+  ssTxt << "ftr nbSnps jointPermPval nbPerms maxL10TrueAbf avgL10TrueAbf" << endl;
   size_t lineId = 1;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
@@ -3383,6 +3513,7 @@ writeResJointPermPval (
 	  << " " << itF->second.vPtCisSnps.size()
 	  << " " << itF->second.jointPermPval
 	  << " " << itF->second.nbPermsSoFar
+	  << " " << itF->second.maxL10TrueAbf
 	  << " " << itF->second.avgL10TrueAbf
 	  << endl;
     gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
@@ -3403,10 +3534,12 @@ writeRes (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const string & whichBfs,
+  const bool & mltvr,
   const int & verbose)
 {
-  writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
-		  verbose);
+  if (! mltvr)
+    writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
+		    verbose);
   
   if (whichStep == 2 || whichStep == 5)
     writeResSepPermPval (outPrefix, mFtrs, vSubgroups, verbose);
@@ -3440,11 +3573,13 @@ run (
   const string & largeGridFile,
   const string & smallGridFile,
   const string & whichBfs,
+  const bool & mltvr,
   const bool & fitNull,
   const size_t & nbPerms,
   const size_t & seed,
   const int & trick,
   const string & whichPermBf,
+  const bool & useMaxBfOverSnps,
   const string & ftrsToKeepFile,
   const string & snpsToKeepFile,
   const int & verbose)
@@ -3486,14 +3621,14 @@ run (
   
   inferAssos (mFtrs, mChr2VecPtSnps, vvSampleIdxPhenos, vvSampleIdxGenos,
 	      anchor, lenCis, whichStep, needQnorm, vSbgrp2Covars, vvGridL,
-	      vvGridS, whichBfs, fitNull, verbose);
+	      vvGridS, whichBfs, mltvr, fitNull, verbose);
   if (whichStep == 2 || whichStep == 4 || whichStep == 5)
     makePerms (mFtrs, vvSampleIdxPhenos, whichStep, needQnorm, vSbgrp2Covars,
 	       vvGridL, vvGridS, fitNull, nbPerms, seed, trick, whichPermBf,
-	       verbose);
+	       useMaxBfOverSnps, verbose);
   
   writeRes (outPrefix, outRaw, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
-	    whichStep, vvGridL, vvGridS, whichBfs, verbose);
+	    whichStep, vvGridL, vvGridS, whichBfs, mltvr, verbose);
 }
 
 #ifdef EQTLBMA_MAIN
@@ -3502,7 +3637,8 @@ int main (int argc, char ** argv)
 {
   int verbose = 1, whichStep = 0, trick = 0;
   size_t lenCis = 100000, nbPerms = 0, seed = string::npos;
-  bool outRaw = false, needQnorm = false, fitNull = false;
+  bool outRaw = false, needQnorm = false, fitNull = false, mltvr = false,
+    useMaxBfOverSnps = false;
   string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
     anchor = "FSS", outPrefix, covarPathsFile, largeGridFile, smallGridFile,
     whichBfs = "gen", whichPermBf = "gen", ftrsToKeepFile, snpsToKeepFile;
@@ -3510,8 +3646,8 @@ int main (int argc, char ** argv)
   parseArgs (argc, argv, genoPathsFile, snpCoordFile, phenoPathsFile,
 	     ftrCoordsFile, anchor, lenCis, outPrefix, outRaw, whichStep,
 	     needQnorm, covarPathsFile, largeGridFile, smallGridFile, whichBfs,
-	     fitNull, nbPerms, seed, trick, whichPermBf, ftrsToKeepFile,
-	     snpsToKeepFile, verbose);
+	     mltvr, fitNull, nbPerms, seed, trick, whichPermBf, useMaxBfOverSnps,
+	     ftrsToKeepFile, snpsToKeepFile, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -3521,13 +3657,14 @@ int main (int argc, char ** argv)
 	 << endl
 	 << "compiled -> " << __DATE__ << " " << __TIME__
 	 << endl << flush;
-    printCmdLine (argc, argv);
+    printCmdLine (cout, argc, argv);
   }
   
   run (genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile, anchor,
        lenCis, outPrefix, outRaw, whichStep, needQnorm, covarPathsFile,
-       largeGridFile, smallGridFile, whichBfs, fitNull, nbPerms, seed, trick,
-       whichPermBf, ftrsToKeepFile, snpsToKeepFile, verbose);
+       largeGridFile, smallGridFile, whichBfs, mltvr, fitNull, nbPerms, seed,
+       trick, whichPermBf, useMaxBfOverSnps, ftrsToKeepFile, snpsToKeepFile,
+       verbose);
   
   if (verbose > 0)
   {
