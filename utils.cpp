@@ -504,8 +504,9 @@ loadOneColumnFileAsNumbers (
 }
 
 /** \brief Used by scandir.
+ *  \note unused parameter, see http://stackoverflow.com/q/1486904/597069
  */
-static int dummy_selector (const struct dirent * dir_entry)
+static int dummy_selector (const struct dirent * /*dir_entry*/)
 {
   return 1;
 }
@@ -978,11 +979,12 @@ getMaxMemUsedByProcess (void)
 
 void
 printCmdLine (
+  ostream & os,
   int argc,
   char ** argv)
 {
-  cout << argv[0];
+  os << argv[0];
   for(int i = 1; i < argc; ++i)
-    cout << " " << argv[i];
-  cout << endl;
+    os << " " << argv[i];
+  os << endl << flush;
 }
