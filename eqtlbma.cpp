@@ -1610,6 +1610,39 @@ ResFtrSnp_calcAbfs (
 }
 
 void
+ResFtrSnp_calcAbfsMvlr (
+  ResFtrSnp & /*iResFtrSnp*/,
+  const string & /*whichBfs*/,
+  const vector<vector<double> > & /*vvGridL*/,
+  const vector<vector<double> > & /*vvGridS*/,
+  const bool & /*fitNull*/)
+{
+#ifdef LIB_MVLR
+  MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
+  iMvlr.set_Sigma_option (1); // ?
+  vector<vector<int> > vvGamma (1, vector<int> ()); // configurations
+  
+  // compute ABF general (consistent + large grid)
+  for(size_t s = 0; s < nbSubgroups; ++s)
+    vvGamma[0].push_back (1);
+  for (size_t gridIdx = 0; gridIdx < vvGridL.size(); ++gridIdx)
+    iResFtrSnp.mUnweightedAbfs["gen"][gridIdx] =
+      iMvlr.compute_log10_ABF (vvGridL[gridIdx][0],
+			       vvGridL[gridIdx][1],
+			       vvGamma);
+  iResFtrSnp.mWeightedAbfs["gen"] =
+    log10_weighted_sum (&(iResFtrSnp.mUnweightedAbfs["gen"][0]),
+			vvGridL.size());
+  iResFtrSnp.mWeightedAbfs["gen-fix"] = numeric_limits<double>::quiet_NaN();
+  iResFtrSnp.mWeightedAbfs["gen-maxh"] = numeric_limits<double>::quiet_NaN();
+  iResFtrSnp.mWeightedAbfs["sin"] = numeric_limits<double>::quiet_NaN();
+  
+  // compute ABF all
+  // TODO
+#endif
+}
+
+void
 Ftr_init (
   Ftr & iFtr,
   const string & name,
@@ -1710,14 +1743,13 @@ Ftr_inferAssos (
   const int & verbose)
 {
   size_t nbSubgroups = iFtr.vvPhenos.size();
-  Snp iSnp;
   for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
   {
     if (verbose > 0)
       cout << iFtr.name << " " << iFtr.vPtCisSnps[snpId]->name << endl;
+    ResFtrSnp iResFtrSnp;
     if (! mvlr) // univariate model
     {
-      ResFtrSnp iResFtrSnp;
       ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
       {
@@ -1737,8 +1769,8 @@ Ftr_inferAssos (
     else // multivariate model
     {
       vector<vector<double> > Y (nbSubgroups, vector<double> ()),
-	Xg (nbSubgroups, vector<double> ()),
-	Xc (nbSubgroups, vector<double> ());
+	Xg (1, vector<double> ()), // single SNP
+	Xc (vSbgrp2Covars[0].size(), vector<double> ());
       for (size_t s = 0; s < nbSubgroups; ++s)
       {
 	size_t idxPheno, idxGeno;
@@ -1752,39 +1784,17 @@ Ftr_inferAssos (
 	      && ! iFtr.vPtCisSnps[snpId]->vvIsNa[s][idxGeno])
 	  {
 	    Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
-	    Xg[s].push_back (iFtr.vPtCisSnps[snpId]->vvGenos[s][idxGeno]);
+	    Xg[0].push_back (iFtr.vPtCisSnps[snpId]->vvGenos[s][idxGeno]);
 	    for (map<string, vector<double> >::const_iterator it =
 		   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
 	      Xc[s].push_back (it->second[i]);
 	  }
 	}
       }
-      ResFtrSnp iResFtrSnp;
       iResFtrSnp.snp = iFtr.vPtCisSnps[snpId]->name;
       iResFtrSnp.vNs.assign (nbSubgroups, Y.size());
-      iResFtrSnp.mUnweightedAbfs["gen"] =
-	vector<double> (vvGridL.size(), numeric_limits<double>::quiet_NaN());
-#ifdef LIB_MVLR
-      MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
-      vector<vector<int> > vvGamma (1, vector<int> ()); // configurations
-      
-      // compute ABF general (consistent + large grid)
-      for(size_t s = 0; s < nbSubgroups; ++s)
-	vvGamma[0].push_back (1);
-      for (size_t gridIdx = 0; gridIdx < vvGridL.size(); ++gridIdx)
-	iResFtrSnp.mUnweightedAbfs["gen"][gridIdx] =
-	  iMvlr.compute_log10_ABF (vvGridL[gridIdx][0],
-				   vvGridL[gridIdx][1],
-				   vvGamma);
-      iResFtrSnp.mWeightedAbfs["gen"] =
-	log10_weighted_sum (&(iResFtrSnp.mUnweightedAbfs["gen"][0]),
-			    vvGridL.size());
-      
-      // compute ABF sin
-      // TODO
-      
+      ResFtrSnp_calcAbfsMvlr (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
       iFtr.vResFtrSnps.push_back (iResFtrSnp);
-#endif
     }
   }
 }
@@ -2050,7 +2060,7 @@ Ftr_makePermsJoint (
   iFtr.nbPermsSoFarJoint = 0;
   
   size_t nbSubgroups = iFtr.vvPhenos.size();
-  double maxL10PermAbf, l10PermAbf;
+  double maxL10PermAbf, l10PermAbf, avgL10PermAbf;
   vector<double> vL10PermAbfs;
   bool shuffleOnly = false;
   Snp iSnp;
@@ -2067,8 +2077,13 @@ Ftr_makePermsJoint (
       continue;
     
     ++iFtr.nbPermsSoFarJoint;
-    maxL10PermAbf = - numeric_limits<double>::infinity(); // if max over SNPs
-    vL10PermAbfs.clear (); // if avg over SNPs
+    if (useMaxBfOverSnps)
+      maxL10PermAbf = - numeric_limits<double>::infinity();
+    else // if avg over SNPs
+    {
+      vL10PermAbfs.clear ();
+      avgL10PermAbf = numeric_limits<double>::quiet_NaN();
+    }
     
     for (size_t snpId = 0; snpId < iFtr.vPtCisSnps.size(); ++snpId)
     {
@@ -2109,15 +2124,22 @@ Ftr_makePermsJoint (
 	if (l10PermAbf > maxL10PermAbf)
 	  maxL10PermAbf = l10PermAbf;
       }
-      else
-	vL10PermAbfs.push_back (iResFtrSnp.mWeightedAbfs[whichPermBf]);
+      else // if avg over SNPs
+	if (! isNan (iResFtrSnp.mWeightedAbfs[whichPermBf]))
+	  vL10PermAbfs.push_back (iResFtrSnp.mWeightedAbfs[whichPermBf]);
     }
     
-    if ((useMaxBfOverSnps && maxL10PermAbf >= iFtr.maxL10TrueAbf)
-	|| (! useMaxBfOverSnps && log10_weighted_sum (&(vL10PermAbfs[0]),
-						      vL10PermAbfs.size())
-	    >= iFtr.avgL10TrueAbf))
-      ++iFtr.jointPermPval;
+    if (useMaxBfOverSnps)
+    {
+      if (maxL10PermAbf >= iFtr.maxL10TrueAbf)
+	++iFtr.jointPermPval;
+    }
+    else // if avg over SNPs
+    {
+      avgL10PermAbf = log10_weighted_sum (&(vL10PermAbfs[0]), vL10PermAbfs.size());
+      if (avgL10PermAbf >= iFtr.avgL10TrueAbf)
+	++iFtr.jointPermPval;
+    }
     if (trick != 0 && iFtr.jointPermPval == 11)
     {
       if (trick == 1)
@@ -2144,6 +2166,7 @@ loadListsGenoAndPhenoFiles (
   map<string, string> & mGenoPaths,
   map<string, string> & mPhenoPaths,
   vector<string> & vSubgroups,
+  const bool & mvlr,
   const int & verbose)
 {
   loadTwoColumnFile (phenoPathsFile, mPhenoPaths, vSubgroups, verbose);
@@ -2155,6 +2178,15 @@ loadListsGenoAndPhenoFiles (
 	 << " or as many as phenotype files" << endl;
     exit (1);
   }
+  if (mvlr)
+    for (map<string, string>::const_iterator it = mGenoPaths.begin();
+	 it != mGenoPaths.end(); ++it)
+      if (it->second.compare(mGenoPaths.begin()->second) != 0)
+      {
+	cerr << "ERROR: --mvlr requires the same genotypes in all subgroups"
+	     << endl;
+	exit (1);
+      }
 }
 
 void
@@ -3796,7 +3828,7 @@ run (
   map<string, string> mGenoPaths, mPhenoPaths;
   vector<string> vSubgroups;
   loadListsGenoAndPhenoFiles (genoPathsFile, phenoPathsFile, mGenoPaths,
-			      mPhenoPaths, vSubgroups, verbose);
+			      mPhenoPaths, vSubgroups, mvlr, verbose);
   
   vector<string> vSamples;
   vector<vector<size_t> > vvSampleIdxGenos, vvSampleIdxPhenos;
