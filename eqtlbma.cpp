@@ -135,7 +135,7 @@ void help (char ** argv)
        << "      --mvlr\tuse the multivariate version of the ABF" << endl
        << "\t\tallows for correlation between samples in the errors" << endl
        << "\t\tespecially useful when subgroups come from same individuals" << endl
-       << "\t\trequires --fitnull as the small sample size correction works only for univariate ABF" << endl
+       << "\t\tbetter with --fitnull as the small sample correction only partiall applies here" << endl
        << "\t\tcurrently only works with --step 3" << endl
        << "      --fitnull\testimate the variance of the errors on the null model (no genotype effect)" << endl
        << "\t\tgood accuracy if SNPs have very small effect sizes" << endl
@@ -507,12 +507,7 @@ parseArgs (
     exit (1);
   }
   if (mvlr && ! fitNull)
-  {
-    printCmdLine (cerr, argc, argv);
-    fprintf (stderr, "ERROR: --mvlr requires --fitnull\n\n");
-    help (argv);
-    exit (1);
-  }
+    fprintf (stderr, "WARNING: --mvlr should be use with --fitnull\n\n");
   if (mvlr && whichStep != 3)
   {
     printCmdLine (cerr, argc, argv);
@@ -1435,7 +1430,7 @@ ResFtrSnp_calcAbfsAvgSinAndGenSin (
 /** \brief The configuration is represented only by the index/indices
  *  of the subgroup(s) in which the eQTL is active (eg. '2' or '6-7-11')
  */
-void
+static void
 prepareConfig (
   stringstream & ssConfig,
   vector<bool> & vIsEqtlInConfig,
@@ -1610,36 +1605,263 @@ ResFtrSnp_calcAbfs (
 }
 
 void
-ResFtrSnp_calcAbfsMvlr (
-  ResFtrSnp & /*iResFtrSnp*/,
-  const string & /*whichBfs*/,
-  const vector<vector<double> > & /*vvGridL*/,
-  const vector<vector<double> > & /*vvGridS*/,
-  const bool & /*fitNull*/)
+ResFtrSnp_calcAbfsConstLargeGridMvlr (
+  ResFtrSnp & iResFtrSnp,
+  const vector<vector<double> > & vvGridL,
+  const bool & fitNull,
+  vector<vector<double> > & Y,
+  vector<vector<double> > & Xg,
+  vector<vector<double> > & Xc)
 {
 #ifdef LIB_MVLR
-  MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
-  iMvlr.set_Sigma_option (1); // ?
-  vector<vector<int> > vvGamma (1, vector<int> ()); // configurations
+  vector<double> vL10AbfsConst (vvGridL.size(), 0.0),
+    vL10AbfsConstFix (vvGridL.size(), 0.0),
+    vL10AbfsConstMaxh (vvGridL.size(), 0.0);
   
-  // compute ABF general (consistent + large grid)
-  for(size_t s = 0; s < nbSubgroups; ++s)
-    vvGamma[0].push_back (1);
+  MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
+  if (! fitNull)
+    iMvlr.set_Sigma_option (1);
+  else
+    iMvlr.set_Sigma_option (2);
+  vector<vector<int> > vvGamma (1, vector<int> (iResFtrSnp.vNs.size(), 1));
+  
   for (size_t gridIdx = 0; gridIdx < vvGridL.size(); ++gridIdx)
-    iResFtrSnp.mUnweightedAbfs["gen"][gridIdx] =
+  {
+    vL10AbfsConst[gridIdx] =
       iMvlr.compute_log10_ABF (vvGridL[gridIdx][0],
 			       vvGridL[gridIdx][1],
 			       vvGamma);
-  iResFtrSnp.mWeightedAbfs["gen"] =
-    log10_weighted_sum (&(iResFtrSnp.mUnweightedAbfs["gen"][0]),
-			vvGridL.size());
-  iResFtrSnp.mWeightedAbfs["gen-fix"] = numeric_limits<double>::quiet_NaN();
-  iResFtrSnp.mWeightedAbfs["gen-maxh"] = numeric_limits<double>::quiet_NaN();
-  iResFtrSnp.mWeightedAbfs["sin"] = numeric_limits<double>::quiet_NaN();
+    vL10AbfsConstFix[gridIdx] =
+      iMvlr.compute_log10_ABF (0,
+			       vvGridL[gridIdx][0] + vvGridL[gridIdx][1],
+			       vvGamma);
+    vL10AbfsConstMaxh[gridIdx] =
+      iMvlr.compute_log10_ABF (vvGridL[gridIdx][0] + vvGridL[gridIdx][1],
+			       0,
+			       vvGamma);
+  }
+  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen",
+						vL10AbfsConst));
+  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen-fix",
+						vL10AbfsConstFix));
+  iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen-maxh",
+						vL10AbfsConstMaxh));
   
-  // compute ABF all
-  // TODO
+  iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen",
+					      log10_weighted_sum (
+						&(vL10AbfsConst[0]),
+						vvGridL.size())));
+  iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen-fix",
+					      log10_weighted_sum (
+						&(vL10AbfsConstFix[0]),
+						vvGridL.size())));
+  iResFtrSnp.mWeightedAbfs.insert (make_pair ("gen-maxh",
+					      log10_weighted_sum (
+						&(vL10AbfsConstMaxh[0]),
+						vvGridL.size())));
 #endif
+}
+
+void
+ResFtrSnp_calcAbfsSingletonsMvlr (
+  ResFtrSnp & iResFtrSnp,
+  const vector<vector<double> > & vvGridS,
+  const bool & fitNull,
+  vector<vector<double> > & Y,
+  vector<vector<double> > & Xg,
+  vector<vector<double> > & Xc)
+{
+#ifdef LIB_MVLR
+  stringstream ssConfig;
+  vector<vector<double> > Y_singletons;
+  vector<vector<int> > vvGamma (1, vector<int> ());
+  vector<double> vL10Abfs (vvGridS.size(), 0.0);
+  
+  for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
+  {
+    ssConfig.str("");
+    ssConfig << (s+1);
+    
+    if (iResFtrSnp.vNs[s] > 2)
+    {
+      Y_singletons.clear ();
+      Y_singletons.push_back (Y[s]);
+      vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
+      vvGamma[0][s] = 1;
+      
+      MVLR iMvlr (Y_singletons, Xg, Xc, 1);
+      if (! fitNull)
+	iMvlr.set_Sigma_option (1);
+      else
+	iMvlr.set_Sigma_option (2);
+      for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
+	vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
+						     vvGridS[gridIdx][1],
+						     vvGamma);
+      iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
+						    vL10Abfs));
+      iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
+						 log10_weighted_sum (
+						   &(vL10Abfs[0]),
+						   vL10Abfs.size())));
+    }
+    else // iResFtrSnp.vNs[s] <= 2
+    {
+      iResFtrSnp.mUnweightedAbfs.insert (
+	make_pair (ssConfig.str(),
+		   vector<double> (
+		     vvGridS.size(),
+		     numeric_limits<double>::quiet_NaN())));
+      iResFtrSnp.mWeightedAbfs.insert (
+	make_pair (ssConfig.str(),
+		   numeric_limits<double>::quiet_NaN()));
+    }
+  }
+#endif
+}
+
+void
+ResFtrSnp_calcAbfsAllConfigsMvlr (
+  ResFtrSnp & iResFtrSnp,
+  const vector<vector<double> > & vvGridS,
+  const bool & fitNull,
+  vector<vector<double> > & Y,
+  vector<vector<double> > & Xg,
+  vector<vector<double> > & Xc)
+{
+  gsl_combination * comb;
+  stringstream ssConfig;
+  vector<bool> vIsEqtlInConfig; // T,T,F if S=3 and config="1-2"
+  vector<vector<double> > Y_subset;
+  vector<vector<int> > vvGamma (1, vector<int> ());
+  vector<double> vL10Abfs;
+  
+  for (size_t k = 1; k <= iResFtrSnp.vNs.size(); ++k)
+  {
+    comb = gsl_combination_calloc (iResFtrSnp.vNs.size(), k);
+    if (comb == NULL)
+    {
+      cerr << "ERROR: can't allocate memory for the combination" << endl;
+      exit (1);
+    }
+    while (true)
+    {
+      prepareConfig (ssConfig, vIsEqtlInConfig, comb);
+      Y_subset.clear ();
+      for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
+	if (iResFtrSnp.vNs[s] > 2 && vIsEqtlInConfig[s])
+	  Y_subset.push_back (Y[s]);
+      vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
+      for (size_t s = 0; s < vIsEqtlInConfig.size(); ++s)
+	if (vIsEqtlInConfig[s])
+	  vvGamma[0][s] = 1;
+      if (Y_subset[0].size() > 2)
+      {
+	vL10Abfs.assign (vvGridS.size(), 0);
+	MVLR iMvlr (Y_subset, Xg, Xc, 1);
+	if (! fitNull)
+	  iMvlr.set_Sigma_option (1);
+	else
+	  iMvlr.set_Sigma_option (2);
+	for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
+	  vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
+						       vvGridS[gridIdx][1],
+						       vvGamma);
+	iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
+						      vL10Abfs));
+	iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
+						   log10_weighted_sum (
+						     &(vL10Abfs[0]),
+						     vL10Abfs.size())));
+      }
+      else
+      {
+	iResFtrSnp.mUnweightedAbfs.insert (
+	  make_pair(ssConfig.str(), vector<double> (
+		      vvGridS.size(), numeric_limits<double>::quiet_NaN())));
+	iResFtrSnp.mWeightedAbfs.insert (
+	  make_pair(ssConfig.str(), numeric_limits<double>::quiet_NaN()));
+      }
+      if (gsl_combination_next (comb) != GSL_SUCCESS)
+	break;
+    }
+    gsl_combination_free (comb);
+  }
+}
+
+void
+ResFtrSnp_calcAbfsMvlr (
+  ResFtrSnp & iResFtrSnp,
+  vector<vector<double> > & Y,
+  vector<vector<double> > & Xg,
+  vector<vector<double> > & Xc,
+  const string & whichBfs,
+  const vector<vector<double> > & vvGridL,
+  const vector<vector<double> > & vvGridS,
+  const bool & fitNull)
+{
+  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull, Y, Xg, Xc);
+  if (whichBfs.compare("sin") == 0)
+  {
+    ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull, Y, Xg, Xc);
+    ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+  }
+  else if (whichBfs.compare("all") == 0)
+  {
+    ResFtrSnp_calcAbfsAllConfigsMvlr (iResFtrSnp, vvGridS, fitNull, Y, Xg, Xc);
+    ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+    ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
+  }
+}
+
+void
+ResFtrSnp_runMltvrAnalysis (
+  ResFtrSnp & iResFtrSnp,
+  const Ftr & iFtr,
+  const Snp & iSnp,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const bool & needQnorm,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
+  const vector<vector<double> > & vvGridL,
+  const vector<vector<double> > & vvGridS,
+  const string & whichBfs,
+  const bool & fitNull)
+{
+  // prepare the data
+  size_t nbSubgroups = iFtr.vvPhenos.size();
+  vector<vector<double> > Y (nbSubgroups, vector<double> ()),
+    Xg (1, vector<double> ()), // single SNP
+    Xc (vSbgrp2Covars[0].size(), vector<double> ());
+  for (size_t s = 0; s < nbSubgroups; ++s)
+  {
+    size_t idxPheno, idxGeno;
+    for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
+    {
+      idxPheno = vvSampleIdxPhenos[s][i];
+      idxGeno = vvSampleIdxGenos[s][i];
+      if (idxPheno != string::npos
+	  && idxGeno != string::npos
+	  && ! iFtr.vvIsNa[s][idxPheno]
+	  && ! iSnp.vvIsNa[s][idxGeno])
+      {
+	Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
+	Xg[0].push_back (iSnp.vvGenos[s][idxGeno]);
+	for (map<string, vector<double> >::const_iterator it =
+	       vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+	  Xc[s].push_back (it->second[i]);
+      }
+    }
+    if (needQnorm)
+      qqnorm (&Y[s][0], Y[s].size());
+  }
+  
+  // initialize the struct
+  iResFtrSnp.snp = iSnp.name;
+  iResFtrSnp.vNs.assign (nbSubgroups, Y[0].size());
+  
+  // compute the multivariate ABF(s)
+  ResFtrSnp_calcAbfsMvlr (iResFtrSnp, Y, Xg, Xc, whichBfs, vvGridL, vvGridS, fitNull);
 }
 
 void
@@ -1768,32 +1990,10 @@ Ftr_inferAssos (
     }
     else // multivariate model
     {
-      vector<vector<double> > Y (nbSubgroups, vector<double> ()),
-	Xg (1, vector<double> ()), // single SNP
-	Xc (vSbgrp2Covars[0].size(), vector<double> ());
-      for (size_t s = 0; s < nbSubgroups; ++s)
-      {
-	size_t idxPheno, idxGeno;
-	for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
-	{
-	  idxPheno = vvSampleIdxPhenos[s][i];
-	  idxGeno = vvSampleIdxGenos[s][i];
-	  if (idxPheno != string::npos
-	      && idxGeno != string::npos
-	      && ! iFtr.vvIsNa[s][idxPheno]
-	      && ! iFtr.vPtCisSnps[snpId]->vvIsNa[s][idxGeno])
-	  {
-	    Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
-	    Xg[0].push_back (iFtr.vPtCisSnps[snpId]->vvGenos[s][idxGeno]);
-	    for (map<string, vector<double> >::const_iterator it =
-		   vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
-	      Xc[s].push_back (it->second[i]);
-	  }
-	}
-      }
-      iResFtrSnp.snp = iFtr.vPtCisSnps[snpId]->name;
-      iResFtrSnp.vNs.assign (nbSubgroups, Y.size());
-      ResFtrSnp_calcAbfsMvlr (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
+      ResFtrSnp_runMltvrAnalysis (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]),
+				  vvSampleIdxPhenos, vvSampleIdxGenos,
+				  needQnorm, vSbgrp2Covars, vvGridL, vvGridS,
+				  whichBfs, fitNull);
       iFtr.vResFtrSnps.push_back (iResFtrSnp);
     }
   }
@@ -3102,7 +3302,10 @@ inferAssos (
 {
   if (verbose > 0)
     cout << "look for association between each pair feature-SNP ..." << endl
-	 << "anchor=" << anchor << " lenCis=" << lenCis << endl << flush;
+	 << "anchor=" << anchor << " lenCis=" << lenCis
+	 << "multivariate=" << boolalpha << mvlr
+	 << "fitnull=" << fitNull
+	 << endl << flush;
   
   clock_t timeBegin = clock();
   size_t nbAnalyzedPairs = 0;
