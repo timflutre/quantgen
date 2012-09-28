@@ -831,19 +831,23 @@ getAbfFromStdSumStats (
   varbbarhat = (varbbarhat != 0) ?
     1 / varbbarhat
     : numeric_limits<double>::infinity();
-  double T2 = pow(bbarhat, 2.0) / varbbarhat;
-  double lABF_bbar = (T2 != 0) ?
-    0.5 * log10(varbbarhat) - 0.5 * log10(varbbarhat + oma2)
-    + (0.5 * T2 * oma2 / (varbbarhat + oma2)) / log(10)
-    : 0;
+  if (bbarhat != 0 && varbbarhat < numeric_limits<double>::infinity())
+  {
+    double T2 = pow(bbarhat, 2.0) / varbbarhat;
+    double lABF_bbar = (T2 != 0) ?
+      0.5 * log10(varbbarhat) - 0.5 * log10(varbbarhat + oma2)
+      + (0.5 * T2 * oma2 / (varbbarhat + oma2)) / log(10)
+      : 0;
 #ifdef DEBUG
-  printf ("bbarhat=%e varbbarhat=%e T2=%e lABF_bbar=%e\n",
-	  bbarhat, varbbarhat, T2, lABF_bbar);
+    printf ("bbarhat=%e varbbarhat=%e T2=%e lABF_bbar=%e\n",
+	    bbarhat, varbbarhat, T2, lABF_bbar);
 #endif
-  
-  l10AbfAll = lABF_bbar;
-  for (size_t i = 0; i < l10AbfsSingleSbgrp.size(); ++i)
-    l10AbfAll += l10AbfsSingleSbgrp[i];
+    l10AbfAll = lABF_bbar;
+    for (size_t i = 0; i < l10AbfsSingleSbgrp.size(); ++i)
+      l10AbfAll += l10AbfsSingleSbgrp[i];
+  }
+  else // MAF very close, or equal, to 0
+    l10AbfAll = 0;
   
   return l10AbfAll;
 }
@@ -1231,16 +1235,15 @@ ResFtrSnp_getStdStatsAndCorrSmallSampleSize (
 	iResFtrSnp.vSigmahats[s],
 	sebhat = iResFtrSnp.vMapPredictors[s].find("genotype")->second[1] /
 	iResFtrSnp.vSigmahats[s],
-	t = bhat / sebhat,
-	sigmahat = 0;
+	t = bhat / sebhat;
       if (! fitNull) // apply quantile-quantile transformation
 	t = gsl_cdf_gaussian_Pinv (gsl_cdf_tdist_P (-fabs(bhat/sebhat),
 						    n-2), 1.0);
       vector<double> vStdSstats;
       if (fabs(t) > 1e-8)
       {
-	sigmahat = fabs (iResFtrSnp.vMapPredictors[s].find("genotype")
-			 ->second[0]) /
+	double sigmahat = fabs (iResFtrSnp.vMapPredictors[s].find("genotype")
+				->second[0]) /
 	  (fabs (t) * sebhat);
 	bhat = iResFtrSnp.vMapPredictors[s].find("genotype")->second[0] /
 	  sigmahat;
@@ -1248,7 +1251,6 @@ ResFtrSnp_getStdStatsAndCorrSmallSampleSize (
       }
       else
       {
-	sigmahat = numeric_limits<double>::quiet_NaN();
 	bhat = 0;
 	sebhat = numeric_limits<double>::infinity();
       }
@@ -1257,7 +1259,7 @@ ResFtrSnp_getStdStatsAndCorrSmallSampleSize (
       vStdSstats.push_back (t);
       vvStdSstats.push_back (vStdSstats);
     }
-    else
+    else // iResFtrSnp.vNs[s] <= 2
       vvStdSstats.push_back (vector<double> (
 			       3, numeric_limits<double>::quiet_NaN()));
   }
@@ -1401,7 +1403,6 @@ ResFtrSnp_calcAbfsAvgSinAndGenSin (
       vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
       vWeights.push_back ((1.0 / 2.0) *
 			  (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(), 1)));
-      // vWeights.push_back (1.0); // old weights
     }
   }
   
@@ -1552,7 +1553,6 @@ ResFtrSnp_calcAbfAvgAll (
 	vL10Abfs.push_back (iResFtrSnp.mWeightedAbfs[ssConfig.str()]);
 	vWeights.push_back ((1.0 / (double) iResFtrSnp.vNs.size()) *
 			    (1.0 / gsl_sf_choose (iResFtrSnp.vNs.size(), k)));
-	// vWeights.push_back (1.0); // old weights
       }
       if (gsl_combination_next (comb) != GSL_SUCCESS)
 	break;
@@ -1614,9 +1614,12 @@ ResFtrSnp_calcAbfsConstLargeGridMvlr (
   vector<vector<double> > & Xc)
 {
 #ifdef LIB_MVLR
-  vector<double> vL10AbfsConst (vvGridL.size(), 0.0),
-    vL10AbfsConstFix (vvGridL.size(), 0.0),
-    vL10AbfsConstMaxh (vvGridL.size(), 0.0);
+  vector<double> vL10AbfsConst (vvGridL.size(),
+				numeric_limits<double>::quiet_NaN()),
+    vL10AbfsConstFix (vvGridL.size(),
+		      numeric_limits<double>::quiet_NaN()),
+    vL10AbfsConstMaxh (vvGridL.size(),
+		       numeric_limits<double>::quiet_NaN());
   
   MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
   if (! fitNull)
@@ -1675,7 +1678,8 @@ ResFtrSnp_calcAbfsSingletonsMvlr (
   stringstream ssConfig;
   vector<vector<double> > Y_singletons;
   vector<vector<int> > vvGamma (1, vector<int> ());
-  vector<double> vL10Abfs (vvGridS.size(), 0.0);
+  vector<double> vL10Abfs (vvGridS.size(),
+			   numeric_limits<double>::quiet_NaN());
   
   for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
   {
@@ -1757,7 +1761,7 @@ ResFtrSnp_calcAbfsAllConfigsMvlr (
 	  vvGamma[0][s] = 1;
       if (Y_subset[0].size() > 2)
       {
-	vL10Abfs.assign (vvGridS.size(), 0);
+	vL10Abfs.assign (vvGridS.size(), numeric_limits<double>::quiet_NaN());
 	MVLR iMvlr (Y_subset, Xg, Xc, 1);
 	if (! fitNull)
 	  iMvlr.set_Sigma_option (1);
@@ -1800,7 +1804,8 @@ ResFtrSnp_calcAbfsMvlr (
   const vector<vector<double> > & vvGridS,
   const bool & fitNull)
 {
-  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull, Y, Xg, Xc);
+  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull, Y, Xg,
+					Xc);
   if (whichBfs.compare("sin") == 0)
   {
     ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull, Y, Xg, Xc);
