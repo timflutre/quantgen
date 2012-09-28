@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -Wextra -g -DEQTLBMA_MAIN utils.cpp eqtlbma.cpp -lgsl -lgslcblas -lz -o eqtlbma
+ *  g++ -Wall -Wextra -g -DEQTLBMA_MAIN -DLIB_MVLR MVLR.cc utils.cpp eqtlbma.cpp -lgsl -lgslcblas -lz -o eqtlbma
  */
 
 #include <cmath>
@@ -3303,8 +3303,8 @@ inferAssos (
   if (verbose > 0)
     cout << "look for association between each pair feature-SNP ..." << endl
 	 << "anchor=" << anchor << " lenCis=" << lenCis
-	 << "multivariate=" << boolalpha << mvlr
-	 << "fitnull=" << fitNull
+	 << " multivariate=" << boolalpha << mvlr
+	 << " fitnull=" << fitNull
 	 << endl << flush;
   
   clock_t timeBegin = clock();
