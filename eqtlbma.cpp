@@ -508,13 +508,6 @@ parseArgs (
   }
   if (mvlr && ! fitNull)
     fprintf (stderr, "WARNING: --mvlr should be use with --fitnull\n\n");
-  if (mvlr && whichStep != 3)
-  {
-    printCmdLine (cerr, argc, argv);
-    fprintf (stderr, "ERROR: --mvlr currently only works with --step 3\n\n");
-    help (argv);
-    exit (1);
-  }
   if ((whichStep == 2 || whichStep == 4 || whichStep == 5) && nbPerms == 0)
   {
     printCmdLine (cerr, argc, argv);
@@ -1605,6 +1598,90 @@ ResFtrSnp_calcAbfs (
 }
 
 void
+ResFtrSnp_prepareDataForMvlr (
+  ResFtrSnp & iResFtrSnp,
+  const Ftr & iFtr,
+  const Snp & iSnp,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
+  const bool & needQnorm,
+  vector<vector<double> > & Y,
+  vector<vector<double> > & Xg,
+  vector<vector<double> > & Xc)
+{
+  Y.assign (iFtr.vvPhenos.size(), vector<double> ());
+  Xg.assign (1, vector<double> ());
+  Xc.assign (vSbgrp2Covars[0].size(), vector<double> ());
+  for (size_t s = 0; s < iFtr.vvPhenos.size(); ++s)
+  {
+    size_t idxPheno, idxGeno;
+    for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
+    {
+      idxPheno = vvSampleIdxPhenos[s][i];
+      idxGeno = vvSampleIdxGenos[s][i];
+      if (idxPheno != string::npos
+	  && idxGeno != string::npos
+	  && ! iFtr.vvIsNa[s][idxPheno]
+	  && ! iSnp.vvIsNa[s][idxGeno])
+      {
+	Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
+	Xg[0].push_back (iSnp.vvGenos[s][idxGeno]);
+	for (map<string, vector<double> >::const_iterator it =
+	       vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+	  Xc[s].push_back (it->second[i]);
+      }
+    }
+    if (needQnorm)
+      qqnorm (&Y[s][0], Y[s].size());
+  }
+  iResFtrSnp.vNs.assign (iFtr.vvPhenos.size(), Y[0].size());
+}
+
+void
+ResFtrSnp_prepareDataForMvlrPerm (
+  ResFtrSnp & iResFtrSnp,
+  const Ftr & iFtr,
+  const Snp & iSnp,
+  const vector<vector<size_t> > & vvSampleIdxPhenos,
+  const vector<vector<size_t> > & vvSampleIdxGenos,
+  const vector<map<string, vector<double> > > & vSbgrp2Covars,
+  const bool & needQnorm,
+  const gsl_permutation * perm,
+  vector<vector<double> > & Y,
+  vector<vector<double> > & Xg,
+  vector<vector<double> > & Xc)
+{
+  Y.assign (iFtr.vvPhenos.size(), vector<double> ());
+  Xg.assign (1, vector<double> ());
+  Xc.assign (vSbgrp2Covars[0].size(), vector<double> ());
+  for (size_t s = 0; s < iFtr.vvPhenos.size(); ++s)
+  {
+    size_t idxPheno, idxGeno, p;
+    for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
+    {
+      p = gsl_permutation_get (perm, i);
+      idxPheno = vvSampleIdxPhenos[s][p];
+      idxGeno = vvSampleIdxGenos[s][i];
+      if (idxPheno != string::npos
+	  && idxGeno != string::npos
+	  && ! iFtr.vvIsNa[s][idxPheno]
+	  && ! iSnp.vvIsNa[s][idxGeno])
+      {
+	Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
+	Xg[0].push_back (iSnp.vvGenos[s][idxGeno]);
+	for (map<string, vector<double> >::const_iterator it =
+	       vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
+	  Xc[s].push_back (it->second[i]);
+      }
+    }
+    if (needQnorm)
+      qqnorm (&Y[s][0], Y[s].size());
+  }
+  iResFtrSnp.vNs.assign (iFtr.vvPhenos.size(), Y[0].size());
+}
+
+void
 ResFtrSnp_calcAbfsConstLargeGridMvlr (
   ResFtrSnp & iResFtrSnp,
   const vector<vector<double> > & vvGridL,
@@ -1820,56 +1897,6 @@ ResFtrSnp_calcAbfsMvlr (
 }
 
 void
-ResFtrSnp_runMltvrAnalysis (
-  ResFtrSnp & iResFtrSnp,
-  const Ftr & iFtr,
-  const Snp & iSnp,
-  const vector<vector<size_t> > & vvSampleIdxPhenos,
-  const vector<vector<size_t> > & vvSampleIdxGenos,
-  const bool & needQnorm,
-  const vector<map<string, vector<double> > > & vSbgrp2Covars,
-  const vector<vector<double> > & vvGridL,
-  const vector<vector<double> > & vvGridS,
-  const string & whichBfs,
-  const bool & fitNull)
-{
-  // prepare the data
-  size_t nbSubgroups = iFtr.vvPhenos.size();
-  vector<vector<double> > Y (nbSubgroups, vector<double> ()),
-    Xg (1, vector<double> ()), // single SNP
-    Xc (vSbgrp2Covars[0].size(), vector<double> ());
-  for (size_t s = 0; s < nbSubgroups; ++s)
-  {
-    size_t idxPheno, idxGeno;
-    for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
-    {
-      idxPheno = vvSampleIdxPhenos[s][i];
-      idxGeno = vvSampleIdxGenos[s][i];
-      if (idxPheno != string::npos
-	  && idxGeno != string::npos
-	  && ! iFtr.vvIsNa[s][idxPheno]
-	  && ! iSnp.vvIsNa[s][idxGeno])
-      {
-	Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
-	Xg[0].push_back (iSnp.vvGenos[s][idxGeno]);
-	for (map<string, vector<double> >::const_iterator it =
-	       vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
-	  Xc[s].push_back (it->second[i]);
-      }
-    }
-    if (needQnorm)
-      qqnorm (&Y[s][0], Y[s].size());
-  }
-  
-  // initialize the struct
-  iResFtrSnp.snp = iSnp.name;
-  iResFtrSnp.vNs.assign (nbSubgroups, Y[0].size());
-  
-  // compute the multivariate ABF(s)
-  ResFtrSnp_calcAbfsMvlr (iResFtrSnp, Y, Xg, Xc, whichBfs, vvGridL, vvGridS, fitNull);
-}
-
-void
 Ftr_init (
   Ftr & iFtr,
   const string & name,
@@ -1975,9 +2002,9 @@ Ftr_inferAssos (
     if (verbose > 0)
       cout << iFtr.name << " " << iFtr.vPtCisSnps[snpId]->name << endl;
     ResFtrSnp iResFtrSnp;
+    ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
     if (! mvlr) // univariate model
     {
-      ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
       for (size_t s = 0; s < nbSubgroups; ++s)
       {
 	if (iFtr.vvPhenos[s].size() > 0 &&
@@ -1991,16 +2018,17 @@ Ftr_inferAssos (
       }
       if (whichStep == 3 || whichStep == 4 || whichStep == 5)
 	ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
-      iFtr.vResFtrSnps.push_back (iResFtrSnp);
     }
     else // multivariate model
     {
-      ResFtrSnp_runMltvrAnalysis (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]),
-				  vvSampleIdxPhenos, vvSampleIdxGenos,
-				  needQnorm, vSbgrp2Covars, vvGridL, vvGridS,
-				  whichBfs, fitNull);
-      iFtr.vResFtrSnps.push_back (iResFtrSnp);
+      vector<vector<double> > Y, Xg, Xc;
+      ResFtrSnp_prepareDataForMvlr (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]),
+				    vvSampleIdxPhenos, vvSampleIdxGenos,
+				    vSbgrp2Covars, needQnorm, Y, Xg, Xc);
+      ResFtrSnp_calcAbfsMvlr (iResFtrSnp, Y, Xg, Xc, whichBfs, vvGridL, vvGridS,
+			      fitNull);
     }
+    iFtr.vResFtrSnps.push_back (iResFtrSnp);
   }
 }
 
@@ -2244,6 +2272,7 @@ Ftr_makePermsJoint (
   const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
+  const bool & mvlr,
   const bool & fitNull,
   const size_t & nbPerms,
   const int & trick,
@@ -2295,33 +2324,67 @@ Ftr_makePermsJoint (
       iSnp = *(iFtr.vPtCisSnps[snpId]);
       ResFtrSnp iResFtrSnp;
       ResFtrSnp_init (iResFtrSnp, iSnp.name, nbSubgroups);
-      for (size_t s = 0; s < nbSubgroups; ++s)
-	if (iFtr.vvPhenos[s].size() > 0 &&
-	    iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
-	  ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
-					   vvSampleIdxPhenos,
-					   vvSampleIdxGenos,
-					   needQnorm, vSbgrp2Covars, perm);
-      vector<vector<double> > vvStdSstats;
-      ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
-						   vvStdSstats);
-      if (whichPermBf.compare("gen") == 0)
-      	ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
-      else if (whichPermBf.compare("sin") == 0)
+      if (! mvlr) // univariate model
       {
-      	ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
-      	ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+	for (size_t s = 0; s < nbSubgroups; ++s)
+	  if (iFtr.vvPhenos[s].size() > 0 &&
+	      iFtr.vPtCisSnps[snpId]->vvGenos[s].size() > 0)
+	    ResFtrSnp_getSstatsPermOneSbgrp (iResFtrSnp, iFtr, iSnp, s,
+					     vvSampleIdxPhenos,
+					     vvSampleIdxGenos,
+					     needQnorm, vSbgrp2Covars, perm);
+	vector<vector<double> > vvStdSstats;
+	ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
+						     vvStdSstats);
+	if (whichPermBf.compare("gen") == 0)
+	  ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
+	else if (whichPermBf.compare("sin") == 0)
+	{
+	  ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+	  ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+	}
+	else if (whichPermBf.compare("gen-sin") == 0)
+	{
+	  ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
+	  ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
+	  ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+	}
+	else if (whichPermBf.compare("all") == 0)
+	{
+	  ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
+	  ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
+	}
       }
-      else if (whichPermBf.compare("gen-sin") == 0)
+      else // multivariate model
       {
-      	ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
-      	ResFtrSnp_calcAbfsSingletons (iResFtrSnp, vvGridS, vvStdSstats);
-      	ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
-      }
-      else if (whichPermBf.compare("all") == 0)
-      {
-	ResFtrSnp_calcAbfsAllConfigs (iResFtrSnp, vvGridS, vvStdSstats);
-	ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
+	vector<vector<double> > Y, Xg, Xc;
+	ResFtrSnp_prepareDataForMvlrPerm (iResFtrSnp, iFtr, iSnp,
+					  vvSampleIdxPhenos, vvSampleIdxGenos,
+					  vSbgrp2Covars, needQnorm, perm,
+					  Y, Xg, Xc);
+	if (whichPermBf.compare("gen") == 0)
+	  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull,
+						Y, Xg, Xc);
+	else if (whichPermBf.compare("sin") == 0)
+	{
+	  ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull,
+					    Y, Xg, Xc);
+	  ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+	}
+	else if (whichPermBf.compare("gen-sin") == 0)
+	{
+	  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull,
+						Y, Xg, Xc);
+	  ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull,
+					    Y, Xg, Xc);
+	  ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
+	}
+	else if (whichPermBf.compare("all") == 0)
+	{
+	  ResFtrSnp_calcAbfsAllConfigsMvlr (iResFtrSnp, vvGridS, fitNull,
+					    Y, Xg, Xc);
+	  ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
+	}
       }
       if (useMaxBfOverSnps)
       {
@@ -3427,6 +3490,7 @@ makePermsJoint (
   const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
+  const bool & mvlr,
   const bool & fitNull,
   const size_t & nbPerms,
   const size_t & seed,
@@ -3451,7 +3515,7 @@ makePermsJoint (
     if (itF->second.vResFtrSnps.size() > 0)
       Ftr_makePermsJoint (itF->second, vvSampleIdxPhenos,
 			  vvSampleIdxGenos, needQnorm, vSbgrp2Covars, vvGridL,
-			  vvGridS, fitNull, nbPerms, trick, whichPermBf,
+			  vvGridS, mvlr, fitNull, nbPerms, trick, whichPermBf,
 			  useMaxBfOverSnps, rngPerm, rngTrick);
   }
   if (verbose == 1)
@@ -3471,6 +3535,7 @@ makePerms (
   const vector<map<string, vector<double> > > & vSbgrp2Covars,
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
+  const bool & mvlr,
   const bool & fitNull,
   const size_t & nbPerms,
   const size_t & seed,
@@ -3518,7 +3583,7 @@ makePerms (
   
   if (whichStep == 4 || whichStep == 5)
     makePermsJoint (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
-		    needQnorm, vSbgrp2Covars, vvGridL, vvGridS, fitNull,
+		    needQnorm, vSbgrp2Covars, vvGridL, vvGridS, mvlr, fitNull,
 		    nbPerms, seed, trick, whichPermBf, useMaxBfOverSnps,
 		    rngPerm, rngTrick, verbose);
   
@@ -4068,8 +4133,8 @@ run (
 	      vvGridS, whichBfs, mvlr, fitNull, verbose);
   if (whichStep == 2 || whichStep == 4 || whichStep == 5)
     makePerms (mFtrs, vvSampleIdxPhenos, whichStep, needQnorm, vSbgrp2Covars,
-	       vvGridL, vvGridS, fitNull, nbPerms, seed, trick, whichPermSep,
-	       whichPermBf, useMaxBfOverSnps, verbose);
+	       vvGridL, vvGridS, mvlr, fitNull, nbPerms, seed, trick,
+	       whichPermSep, whichPermBf, useMaxBfOverSnps, verbose);
   
   writeRes (outPrefix, outRaw, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
 	    whichStep, vvGridL, vvGridS, whichBfs, whichPermSep, mvlr,
