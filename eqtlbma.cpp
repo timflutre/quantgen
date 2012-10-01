@@ -1753,7 +1753,6 @@ ResFtrSnp_calcAbfsSingletonsMvlr (
 {
 #ifdef LIB_MVLR
   stringstream ssConfig;
-  vector<vector<double> > Y_singletons;
   vector<vector<int> > vvGamma (1, vector<int> ());
   vector<double> vL10Abfs (vvGridS.size(),
 			   numeric_limits<double>::quiet_NaN());
@@ -1763,40 +1762,24 @@ ResFtrSnp_calcAbfsSingletonsMvlr (
     ssConfig.str("");
     ssConfig << (s+1);
     
-    if (iResFtrSnp.vNs[s] > 2)
-    {
-      Y_singletons.clear ();
-      Y_singletons.push_back (Y[s]);
-      vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
-      vvGamma[0][s] = 1;
-      
-      MVLR iMvlr (Y_singletons, Xg, Xc, 1);
-      if (! fitNull)
-	iMvlr.set_Sigma_option (1);
-      else
-	iMvlr.set_Sigma_option (2);
-      for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
-	vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
-						     vvGridS[gridIdx][1],
-						     vvGamma);
-      iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
-						    vL10Abfs));
-      iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
-						 log10_weighted_sum (
-						   &(vL10Abfs[0]),
-						   vL10Abfs.size())));
-    }
-    else // iResFtrSnp.vNs[s] <= 2
-    {
-      iResFtrSnp.mUnweightedAbfs.insert (
-	make_pair (ssConfig.str(),
-		   vector<double> (
-		     vvGridS.size(),
-		     numeric_limits<double>::quiet_NaN())));
-      iResFtrSnp.mWeightedAbfs.insert (
-	make_pair (ssConfig.str(),
-		   numeric_limits<double>::quiet_NaN()));
-    }
+    vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
+    vvGamma[0][s] = 1;
+    
+    MVLR iMvlr (Y, Xg, Xc, 1);
+    if (! fitNull)
+      iMvlr.set_Sigma_option (1);
+    else
+      iMvlr.set_Sigma_option (2);
+    for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
+      vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
+						   vvGridS[gridIdx][1],
+						   vvGamma);
+    iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
+						  vL10Abfs));
+    iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
+					       log10_weighted_sum (
+						 &(vL10Abfs[0]),
+						 vL10Abfs.size())));
   }
 #endif
 }
@@ -1810,10 +1793,10 @@ ResFtrSnp_calcAbfsAllConfigsMvlr (
   vector<vector<double> > & Xg,
   vector<vector<double> > & Xc)
 {
+#ifdef LIB_MVLR
   gsl_combination * comb;
   stringstream ssConfig;
   vector<bool> vIsEqtlInConfig; // T,T,F if S=3 and config="1-2"
-  vector<vector<double> > Y_subset;
   vector<vector<int> > vvGamma (1, vector<int> ());
   vector<double> vL10Abfs;
   
@@ -1828,46 +1811,32 @@ ResFtrSnp_calcAbfsAllConfigsMvlr (
     while (true)
     {
       prepareConfig (ssConfig, vIsEqtlInConfig, comb);
-      Y_subset.clear ();
-      for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
-	if (iResFtrSnp.vNs[s] > 2 && vIsEqtlInConfig[s])
-	  Y_subset.push_back (Y[s]);
       vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
       for (size_t s = 0; s < vIsEqtlInConfig.size(); ++s)
 	if (vIsEqtlInConfig[s])
 	  vvGamma[0][s] = 1;
-      if (Y_subset[0].size() > 2)
-      {
-	vL10Abfs.assign (vvGridS.size(), numeric_limits<double>::quiet_NaN());
-	MVLR iMvlr (Y_subset, Xg, Xc, 1);
-	if (! fitNull)
-	  iMvlr.set_Sigma_option (1);
-	else
-	  iMvlr.set_Sigma_option (2);
-	for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
-	  vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
-						       vvGridS[gridIdx][1],
-						       vvGamma);
-	iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
-						      vL10Abfs));
-	iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
-						   log10_weighted_sum (
-						     &(vL10Abfs[0]),
-						     vL10Abfs.size())));
-      }
+      vL10Abfs.assign (vvGridS.size(), numeric_limits<double>::quiet_NaN());
+      MVLR iMvlr (Y, Xg, Xc, 1);
+      if (! fitNull)
+	iMvlr.set_Sigma_option (1);
       else
-      {
-	iResFtrSnp.mUnweightedAbfs.insert (
-	  make_pair(ssConfig.str(), vector<double> (
-		      vvGridS.size(), numeric_limits<double>::quiet_NaN())));
-	iResFtrSnp.mWeightedAbfs.insert (
-	  make_pair(ssConfig.str(), numeric_limits<double>::quiet_NaN()));
-      }
+	iMvlr.set_Sigma_option (2);
+      for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
+	vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
+						     vvGridS[gridIdx][1],
+						     vvGamma);
+      iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
+						    vL10Abfs));
+      iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
+						 log10_weighted_sum (
+						   &(vL10Abfs[0]),
+						   vL10Abfs.size())));
       if (gsl_combination_next (comb) != GSL_SUCCESS)
 	break;
     }
     gsl_combination_free (comb);
   }
+#endif
 }
 
 void
