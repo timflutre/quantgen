@@ -260,6 +260,8 @@ void MVLR::compute_Sigma1(){
     gsl_blas_dgemm(CblasTrans,CblasNoTrans,1,Yr,Yr,0,Sigma);
     gsl_matrix_add(Sigma,H);
     gsl_matrix_scale(Sigma,1.0/(n+m-q-s-1));
+    
+    gsl_matrix_free(Yr);
   }   
   
 
@@ -727,6 +729,10 @@ MVLR::~MVLR(){
     gsl_matrix_free(Sigma);
     gsl_matrix_free(Sigma_inv);
   }
+  if(Sigma0!=0){
+    gsl_matrix_free(Sigma0);
+    gsl_matrix_free(Sigma0_inv);
+  }
   if(bVi!=0)
     gsl_matrix_free(bVi);
   if(Vg_inv!=0)
@@ -778,7 +784,7 @@ double MVLR::compute_log10_ABF(){
   
   Wg = kron(Ip,Pg,p,s);
   
-
+  gsl_matrix_free(Ip);
 
   
 
