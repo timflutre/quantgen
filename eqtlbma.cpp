@@ -132,11 +132,12 @@ void help (char ** argv)
        << "\t\t they use the small grid (BFgen-sin is also reported)" << endl
        << "\t\t'all': compute also the BFs for all configurations (costly if many subgroups)" << endl
        << "\t\t all BFs use the small grid" << endl
+#ifdef LIB_MVLR
        << "      --mvlr\tuse the multivariate version of the ABF" << endl
        << "\t\tallows for correlation between samples in the errors" << endl
        << "\t\tespecially useful when subgroups come from same individuals" << endl
        << "\t\tbetter with --fitnull as the small sample correction only partiall applies here" << endl
-       << "\t\tcurrently only works with --step 3" << endl
+#endif
        << "      --fitnull\testimate the variance of the errors on the null model (no genotype effect)" << endl
        << "\t\tgood accuracy if SNPs have very small effect sizes" << endl
        << "      --nperm\tnumber of permutations" << endl
@@ -3830,6 +3831,7 @@ writeResAbfsRaw (
 	  }
 	  if (whichBfs.compare("sin") == 0)
 	    break;
+	  gsl_combination_free (comb);
 	}
       }
     }
