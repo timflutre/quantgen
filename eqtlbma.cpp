@@ -105,6 +105,7 @@ void help (char ** argv)
        << "\t\tby default, only the ABFs averaged over the grids are written" << endl
        << "\t\twriting all raw ABFs can be too much if the number of subgroups is large" << endl
        << "      --qnorm\tquantile-normalize the phenotypes" << endl
+       << "      --maf\tminimum minor allele frequency (default=1.0)" << endl
        << "      --covar\tfile with absolute paths to covariate files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
        << "\t\tcan be a single line (single subgroup)" << endl
@@ -203,6 +204,7 @@ parseArgs (
   bool & outRaw,
   int & whichStep,
   bool & needQnorm,
+  float & minMaf,
   string & covarFile,
   string & largeGridFile,
   string & smallGridFile,
@@ -237,6 +239,7 @@ parseArgs (
 	{"outraw", no_argument, 0, 0},
 	{"step", required_argument, 0, 0},
 	{"qnorm", no_argument, 0, 0},
+	{"maf", required_argument, 0, 0},
 	{"covar", required_argument, 0, 0},
 	{"gridL", required_argument, 0, 0},
 	{"gridS", required_argument, 0, 0},
@@ -296,6 +299,11 @@ parseArgs (
       if (strcmp(long_options[option_index].name, "qnorm") == 0)
       {
 	needQnorm = true;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "maf") == 0)
+      {
+	minMaf = atof (optarg);
 	break;
       }
       if (strcmp(long_options[option_index].name, "covar") == 0)
@@ -2818,6 +2826,7 @@ loadFtrInfo (
 void
 loadGenosAndSnpInfo (
   const map<string, string> & mGenoPaths,
+  const float & minMaf,
   const vector<string> & vSubgroups,
   const vector<string> & vSnpsToKeep,
   map<string, Snp> & mSnps,
@@ -2887,6 +2896,8 @@ loadGenosAndSnpInfo (
 		    - count (iSnp.vvIsNa[s].begin(),
 			     iSnp.vvIsNa[s].end(),
 			     true));
+	if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	  continue;
 	iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
 	iSnp.chr = tokens[0];
 	iSnp.coord = atol (tokens[2].c_str());
@@ -2919,6 +2930,8 @@ loadGenosAndSnpInfo (
 		    - count (mSnps[tokens[1]].vvIsNa[s].begin(),
 			     mSnps[tokens[1]].vvIsNa[s].end(),
 			     true));
+	if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	  continue;
 	mSnps[tokens[1]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
       }
     }
@@ -2952,6 +2965,7 @@ loadGenosAndSnpInfo (
 void
 loadGenos (
   const map<string, string> & mGenoPaths,
+  const float & minMaf,
   const vector<string> & vSubgroups,
   const vector<string> & vSnpsToKeep,
   map<string, Snp> & mSnps,
@@ -3021,6 +3035,8 @@ loadGenos (
 		    - count (iSnp.vvIsNa[s].begin(),
 			     iSnp.vvIsNa[s].end(),
 			     true));
+	if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	  continue;
 	iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
 	mSnps.insert (make_pair (tokens[0], iSnp));
       }
@@ -3043,6 +3059,8 @@ loadGenos (
 		    - count (mSnps[tokens[0]].vvIsNa[s].begin(),
 			     mSnps[tokens[0]].vvIsNa[s].end(),
 			     true));
+	if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	  continue;
 	mSnps[tokens[0]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
       }
     }
@@ -4048,6 +4066,7 @@ run (
   const bool & outRaw,
   const int & whichStep,
   const bool & needQnorm,
+  const float & minMaf,
   const string & covarPathsFile,
   const string & largeGridFile,
   const string & smallGridFile,
@@ -4087,11 +4106,11 @@ run (
   map<string, Snp> mSnps;
   map<string, vector<Snp*> > mChr2VecPtSnps;
   if (snpCoordFile.empty())
-    loadGenosAndSnpInfo (mGenoPaths, vSubgroups, vSnpsToKeep, mSnps,
+    loadGenosAndSnpInfo (mGenoPaths, minMaf, vSubgroups, vSnpsToKeep, mSnps,
 			 mChr2VecPtSnps, verbose);
   else
   {
-    loadGenos (mGenoPaths, vSubgroups, vSnpsToKeep, mSnps, verbose);
+    loadGenos (mGenoPaths, minMaf, vSubgroups, vSnpsToKeep, mSnps, verbose);
     loadSnpInfo (snpCoordFile, mSnps, mChr2VecPtSnps, verbose);
   }
   
@@ -4118,6 +4137,7 @@ int main (int argc, char ** argv)
 {
   int verbose = 1, whichStep = 0, trick = 0, whichPermSep = 1;
   size_t lenCis = 100000, nbPerms = 0, seed = string::npos;
+  float minMaf = 1.0;
   bool outRaw = false, needQnorm = false, fitNull = false, mvlr = false,
     useMaxBfOverSnps = false;
   string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
@@ -4126,9 +4146,10 @@ int main (int argc, char ** argv)
   
   parseArgs (argc, argv, genoPathsFile, snpCoordFile, phenoPathsFile,
 	     ftrCoordsFile, anchor, lenCis, outPrefix, outRaw, whichStep,
-	     needQnorm, covarPathsFile, largeGridFile, smallGridFile, whichBfs,
-	     mvlr, fitNull, nbPerms, seed, trick, whichPermSep, whichPermBf,
-	     useMaxBfOverSnps, ftrsToKeepFile, snpsToKeepFile, verbose);
+	     needQnorm, minMaf, covarPathsFile, largeGridFile, smallGridFile,
+	     whichBfs, mvlr, fitNull, nbPerms, seed, trick, whichPermSep,
+	     whichPermBf, useMaxBfOverSnps, ftrsToKeepFile, snpsToKeepFile, 
+	     verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -4142,7 +4163,7 @@ int main (int argc, char ** argv)
   }
   
   run (genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile, anchor,
-       lenCis, outPrefix, outRaw, whichStep, needQnorm, covarPathsFile,
+       lenCis, outPrefix, outRaw, whichStep, needQnorm, minMaf, covarPathsFile,
        largeGridFile, smallGridFile, whichBfs, mvlr, fitNull, nbPerms, seed,
        trick, whichPermSep, whichPermBf, useMaxBfOverSnps, ftrsToKeepFile,
        snpsToKeepFile, verbose);
