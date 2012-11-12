@@ -105,7 +105,7 @@ void help (char ** argv)
        << "\t\tby default, only the ABFs averaged over the grids are written" << endl
        << "\t\twriting all raw ABFs can be too much if the number of subgroups is large" << endl
        << "      --qnorm\tquantile-normalize the phenotypes" << endl
-       << "      --maf\tminimum minor allele frequency (default=1.0)" << endl
+       << "      --maf\tminimum minor allele frequency (default=0.0)" << endl
        << "      --covar\tfile with absolute paths to covariate files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
        << "\t\tcan be a single line (single subgroup)" << endl
@@ -4137,7 +4137,7 @@ int main (int argc, char ** argv)
 {
   int verbose = 1, whichStep = 0, trick = 0, whichPermSep = 1;
   size_t lenCis = 100000, nbPerms = 0, seed = string::npos;
-  float minMaf = 1.0;
+  float minMaf = 0.0;
   bool outRaw = false, needQnorm = false, fitNull = false, mvlr = false,
     useMaxBfOverSnps = false;
   string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
