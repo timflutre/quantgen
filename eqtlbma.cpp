@@ -139,6 +139,7 @@ void help (char ** argv)
        << "\t\tallows for correlation between samples in the errors" << endl
        << "\t\tespecially useful when subgroups come from same individuals" << endl
        << "\t\tbetter with --fitnull as the small sample correction only partiall applies here" << endl
+       << "\t\tcaution, no separate analysis can be performed with this option" << endl
 #endif
        << "      --fitnull\testimate the variance of the errors on the null model (no genotype effect)" << endl
        << "\t\tgood accuracy if SNPs have very small effect sizes" << endl
@@ -518,6 +519,8 @@ parseArgs (
   }
   if (mvlr && ! fitNull)
     fprintf (stderr, "WARNING: --mvlr should be use with --fitnull\n\n");
+  if (mvlr && (whichStep == 2 || whichStep == 5))
+    fprintf (stderr, "WARNING: separate analysis won't be performed with --mvlr\n\n");
   if ((whichStep == 2 || whichStep == 4 || whichStep == 5) && nbPerms == 0)
   {
     printCmdLine (cerr, argc, argv);
@@ -2858,6 +2861,7 @@ loadGenosAndSnpInfoFromImpute (
   const vector<string> & vSubgroups,
   const size_t & s,
   const vector<string> & vSnpsToKeep,
+  const map<string, vector<Ftr*> > & mChr2VecPtFtrs,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps)
 {
@@ -2879,6 +2883,8 @@ loadGenosAndSnpInfoFromImpute (
 	   << endl;
       exit (1);
     }
+    if (mChr2VecPtFtrs.find (tokens[0]) == mChr2VecPtFtrs.end())
+      continue;
     if (! vSnpsToKeep.empty()
 	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1])
 	== vSnpsToKeep.end())
@@ -2960,6 +2966,7 @@ loadGenosAndSnpInfoFromVcf (
   const vector<string> & vSubgroups,
   const size_t & s,
   const vector<string> & vSnpsToKeep,
+  const map<string, vector<Ftr*> > & mChr2VecPtFtrs,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps)
 {
@@ -2994,6 +3001,8 @@ loadGenosAndSnpInfoFromVcf (
 	   << endl;
       exit (1);
     }
+    if (mChr2VecPtFtrs.find (tokens[0]) == mChr2VecPtFtrs.end())
+      continue;
     if (! vSnpsToKeep.empty()
 	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2])
 	== vSnpsToKeep.end())
@@ -3077,6 +3086,7 @@ loadGenosAndSnpInfo (
   const float & minMaf,
   const vector<string> & vSubgroups,
   const vector<string> & vSnpsToKeep,
+  const map<string, vector<Ftr*> > & mChr2VecPtFtrs,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps,
   const int & verbose)
@@ -3104,11 +3114,11 @@ loadGenosAndSnpInfo (
     if (line.find("##fileformat=VCF") != string::npos) // VCF format
       loadGenosAndSnpInfoFromVcf (genoStream, line, nbLines, mGenoPaths,
 				  minMaf, vSubgroups, s, vSnpsToKeep,
-				  mSnps, mChr2VecPtSnps);
+				  mChr2VecPtFtrs, mSnps, mChr2VecPtSnps);
     else // IMPUTE format
       loadGenosAndSnpInfoFromImpute (genoStream, line, nbLines, mGenoPaths,
 				     minMaf, vSubgroups, s, vSnpsToKeep,
-				     mSnps, mChr2VecPtSnps);
+				     mChr2VecPtFtrs, mSnps, mChr2VecPtSnps);
     
     if (! gzeof (genoStream))
     {
@@ -3741,7 +3751,7 @@ makePerms (
     }
   }
   
-  if (whichStep == 2 || whichStep == 5)
+  if (! mvlr && (whichStep == 2 || whichStep == 5))
     makePermsSep (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos, needQnorm,
 		  vSbgrp2Covars, nbPerms, seed, trick, whichPermSep,rngPerm,
 		  rngTrick, verbose);
@@ -3853,6 +3863,7 @@ writeResSepPermPval (
     ++lineId;
     gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     
+    ssTxt.str("");
     ssTxt << "ftr nbSnps permPval nbPerms minTruePval" << endl;
     ++lineId;
     gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
@@ -3902,6 +3913,7 @@ writeResSepPermPval (
   ++lineId;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
+  ssTxt.str("");
   ssTxt << "ftr nbSnps sepPermPval nbPerms minTruePval" << endl;
   ++lineId;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
@@ -4187,6 +4199,7 @@ writeResJointPermPval (
   ++lineId;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
+  ssTxt.str("");
   ssTxt << "ftr nbSnps jointPermPval nbPerms maxL10TrueAbf avgL10TrueAbf" << endl;
   ++lineId;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
@@ -4231,7 +4244,7 @@ writeRes (
     writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
 		    verbose);
   
-  if (whichStep == 2 || whichStep == 5)
+  if (! mvlr && (whichStep == 2 || whichStep == 5))
   {
     if (whichPermSep == 1)
       writeResSepPermPval (outPrefix, mFtrs, seed, verbose);
@@ -4304,8 +4317,8 @@ run (
   map<string, Snp> mSnps;
   map<string, vector<Snp*> > mChr2VecPtSnps;
   if (snpCoordFile.empty())
-    loadGenosAndSnpInfo (mGenoPaths, minMaf, vSubgroups, vSnpsToKeep, mSnps,
-			 mChr2VecPtSnps, verbose);
+    loadGenosAndSnpInfo (mGenoPaths, minMaf, vSubgroups, vSnpsToKeep,
+			 mChr2VecPtFtrs, mSnps, mChr2VecPtSnps, verbose);
   else
   {
     loadGenos (mGenoPaths, minMaf, vSubgroups, vSnpsToKeep, mSnps, verbose);
