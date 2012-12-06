@@ -72,7 +72,8 @@ void help (char ** argv)
        << "  -g, --geno\tfile with absolute paths to genotype files" << endl
        << "\t\ttwo columns: subgroup identifier<space/tab>path to file" << endl
        << "\t\tadd '#' at the beginning of a line to comment it" << endl
-       << "\t\tsubgroup file: can be in two formats" << endl
+       << "\t\tsubgroup file: can be in three formats (VCF/IMPUTE/custom)" << endl
+       << "\t\tVCF: see specifications on 1kG website" << endl
        << "\t\tIMPUTE: row 1 is a header chr<del>name<del>coord<del>a1<del>a2" << endl
        << "\t\t followed by >sample1_a1a1<del>sample1_a1a2<del>sample1_a2a2<del>..." << endl
        << "\t\tcustom: row 1 for sample names, column 1 for SNP names, genotypes as allele dose" << endl
@@ -2531,43 +2532,67 @@ loadSamplesAllGenos (
 	   << " is empty" << endl;
       exit (1);
     }
-    closeFile (mGenoPaths.find(vSubgroups[s])->second, fileStream);
-    split (line, " \t", tokens);
     
-    if (tokens[0].compare("chr") == 0) // IMPUTE format
+    if (line.find("##fileformat=VCF") != string::npos) // VCF format
     {
-      if ((tokens.size() - 5) % 3 != 0)
+      while (getline (fileStream, line))
       {
-	cerr << "ERROR: the header of IMPUTE file "
-	     << mGenoPaths.find(vSubgroups[s])->second
-	     << " is badly formatted" << endl;
-	exit (1);
+	if (line.find("#CHROM") == string::npos)
+	  continue;
+	split (line, " \t", tokens);
+	closeFile (mGenoPaths.find(vSubgroups[s])->second, fileStream);
+	vvSamples.push_back (vector<string> (tokens.size()-9));
+	for (size_t i = 9; i < tokens.size(); ++i)
+	{
+	  vvSamples[s][i-9] = tokens[i];
+	  if (find (vSamples.begin(), vSamples.end(), tokens[i])
+	      == vSamples.end())
+	    vSamples.push_back (tokens[i]);
+	}
+	break;
       }
-      tokens2.clear();
-      i = 5;
-      while (i < tokens.size())
-      {
-	sample = split (tokens[i], "_a", 0); // sampleX_a1a1, sampleX_a1a2 or sampleX_a2a2
-	tokens2.push_back (sample);
-	i = i + 3;
-      }
-      vvSamples.push_back (tokens2);
-      for (i = 0; i < tokens2.size(); ++i)
-	if (find (vSamples.begin(), vSamples.end(), tokens2[i])
-	    == vSamples.end())
-	  vSamples.push_back (tokens2[i]);
     }
-    else
+    else // not VCF
     {
-      if (tokens[0].compare("Id") == 0)
-	tokens.erase (tokens.begin());
-      vvSamples.push_back (tokens);
-      for (i = 0; i < tokens.size(); ++i)
-	if (find (vSamples.begin(), vSamples.end(), tokens[i])
-	    == vSamples.end())
-	  vSamples.push_back (tokens[i]);
+      split (line, " \t", tokens);
+      closeFile (mGenoPaths.find(vSubgroups[s])->second, fileStream);
+      
+      if (tokens[0].compare("chr") == 0) // IMPUTE format
+      {
+	if ((tokens.size() - 5) % 3 != 0)
+	{
+	  cerr << "ERROR: the header of IMPUTE file "
+	       << mGenoPaths.find(vSubgroups[s])->second
+	       << " is badly formatted" << endl;
+	  exit (1);
+	}
+	tokens2.clear();
+	i = 5;
+	while (i < tokens.size())
+	{
+	  sample = split (tokens[i], "_a", 0); // sampleX_a1a1, sampleX_a1a2 or sampleX_a2a2
+	  tokens2.push_back (sample);
+	  i = i + 3;
+	}
+	vvSamples.push_back (tokens2);
+	for (i = 0; i < tokens2.size(); ++i)
+	  if (find (vSamples.begin(), vSamples.end(), tokens2[i])
+	      == vSamples.end())
+	    vSamples.push_back (tokens2[i]);
+      }
+      else // allele dosage
+      {
+	if (tokens[0].compare("Id") == 0)
+	  tokens.erase (tokens.begin());
+	vvSamples.push_back (tokens);
+	for (i = 0; i < tokens.size(); ++i)
+	  if (find (vSamples.begin(), vSamples.end(), tokens[i])
+	      == vSamples.end())
+	    vSamples.push_back (tokens[i]);
+      }
     }
   }
+  
   if (verbose > 0)
   {
     cout << "nb of samples (genotypes): "
@@ -2824,6 +2849,229 @@ loadFtrInfo (
 }
 
 void
+loadGenosAndSnpInfoFromImpute (
+  gzFile & genoStream,
+  string & line,
+  size_t & nbLines,
+  const map<string, string> & mGenoPaths,
+  const float & minMaf,
+  const vector<string> & vSubgroups,
+  const size_t & s,
+  const vector<string> & vSnpsToKeep,
+  map<string, Snp> & mSnps,
+  map<string, vector<Snp*> > & mChr2VecPtSnps)
+{
+  vector<string> tokens;
+  size_t nbSamples;
+  double maf, AA, AB, BB;
+  
+  split (line, " \t", tokens);
+  nbSamples = (size_t) (tokens.size() - 5) / 3;
+  
+  while (getline (genoStream, line))
+  {
+    ++nbLines;
+    split (line, " \t", tokens);
+    if (tokens.size() != (size_t) (3 * nbSamples + 5))
+    {
+      cerr << "ERROR: not enough columns on line " << nbLines
+	   << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	   << endl;
+      exit (1);
+    }
+    if (! vSnpsToKeep.empty()
+	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1])
+	== vSnpsToKeep.end())
+      continue;
+    
+    maf = 0;
+    if (mSnps.find(tokens[1]) == mSnps.end())
+    {
+      Snp iSnp;
+      Snp_init (iSnp, tokens[1], mGenoPaths.size());
+      iSnp.vvIsNa[s].resize (nbSamples, false);
+      iSnp.vvGenos[s].resize (nbSamples,
+			      numeric_limits<double>::quiet_NaN());
+      for (size_t i = 0; i < nbSamples; ++i)
+      {
+	AA = atof(tokens[5+3*i].c_str());
+	AB = atof(tokens[5+3*i+1].c_str());
+	BB = atof(tokens[5+3*i+2].c_str());
+	if (AA == 0 && AB == 0 && BB == 0)
+	  iSnp.vvIsNa[s][i] = true;
+	else
+	{
+	  iSnp.vvGenos[s][i] = 0 * AA + 1 * AB + 2 * BB;
+	  maf += iSnp.vvGenos[s][i];
+	}
+      }
+      maf /= 2 * (nbSamples
+		  - count (iSnp.vvIsNa[s].begin(),
+			   iSnp.vvIsNa[s].end(),
+			   true));
+      if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	continue;
+      iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+      iSnp.chr = tokens[0];
+      iSnp.coord = atol (tokens[2].c_str());
+      mSnps.insert (make_pair (tokens[1], iSnp));
+      
+      if (mChr2VecPtSnps.find(tokens[0]) == mChr2VecPtSnps.end())
+	mChr2VecPtSnps.insert (make_pair (tokens[0],
+					  vector<Snp*> ()));
+      mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[1]]));
+    }
+    else
+    {
+      mSnps[tokens[1]].vvIsNa[s].resize (nbSamples, false);
+      mSnps[tokens[1]].vvGenos[s].resize (nbSamples,
+					  numeric_limits<double>::quiet_NaN());
+      for (size_t i = 0; i < nbSamples; ++i)
+      {
+	AA = atof(tokens[5+3*i].c_str());
+	AB = atof(tokens[5+3*i+1].c_str());
+	BB = atof(tokens[5+3*i+2].c_str());
+	if (AA == 0 && AB == 0 && BB == 0)
+	  mSnps[tokens[1]].vvIsNa[s][i] = true;
+	else
+	{
+	  mSnps[tokens[1]].vvGenos[s][i] = 0 * AA + 1 * AB + 2 * BB;
+	  maf += mSnps[tokens[1]].vvGenos[s][i];
+	}
+      }
+      maf /= 2 * (nbSamples
+		  - count (mSnps[tokens[1]].vvIsNa[s].begin(),
+			   mSnps[tokens[1]].vvIsNa[s].end(),
+			   true));
+      if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	continue;
+      mSnps[tokens[1]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+    }
+  }
+}
+
+void
+loadGenosAndSnpInfoFromVcf (
+  gzFile & genoStream,
+  string & line,
+  size_t & nbLines,
+  const map<string, string> & mGenoPaths,
+  const float & minMaf,
+  const vector<string> & vSubgroups,
+  const size_t & s,
+  const vector<string> & vSnpsToKeep,
+  map<string, Snp> & mSnps,
+  map<string, vector<Snp*> > & mChr2VecPtSnps)
+{
+  vector<string> tokens, tokens2, tokens3;
+  size_t nbSamples;
+  double maf;
+  
+  while (getline (genoStream, line))
+  {
+    if (line.find("#CHROM") == string::npos)
+      continue;
+    split (line, " \t", tokens);
+    nbSamples = tokens.size() - 9;
+    break;
+  }
+  
+  while (getline (genoStream, line))
+  {
+    ++nbLines;
+    split (line, " \t", tokens);
+    if (tokens.size() != nbSamples + 9)
+    {
+      cerr << "ERROR: not enough columns on line " << nbLines
+	   << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	   << endl;
+      exit (1);
+    }
+    if (tokens[8].find("GT") == string::npos)
+    {
+      cerr << "ERROR: missing GT in 9-th field on line " << nbLines
+	   << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	   << endl;
+      exit (1);
+    }
+    if (! vSnpsToKeep.empty()
+	&& find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[2])
+	== vSnpsToKeep.end())
+      continue;
+    
+    maf = 0;
+    if (mSnps.find(tokens[2]) == mSnps.end())
+    {
+      Snp iSnp;
+      Snp_init (iSnp, tokens[2], mGenoPaths.size());
+      iSnp.vvIsNa[s].resize (nbSamples, false);
+      iSnp.vvGenos[s].resize (nbSamples,
+			      numeric_limits<double>::quiet_NaN());
+      for (size_t i = 0; i < nbSamples; ++i)
+      {
+	split (tokens[9+i], ":", tokens2); // if several subfields
+	if (tokens2[0].compare(".") == 0)
+	  iSnp.vvIsNa[s][i] = true;
+	else
+	{
+	  split (tokens2[0], "|/", tokens3);
+	  iSnp.vvGenos[s][i] = 0;
+	  if (tokens3[0].compare("1") == 0)
+	    iSnp.vvGenos[s][i] += 1;
+	  if (tokens3[1].compare("1") == 0)
+	    iSnp.vvGenos[s][i] += 1;
+	  maf += iSnp.vvGenos[s][i];
+	}
+      }
+      maf /= 2 * (nbSamples
+		  - count (iSnp.vvIsNa[s].begin(),
+			   iSnp.vvIsNa[s].end(),
+			   true));
+      if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	continue;
+      iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+      iSnp.chr = tokens[0];
+      iSnp.coord = atol (tokens[1].c_str());
+      mSnps.insert (make_pair (tokens[2], iSnp));
+      
+      if (mChr2VecPtSnps.find(tokens[0]) == mChr2VecPtSnps.end())
+	mChr2VecPtSnps.insert (make_pair (tokens[0],
+					  vector<Snp*> ()));
+      mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[2]]));
+    }
+    else
+    {
+      mSnps[tokens[2]].vvIsNa[s].resize (nbSamples, false);
+      mSnps[tokens[2]].vvGenos[s].resize (nbSamples,
+					  numeric_limits<double>::quiet_NaN());
+      for (size_t i = 0; i < nbSamples; ++i)
+      {
+	split (tokens[9+i], ":", tokens2); // if several subfields
+	if (tokens2[0].compare(".") == 0)
+	  mSnps[tokens[2]].vvIsNa[s][i] = true;
+	else
+	{
+	  split (tokens2[0], "|/", tokens3);
+	  mSnps[tokens[2]].vvGenos[s][i] = 0;
+	  if (tokens3[0].compare("1") == 0)
+	    mSnps[tokens[2]].vvGenos[s][i] += 1;
+	  if (tokens3[1].compare("1") == 0)
+	    mSnps[tokens[2]].vvGenos[s][i] += 1;
+	  maf += mSnps[tokens[2]].vvGenos[s][i];
+	}
+      }
+      maf /= 2 * (nbSamples
+		  - count (mSnps[tokens[2]].vvIsNa[s].begin(),
+			   mSnps[tokens[2]].vvIsNa[s].end(),
+			   true));
+      if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
+	continue;
+      mSnps[tokens[2]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
+    }
+  }
+}
+
+void
 loadGenosAndSnpInfo (
   const map<string, string> & mGenoPaths,
   const float & minMaf,
@@ -2838,12 +3086,12 @@ loadGenosAndSnpInfo (
   
   gzFile genoStream;
   string line;
-  vector<string> tokens;
-  size_t nbSamples, nbLines;
-  double maf, AA, AB, BB;
+  size_t nbLines;
   
+  // load each file
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
+    clock_t timeBegin = clock();
     openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream, "rb");
     if (! getline (genoStream, line))
     {
@@ -2851,90 +3099,17 @@ loadGenosAndSnpInfo (
 	   << mGenoPaths.find(vSubgroups[s])->second << endl;
       exit (1);
     }
-    split (line, " \t", tokens);
-    nbSamples = (size_t) (tokens.size() - 5) / 3;
     nbLines = 1;
     
-    while (getline (genoStream, line))
-    {
-      ++nbLines;
-      split (line, " \t", tokens);
-      if (tokens.size() != (size_t) (3 * nbSamples + 5))
-      {
-	cerr << "ERROR: not enough columns on line " << nbLines
-	     << " of file " << mGenoPaths.find(vSubgroups[s])->second
-	     << endl;
-	exit (1);
-      }
-      if (! vSnpsToKeep.empty()
-	  && find (vSnpsToKeep.begin(), vSnpsToKeep.end(), tokens[1])
-	  == vSnpsToKeep.end())
-	continue;
-      
-      maf = 0;
-      if (mSnps.find(tokens[1]) == mSnps.end())
-      {
-	Snp iSnp;
-	Snp_init (iSnp, tokens[1], mGenoPaths.size());
-	iSnp.vvIsNa[s].resize (nbSamples, false);
-	iSnp.vvGenos[s].resize (nbSamples,
-				numeric_limits<double>::quiet_NaN());
-	for (size_t i = 0; i < nbSamples; ++i)
-	{
-	  AA = atof(tokens[5+3*i].c_str());
-	  AB = atof(tokens[5+3*i+1].c_str());
-	  BB = atof(tokens[5+3*i+2].c_str());
-	  if (AA == 0 && AB == 0 && BB == 0)
-	    iSnp.vvIsNa[s][i] = true;
-	  else
-	  {
-	    iSnp.vvGenos[s][i] = 0 * AA + 1 * AB + 2 * BB;
-	    maf += iSnp.vvGenos[s][i];
-	  }
-	}
-	maf /= 2 * (nbSamples
-		    - count (iSnp.vvIsNa[s].begin(),
-			     iSnp.vvIsNa[s].end(),
-			     true));
-	if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
-	  continue;
-	iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
-	iSnp.chr = tokens[0];
-	iSnp.coord = atol (tokens[2].c_str());
-	mSnps.insert (make_pair (tokens[1], iSnp));
-	
-	if (mChr2VecPtSnps.find(tokens[0]) == mChr2VecPtSnps.end())
-	  mChr2VecPtSnps.insert (make_pair (tokens[0],
-					    vector<Snp*> ()));
-	mChr2VecPtSnps[tokens[0]].push_back (&(mSnps[tokens[1]]));
-      }
-      else
-      {
-	mSnps[tokens[1]].vvIsNa[s].resize (nbSamples, false);
-	mSnps[tokens[1]].vvGenos[s].resize (nbSamples,
-					    numeric_limits<double>::quiet_NaN());
-	for (size_t i = 0; i < nbSamples; ++i)
-	{
-	  AA = atof(tokens[5+3*i].c_str());
-	  AB = atof(tokens[5+3*i+1].c_str());
-	  BB = atof(tokens[5+3*i+2].c_str());
-	  if (AA == 0 && AB == 0 && BB == 0)
-	    mSnps[tokens[1]].vvIsNa[s][i] = true;
-	  else
-	  {
-	    mSnps[tokens[1]].vvGenos[s][i] = 0 * AA + 1 * AB + 2 * BB;
-	    maf += mSnps[tokens[1]].vvGenos[s][i];
-	  }
-	}
-	maf /= 2 * (nbSamples
-		    - count (mSnps[tokens[1]].vvIsNa[s].begin(),
-			     mSnps[tokens[1]].vvIsNa[s].end(),
-			     true));
-	if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
-	  continue;
-	mSnps[tokens[1]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
-      }
-    }
+    if (line.find("##fileformat=VCF") != string::npos) // VCF format
+      loadGenosAndSnpInfoFromVcf (genoStream, line, nbLines, mGenoPaths,
+				  minMaf, vSubgroups, s, vSnpsToKeep,
+				  mSnps, mChr2VecPtSnps);
+    else // IMPUTE format
+      loadGenosAndSnpInfoFromImpute (genoStream, line, nbLines, mGenoPaths,
+				     minMaf, vSubgroups, s, vSnpsToKeep,
+				     mSnps, mChr2VecPtSnps);
+    
     if (! gzeof (genoStream))
     {
       cerr << "ERROR: can't read successfully file "
@@ -2946,7 +3121,9 @@ loadGenosAndSnpInfo (
     closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
-	   << " SNPs" << endl << flush;
+	   << " SNPs (loaded in " << setprecision(8)
+	   << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0)
+	   << " min)" << endl << flush;
   }
   
   // sort the SNPs per chr
