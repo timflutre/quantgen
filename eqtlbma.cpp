@@ -3832,6 +3832,7 @@ writeResSepPermPval (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
   const vector<string> & vSubgroups,
+  const size_t & seed,
   const int & verbose)
 {
   if (verbose > 0)
@@ -3846,9 +3847,14 @@ writeResSepPermPval (
       cout << "file " << ssOutFile.str() << endl << flush;
     gzFile outStream;
     openFile (ssOutFile.str(), outStream, "wb");
+    size_t lineId = 0;
+    
+    ssTxt << "# seed=" << seed << endl;
+    ++lineId;
+    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     
     ssTxt << "ftr nbSnps permPval nbPerms minTruePval" << endl;
-    size_t lineId = 1;
+    ++lineId;
     gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
@@ -3877,6 +3883,7 @@ void
 writeResSepPermPval (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
+  const size_t & seed,
   const int & verbose)
 {
   if (verbose > 0)
@@ -3889,9 +3896,14 @@ writeResSepPermPval (
     cout << "file " << ssOutFile.str() << endl << flush;
   gzFile outStream;
   openFile (ssOutFile.str(), outStream, "wb");
+  size_t lineId = 0;
+  
+  ssTxt << "# seed=" << seed << endl;
+  ++lineId;
+  gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   ssTxt << "ftr nbSnps sepPermPval nbPerms minTruePval" << endl;
-  size_t lineId = 1;
+  ++lineId;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
@@ -4155,6 +4167,8 @@ void
 writeResJointPermPval (
   const string & outPrefix,
   const map<string, Ftr> & mFtrs,
+  const size_t & seed,
+  const string & whichPermBf,
   const int & verbose)
 {
   if (verbose > 0)
@@ -4167,9 +4181,14 @@ writeResJointPermPval (
     cout << "file " << ssOutFile.str() << endl << flush;
   gzFile outStream;
   openFile (ssOutFile.str(), outStream, "wb");
+  size_t lineId = 0;
+  
+  ssTxt << "# permBf=" << whichPermBf << " seed=" << seed << endl;
+  ++lineId;
+  gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   ssTxt << "ftr nbSnps jointPermPval nbPerms maxL10TrueAbf avgL10TrueAbf" << endl;
-  size_t lineId = 1;
+  ++lineId;
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
@@ -4204,6 +4223,8 @@ writeRes (
   const string & whichBfs,
   const int & whichPermSep,
   const bool & mvlr,
+  const size_t & seed,
+  const string & whichPermBf,
   const int & verbose)
 {
   if (! mvlr)
@@ -4213,9 +4234,9 @@ writeRes (
   if (whichStep == 2 || whichStep == 5)
   {
     if (whichPermSep == 1)
-      writeResSepPermPval (outPrefix, mFtrs, verbose);
+      writeResSepPermPval (outPrefix, mFtrs, seed, verbose);
     else
-      writeResSepPermPval (outPrefix, mFtrs, vSubgroups, verbose);;
+      writeResSepPermPval (outPrefix, mFtrs, vSubgroups, seed, verbose);;
   }
   
   if (whichStep == 3 || whichStep == 4 || whichStep == 5)
@@ -4228,7 +4249,7 @@ writeRes (
   }
   
   if (whichStep == 4 || whichStep == 5)
-    writeResJointPermPval (outPrefix, mFtrs, verbose);
+    writeResJointPermPval (outPrefix, mFtrs, seed, whichPermBf, verbose);
 }
 
 void
@@ -4305,7 +4326,7 @@ run (
   
   writeRes (outPrefix, outRaw, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
 	    whichStep, vvGridL, vvGridS, whichBfs, whichPermSep, mvlr,
-	    verbose);
+	    seed, whichPermBf, verbose);
 }
 
 #ifdef EQTLBMA_MAIN
