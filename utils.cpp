@@ -137,9 +137,11 @@ elapsedTime (
 {
   char str[128];
   double elapsed = difftime (endRawTime, startRawTime); // in sec
-  sprintf (str, "%01.0fd %01.0fh %01.0fm %01.0fs", floor(elapsed/(24*60*60)),
-	   floor(elapsed/(60*60)), floor(fmod(elapsed,60*60)/60.0),
-	   fmod(elapsed,60));
+  snprintf (str, 127, "%01.0fd %01.0fh %01.0fm %01.0fs",
+	    floor(elapsed/(24*60*60)),
+	    floor(elapsed/(60*60)),
+	    floor(fmod(elapsed,60*60)/60.0),
+	    fmod(elapsed,60));
   return string(str);
 }
 
@@ -975,6 +977,14 @@ getMaxMemUsedByProcess (void)
   closeFile (pathToFile, stream);
   
   return vmHWM;
+}
+
+string getMaxMemUsedByProcess2Str (void)
+{
+  char str[128];
+  double maxMem = getMaxMemUsedByProcess (); // in kB
+  snprintf (str, 127, "%.0f kB", maxMem);
+  return string(str);
 }
 
 void

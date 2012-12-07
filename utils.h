@@ -128,6 +128,8 @@ bool isNan (double i);
 
 double getMaxMemUsedByProcess (void);
 
+string getMaxMemUsedByProcess2Str (void);
+
 void printCmdLine (ostream & os, int argc, char ** argv);
 
 #endif

@@ -519,7 +519,7 @@ parseArgs (
   }
   if (mvlr && ! fitNull)
     fprintf (stderr, "WARNING: --mvlr should be use with --fitnull\n\n");
-  if (mvlr && (whichStep == 2 || whichStep == 5))
+  if (mvlr && whichStep == 5)
     fprintf (stderr, "WARNING: separate analysis won't be performed with --mvlr\n\n");
   if ((whichStep == 2 || whichStep == 4 || whichStep == 5) && nbPerms == 0)
   {
@@ -990,6 +990,9 @@ ResFtrSnp_init (
   iResFtrSnp.vNs.assign (nbSubgroups, 0);
   iResFtrSnp.vMapPredictors.assign (nbSubgroups,
   				    map<string, vector<double> > ());
+  for (size_t s = 0; s < nbSubgroups; ++s)
+    iResFtrSnp.vMapPredictors[s]["genotype"] =
+      vector<double>  (3, numeric_limits<double>::quiet_NaN());
   iResFtrSnp.vSigmahats.assign (nbSubgroups,
   				numeric_limits<double>::quiet_NaN());
   iResFtrSnp.vPves.assign (nbSubgroups,
@@ -1032,8 +1035,6 @@ ResFtrSnp_getSstatsOneSbgrp (
     if (needQnorm)
       qqnorm (&y[0], y.size());
     
-    iResFtrSnp.vMapPredictors[s]["genotype"] =
-      vector<double>  (3, numeric_limits<double>::quiet_NaN());
     fitSimpleLinearRegression (g, y, iResFtrSnp.vPves[s],
 			       iResFtrSnp.vSigmahats[s],
 			       iResFtrSnp.vMapPredictors[s]["genotype"][0],
@@ -1146,8 +1147,6 @@ ResFtrSnp_getSstatsPermOneSbgrp (
     if (needQnorm)
       qqnorm (&y[0], y.size());
     
-    iResFtrSnp.vMapPredictors[s]["genotype"] =
-      vector<double>  (3, numeric_limits<double>::quiet_NaN());
     fitSimpleLinearRegression (g, y, iResFtrSnp.vPves[s],
 			       iResFtrSnp.vSigmahats[s],
 			       iResFtrSnp.vMapPredictors[s]["genotype"][0],
@@ -1623,11 +1622,12 @@ ResFtrSnp_prepareDataForMvlr (
   vector<vector<double> > & Xg,
   vector<vector<double> > & Xc)
 {
-  Y.assign (iFtr.vvPhenos.size(), vector<double> ());
+  // don't initialize Y yet as the feature may not be present in all subgroups
   Xg.assign (1, vector<double> ());
   Xc.assign (vSbgrp2Covars[0].size(), vector<double> ());
   for (size_t s = 0; s < iFtr.vvPhenos.size(); ++s)
   {
+    vector<double> tmpY;
     size_t idxPheno, idxGeno;
     for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
     {
@@ -1638,17 +1638,21 @@ ResFtrSnp_prepareDataForMvlr (
 	  && ! iFtr.vvIsNa[s][idxPheno]
 	  && ! iSnp.vvIsNa[s][idxGeno])
       {
-	Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
+	tmpY.push_back (iFtr.vvPhenos[s][idxPheno]);
 	Xg[0].push_back (iSnp.vvGenos[s][idxGeno]);
 	for (map<string, vector<double> >::const_iterator it =
 	       vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
 	  Xc[s].push_back (it->second[i]);
       }
     }
-    if (needQnorm)
-      qqnorm (&Y[s][0], Y[s].size());
+    if (tmpY.size() != 0)
+    {
+      if (needQnorm)
+	qqnorm (&tmpY[0], tmpY.size());
+      Y.push_back (tmpY);
+    }
   }
-  iResFtrSnp.vNs.assign (iFtr.vvPhenos.size(), Y[0].size());
+  iResFtrSnp.vNs.assign (Y.size(), Y[0].size());
 }
 
 void
@@ -1665,11 +1669,12 @@ ResFtrSnp_prepareDataForMvlrPerm (
   vector<vector<double> > & Xg,
   vector<vector<double> > & Xc)
 {
-  Y.assign (iFtr.vvPhenos.size(), vector<double> ());
+  // don't initialize Y yet as the feature may not be present in all subgroups
   Xg.assign (1, vector<double> ());
   Xc.assign (vSbgrp2Covars[0].size(), vector<double> ());
   for (size_t s = 0; s < iFtr.vvPhenos.size(); ++s)
   {
+    vector<double> tmpY;
     size_t idxPheno, idxGeno, p;
     for (size_t i = 0; i < vvSampleIdxPhenos[s].size(); ++i)
     {
@@ -1681,15 +1686,19 @@ ResFtrSnp_prepareDataForMvlrPerm (
 	  && ! iFtr.vvIsNa[s][idxPheno]
 	  && ! iSnp.vvIsNa[s][idxGeno])
       {
-	Y[s].push_back (iFtr.vvPhenos[s][idxPheno]);
+	tmpY.push_back (iFtr.vvPhenos[s][idxPheno]);
 	Xg[0].push_back (iSnp.vvGenos[s][idxGeno]);
 	for (map<string, vector<double> >::const_iterator it =
 	       vSbgrp2Covars[s].begin(); it != vSbgrp2Covars[s].end(); ++it)
 	  Xc[s].push_back (it->second[i]);
       }
     }
-    if (needQnorm)
-      qqnorm (&Y[s][0], Y[s].size());
+    if (tmpY.size() != 0)
+    {
+      if (needQnorm)
+	qqnorm (&tmpY[0], tmpY.size());
+      Y.push_back (tmpY);
+    }
   }
   iResFtrSnp.vNs.assign (iFtr.vvPhenos.size(), Y[0].size());
 }
@@ -1882,7 +1891,8 @@ void
 Ftr_init (
   Ftr & iFtr,
   const string & name,
-  const size_t & nbSubgroups)
+  const size_t & nbSubgroups,
+  const size_t & nbSamples)
 {
   iFtr.name = name;
   iFtr.chr.clear();
@@ -1892,8 +1902,9 @@ Ftr_init (
   iFtr.vvIsNa.resize (nbSubgroups);
   for (size_t s = 0; s < nbSubgroups; ++s)
   {
-    iFtr.vvPhenos[s] = (vector<double> ());
-    iFtr.vvIsNa[s] = (vector<bool> ());
+    iFtr.vvPhenos[s] = (vector<double> (nbSamples,
+					numeric_limits<double>::quiet_NaN()));
+    iFtr.vvIsNa[s] = (vector<bool> (nbSamples, true));
   }
   iFtr.vPermPvalsSep.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
   iFtr.vNbPermsSoFar.assign (nbSubgroups, 0);
@@ -1985,7 +1996,8 @@ Ftr_inferAssos (
       cout << iFtr.name << " " << iFtr.vPtCisSnps[snpId]->name << endl;
     ResFtrSnp iResFtrSnp;
     ResFtrSnp_init (iResFtrSnp, iFtr.vPtCisSnps[snpId]->name, nbSubgroups);
-    if (! mvlr) // univariate model
+    if (whichStep == 1 || whichStep == 2 ||
+	(! mvlr && (whichStep == 3 || whichStep == 4 || whichStep == 5)))
     {
       for (size_t s = 0; s < nbSubgroups; ++s)
       {
@@ -2001,7 +2013,7 @@ Ftr_inferAssos (
       if (whichStep == 3 || whichStep == 4 || whichStep == 5)
 	ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
     }
-    else // multivariate model
+    else // multivariate model with BFs only (no summary stats)
     {
       vector<vector<double> > Y, Xg, Xc;
       ResFtrSnp_prepareDataForMvlr (iResFtrSnp, iFtr, *(iFtr.vPtCisSnps[snpId]),
@@ -2698,10 +2710,11 @@ loadPhenos (
   gzFile phenoStream;
   string line;
   vector<string> tokens;
-  size_t nbSamples, nbLines;
+  size_t nbSamples, nbLines, nbFtrsToKeepPerSubgroup;
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
+    nbFtrsToKeepPerSubgroup = 0;
     openFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream, "rb");
     if (! getline (phenoStream, line))
     {
@@ -2731,35 +2744,28 @@ loadPhenos (
 	  && find (vFtrsToKeep.begin(), vFtrsToKeep.end(), tokens[0])
 	  == vFtrsToKeep.end())
 	continue;
+      ++nbFtrsToKeepPerSubgroup;
       
       if (mFtrs.find(tokens[0]) == mFtrs.end())
       {
 	Ftr iFtr;
-	Ftr_init (iFtr, tokens[0], mPhenoPaths.size());
-	iFtr.vvIsNa[s].resize (nbSamples, false);
-	iFtr.vvPhenos[s].resize (nbSamples,
-				 numeric_limits<double>::quiet_NaN());
+	Ftr_init (iFtr, tokens[0], mPhenoPaths.size(), nbSamples);
 	for (size_t i = 1; i < tokens.size(); ++i)
-	{
-	  if (tokens[i].compare("NA") == 0)
-	    iFtr.vvIsNa[s][i-1] = true;
-	  else
+	  if (tokens[i].compare("NA") != 0)
+	  {
+	    iFtr.vvIsNa[s][i-1] = false;
 	    iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
-	}
+	  }
 	mFtrs.insert (make_pair (tokens[0], iFtr));
       }
       else
       {
-	mFtrs[tokens[0]].vvIsNa[s].resize (nbSamples, false);
-	mFtrs[tokens[0]].vvPhenos[s].resize (nbSamples,
-					     numeric_limits<double>::quiet_NaN());
 	for (size_t i = 1; i < tokens.size() ; ++i)
-	{
-	  if (tokens[i].compare("NA") == 0)
-	    mFtrs[tokens[0]].vvIsNa[s][i-1] = true;
-	  else
+	  if (tokens[i].compare("NA") != 0)
+	  {
+	    mFtrs[tokens[0]].vvIsNa[s][i-1] = false;
 	    mFtrs[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
-	}
+	  }
       }
     }
     if (! gzeof (phenoStream))
@@ -2773,7 +2779,8 @@ loadPhenos (
     closeFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
-	   << " features" << endl << flush;
+	   << " features (to keep: " << nbFtrsToKeepPerSubgroup << ")"
+	   << endl << flush;
   }
   
   if (mFtrs.size() == 0)
@@ -3751,7 +3758,7 @@ makePerms (
     }
   }
   
-  if (! mvlr && (whichStep == 2 || whichStep == 5))
+  if (whichStep == 2 || (whichStep == 5 && ! mvlr))
     makePermsSep (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos, needQnorm,
 		  vSbgrp2Covars, nbPerms, seed, trick, whichPermSep,rngPerm,
 		  rngTrick, verbose);
@@ -4036,7 +4043,9 @@ writeResAbfsRaw (
 	    ssTxt << " " << ssConfig.str();
 	    for (size_t i = 0; i < vvGridL.size(); ++i)
 	    {
-	      if (i < vvGridS.size())
+	      if (i < vvGridS.size()
+		  && itP->mUnweightedAbfs.find(ssConfig.str()) !=
+		  itP->mUnweightedAbfs.end()) // for ftr not present in all subgroups
 		ssTxt << " " << itP->mUnweightedAbfs.find(ssConfig.str())->
 		  second[i];
 	      else
@@ -4240,11 +4249,12 @@ writeRes (
   const string & whichPermBf,
   const int & verbose)
 {
-  if (! mvlr)
+  if (whichStep == 1 || whichStep == 2 ||
+      (! mvlr && (whichStep == 3 || whichStep == 4 || whichStep == 5)))
     writeResSstats (outPrefix, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
 		    verbose);
   
-  if (! mvlr && (whichStep == 2 || whichStep == 5))
+  if (whichStep == 2 || (whichStep == 5 && ! mvlr))
   {
     if (whichPermSep == 1)
       writeResSepPermPval (outPrefix, mFtrs, seed, verbose);
@@ -4386,7 +4396,7 @@ int main (int argc, char ** argv)
 	 << endl
 	 << "elapsed -> " << elapsedTime(startRawTime, endRawTime)
 	 << endl
-	 << "max.mem -> " << getMaxMemUsedByProcess () << " kB"
+	 << "max.mem -> " << getMaxMemUsedByProcess2Str ()
 	 << endl;
   }
   
