@@ -1647,12 +1647,12 @@ ResFtrSnp_prepareDataForMvlr (
     }
     if (tmpY.size() != 0)
     {
+      iResFtrSnp.vNs[s] = tmpY.size();
       if (needQnorm)
 	qqnorm (&tmpY[0], tmpY.size());
       Y.push_back (tmpY);
     }
   }
-  iResFtrSnp.vNs.assign (Y.size(), Y[0].size());
 }
 
 void
@@ -1695,12 +1695,12 @@ ResFtrSnp_prepareDataForMvlrPerm (
     }
     if (tmpY.size() != 0)
     {
+      iResFtrSnp.vNs[s] = tmpY.size();
       if (needQnorm)
 	qqnorm (&tmpY[0], tmpY.size());
       Y.push_back (tmpY);
     }
   }
-  iResFtrSnp.vNs.assign (iFtr.vvPhenos.size(), Y[0].size());
 }
 
 void
@@ -1779,13 +1779,18 @@ ResFtrSnp_calcAbfsSingletonsMvlr (
   vector<double> vL10Abfs (vvGridS.size(),
 			   numeric_limits<double>::quiet_NaN());
   
+  size_t i = 0; // for cases where ftr is absent in some subgroups
   for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
   {
+    if (iResFtrSnp.vNs[s] < 2)
+      continue;
+    
     ssConfig.str("");
     ssConfig << (s+1);
     
-    vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
-    vvGamma[0][s] = 1;
+    vvGamma[0].assign (Y.size(), 0);
+    vvGamma[0][i] = 1;
+    ++i;
     
     MVLR iMvlr (Y, Xg, Xc, 1);
     if (! fitNull)
@@ -1830,13 +1835,32 @@ ResFtrSnp_calcAbfsAllConfigsMvlr (
       cerr << "ERROR: can't allocate memory for the combination" << endl;
       exit (1);
     }
+    
     while (true)
     {
+      bool isFtrAbsentInOneSubgroup = false; // skip config if true
+      for (size_t i = 0; i < comb->k; ++i)
+	if (iResFtrSnp.vNs[gsl_combination_get (comb, i)] < 2)
+	{
+	  isFtrAbsentInOneSubgroup = true;
+	  break;
+	}
+      if (isFtrAbsentInOneSubgroup)
+      {
+	if (gsl_combination_next (comb) != GSL_SUCCESS)
+	  break;
+	continue;
+      }
+      
       prepareConfig (ssConfig, vIsEqtlInConfig, comb);
-      vvGamma[0].assign (iResFtrSnp.vNs.size(), 0);
+      vvGamma[0].assign (Y.size(), 0);
+      size_t i = 0;
       for (size_t s = 0; s < vIsEqtlInConfig.size(); ++s)
 	if (vIsEqtlInConfig[s])
-	  vvGamma[0][s] = 1;
+	{
+	  vvGamma[0][i] = 1;
+	  ++i;
+	}
       vL10Abfs.assign (vvGridS.size(), numeric_limits<double>::quiet_NaN());
       MVLR iMvlr (Y, Xg, Xc, 1);
       if (! fitNull)
@@ -3138,7 +3162,7 @@ loadGenosAndSnpInfo (
     closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
-	   << " SNPs (loaded in " << setprecision(8)
+	   << " SNPs (loaded in " << fixed << setprecision(2)
 	   << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0)
 	   << " min)" << endl << flush;
   }
@@ -3269,7 +3293,7 @@ loadGenos (
     closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
-	   << " SNPs (loaded in " << setprecision(8)
+	   << " SNPs (loaded in " << fixed << setprecision(2)
 	   << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0)
 	   << " min)" << endl << flush;
   }
@@ -3583,7 +3607,7 @@ inferAssos (
   if (verbose > 0)
   {
     if(verbose == 1)
-      cout << " (" << setprecision(8) << (clock() - timeBegin) /
+      cout << " (" << fixed << setprecision(2) << (clock() - timeBegin) /
 	(double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
     cout << "nb of analyzed feature-SNP pairs: " << nbAnalyzedPairs << endl;
   }
@@ -3626,7 +3650,7 @@ makePermsSep (
 				    nbPerms, trick, rngPerm, rngTrick);
     }
     if (verbose == 1)
-      cout << " (" << setprecision(8) << (clock() - timeBegin) /
+      cout << " (" << fixed << setprecision(2)<< (clock() - timeBegin) /
 	(double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
   }
   else
@@ -3654,7 +3678,7 @@ makePermsSep (
 				     nbPerms, trick, s, rngPerm, rngTrick);
       }
       if (verbose == 1)
-	cout << " (" << setprecision(8) << (clock() - timeBegin) /
+	cout << " (" << fixed << setprecision(2) << (clock() - timeBegin) /
 	  (double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
     }
   }
@@ -3701,7 +3725,7 @@ makePermsJoint (
 			  useMaxBfOverSnps, rngPerm, rngTrick);
   }
   if (verbose == 1)
-    cout << " (" << setprecision(8) << (clock() - timeBegin) /
+    cout << " (" << fixed << setprecision(2) << (clock() - timeBegin) /
       (double(CLOCKS_PER_SEC)*60.0) << " min)" << endl << flush;
 }
 
