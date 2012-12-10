@@ -1915,8 +1915,7 @@ void
 Ftr_init (
   Ftr & iFtr,
   const string & name,
-  const size_t & nbSubgroups,
-  const size_t & nbSamples)
+  const size_t & nbSubgroups)
 {
   iFtr.name = name;
   iFtr.chr.clear();
@@ -1924,12 +1923,6 @@ Ftr_init (
   iFtr.end = string::npos;
   iFtr.vvPhenos.resize (nbSubgroups);
   iFtr.vvIsNa.resize (nbSubgroups);
-  for (size_t s = 0; s < nbSubgroups; ++s)
-  {
-    iFtr.vvPhenos[s] = (vector<double> (nbSamples,
-					numeric_limits<double>::quiet_NaN()));
-    iFtr.vvIsNa[s] = (vector<bool> (nbSamples, true));
-  }
   iFtr.vPermPvalsSep.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
   iFtr.vNbPermsSoFar.assign (nbSubgroups, 0);
   iFtr.vMinTruePvals.assign (nbSubgroups, numeric_limits<double>::quiet_NaN());
@@ -2773,22 +2766,26 @@ loadPhenos (
       if (mFtrs.find(tokens[0]) == mFtrs.end())
       {
 	Ftr iFtr;
-	Ftr_init (iFtr, tokens[0], mPhenoPaths.size(), nbSamples);
+	Ftr_init (iFtr, tokens[0], mPhenoPaths.size());
+	iFtr.vvPhenos[s].assign (nbSamples, numeric_limits<double>::quiet_NaN());
+	iFtr.vvIsNa[s].assign (nbSamples, true);
 	for (size_t i = 1; i < tokens.size(); ++i)
 	  if (tokens[i].compare("NA") != 0)
 	  {
-	    iFtr.vvIsNa[s][i-1] = false;
 	    iFtr.vvPhenos[s][i-1] = atof (tokens[i].c_str());
+	    iFtr.vvIsNa[s][i-1] = false;
 	  }
 	mFtrs.insert (make_pair (tokens[0], iFtr));
       }
       else
       {
+	mFtrs[tokens[0]].vvPhenos[s].assign (nbSamples, numeric_limits<double>::quiet_NaN());
+	mFtrs[tokens[0]].vvIsNa[s].assign (nbSamples, true);
 	for (size_t i = 1; i < tokens.size() ; ++i)
 	  if (tokens[i].compare("NA") != 0)
 	  {
-	    mFtrs[tokens[0]].vvIsNa[s][i-1] = false;
 	    mFtrs[tokens[0]].vvPhenos[s][i-1] = atof (tokens[i].c_str());
+	    mFtrs[tokens[0]].vvIsNa[s][i-1] = false;
 	  }
       }
     }
@@ -2893,6 +2890,7 @@ loadGenosAndSnpInfoFromImpute (
   const size_t & s,
   const vector<string> & vSnpsToKeep,
   const map<string, vector<Ftr*> > & mChr2VecPtFtrs,
+  size_t & nbSnpsToKeepPerSubgroup,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps)
 {
@@ -2948,6 +2946,7 @@ loadGenosAndSnpInfoFromImpute (
 			   true));
       if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
 	continue;
+      ++nbSnpsToKeepPerSubgroup;
       iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
       iSnp.chr = tokens[0];
       iSnp.coord = atol (tokens[2].c_str());
@@ -2982,6 +2981,7 @@ loadGenosAndSnpInfoFromImpute (
 			   true));
       if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
 	continue;
+      ++nbSnpsToKeepPerSubgroup;
       mSnps[tokens[1]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
     }
   }
@@ -2998,6 +2998,7 @@ loadGenosAndSnpInfoFromVcf (
   const size_t & s,
   const vector<string> & vSnpsToKeep,
   const map<string, vector<Ftr*> > & mChr2VecPtFtrs,
+  size_t & nbSnpsToKeepPerSubgroup,
   map<string, Snp> & mSnps,
   map<string, vector<Snp*> > & mChr2VecPtSnps)
 {
@@ -3069,6 +3070,7 @@ loadGenosAndSnpInfoFromVcf (
 			   true));
       if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
 	continue;
+      ++nbSnpsToKeepPerSubgroup;
       iSnp.vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
       iSnp.chr = tokens[0];
       iSnp.coord = atol (tokens[1].c_str());
@@ -3106,6 +3108,7 @@ loadGenosAndSnpInfoFromVcf (
 			   true));
       if ((maf <= 0.5 && maf < minMaf) || (maf > 0.5 && 1-maf < minMaf))
 	continue;
+      ++nbSnpsToKeepPerSubgroup;
       mSnps[tokens[2]].vMafs[s] = maf <= 0.5 ? maf : (1 - maf);
     }
   }
@@ -3127,12 +3130,13 @@ loadGenosAndSnpInfo (
   
   gzFile genoStream;
   string line;
-  size_t nbLines;
+  size_t nbLines, nbSnpsToKeepPerSubgroup;
   
   // load each file
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
     clock_t timeBegin = clock();
+    nbSnpsToKeepPerSubgroup = 0;
     openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream, "rb");
     if (! getline (genoStream, line))
     {
@@ -3145,11 +3149,13 @@ loadGenosAndSnpInfo (
     if (line.find("##fileformat=VCF") != string::npos) // VCF format
       loadGenosAndSnpInfoFromVcf (genoStream, line, nbLines, mGenoPaths,
 				  minMaf, vSubgroups, s, vSnpsToKeep,
-				  mChr2VecPtFtrs, mSnps, mChr2VecPtSnps);
+				  mChr2VecPtFtrs, nbSnpsToKeepPerSubgroup,
+				  mSnps, mChr2VecPtSnps);
     else // IMPUTE format
       loadGenosAndSnpInfoFromImpute (genoStream, line, nbLines, mGenoPaths,
 				     minMaf, vSubgroups, s, vSnpsToKeep,
-				     mChr2VecPtFtrs, mSnps, mChr2VecPtSnps);
+				     mChr2VecPtFtrs, nbSnpsToKeepPerSubgroup,
+				     mSnps, mChr2VecPtSnps);
     
     if (! gzeof (genoStream))
     {
@@ -3162,7 +3168,8 @@ loadGenosAndSnpInfo (
     closeFile (mGenoPaths.find(vSubgroups[s])->second , genoStream);
     if (verbose > 0)
       cout << "s" << (s+1) << " (" << vSubgroups[s] << "): " << (nbLines-1)
-	   << " SNPs (loaded in " << fixed << setprecision(2)
+	   << " SNPs (to keep: " << nbSnpsToKeepPerSubgroup
+	   << ", loaded in " << fixed << setprecision(2)
 	   << (clock() - timeBegin) / (double(CLOCKS_PER_SEC)*60.0)
 	   << " min)" << endl << flush;
   }
@@ -3575,11 +3582,14 @@ inferAssos (
   const int & verbose)
 {
   if (verbose > 0)
+  {
     cout << "look for association between each pair feature-SNP ..." << endl
-	 << "anchor=" << anchor << " lenCis=" << lenCis
-	 << " multivariate=" << boolalpha << mvlr
-	 << " fitnull=" << fitNull
-	 << endl << flush;
+	 << "anchor=" << anchor << " lenCis=" << lenCis;
+    if (whichStep == 3 || whichStep == 4 || whichStep == 5)
+      cout << " multivariate=" << boolalpha << mvlr
+	   << " fitnull=" << fitNull;
+    cout << endl << flush;
+  }
   
   clock_t timeBegin = clock();
   size_t nbAnalyzedPairs = 0;
