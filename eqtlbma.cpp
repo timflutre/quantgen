@@ -3887,7 +3887,7 @@ writeResSepPermPval (
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of feature-level P-values in each subgroup ..."
+    cout << "write results of feature-level P-values in each subgroup separately ..."
 	 << endl << flush;
   
   for (size_t s = 0; s < vSubgroups.size(); ++s)
@@ -3939,7 +3939,7 @@ writeResSepPermPval (
   const int & verbose)
 {
   if (verbose > 0)
-    cout << "write results of feature-level P-values, each subgroup separately ..."
+    cout << "write results of feature-level P-values, each subgroup ..."
 	 << endl << flush;
   
   stringstream ssOutFile, ssTxt;
