@@ -3841,6 +3841,8 @@ writeResSstats (
     size_t lineId = 1;
     gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
     
+    ssTxt.precision (7);
+    ssTxt.setf (ios::scientific);
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
 	 itF != mFtrs.end(); ++itF)
     {
@@ -4011,6 +4013,8 @@ writeResAbfsRaw (
   gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
   
   // write results
+  ssTxt.precision (7);
+  ssTxt.setf (ios::scientific);
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
@@ -4158,6 +4162,8 @@ writeResAbfsAvgGrids (
   
   // write results
   size_t n;
+  ssTxt.precision (7);
+  ssTxt.setf (ios::scientific);
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
