@@ -1,7 +1,7 @@
 /** \file eqtlbma.cpp
  *
  *  `eqtlbma' performs eQTL mapping in multiple subgroups via a Bayesian model.
- *  Copyright (C) 2012 Timothee Flutre
+ *  Copyright (C) 2012-2013 Timothee Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -138,11 +138,10 @@ void help (char ** argv)
        << "      --mvlr\tuse the multivariate version of the ABF" << endl
        << "\t\tallows for correlation between samples in the errors" << endl
        << "\t\tespecially useful when subgroups come from same individuals" << endl
-       << "\t\tbetter with --fitnull as the small sample correction only partiall applies here" << endl
        << "\t\tcaution, no separate analysis can be performed with this option" << endl
+       << "      --fitsigma\tparam used when estimating the variance of the errors with --mvlr" << endl
+       << "\t\tdefault=0 (null model), but can be between 0 and 1" << endl
 #endif
-       << "      --fitnull\testimate the variance of the errors on the null model (no genotype effect)" << endl
-       << "\t\tgood accuracy if SNPs have very small effect sizes" << endl
        << "      --nperm\tnumber of permutations" << endl
        << "\t\tdefault=0, recommended=10000" << endl
        << "      --seed\tseed for the two random number generators" << endl
@@ -181,12 +180,12 @@ void version (char ** argv)
 {
   cout << argv[0] << " " << __DATE__ << " " << __TIME__ << endl
        << endl
-       << "Copyright (C) 2012 T. Flutre." << endl
+       << "Copyright (C) 2012-2013 Timothee Flutre and Xiaoquan Wen." << endl
        << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
        << "This is free software; see the source for copying conditions.  There is NO" << endl
        << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
        << endl
-       << "Written by T. Flutre." << endl;
+       << "Written by Timothee Flutre and Xiaoquan Wen." << endl;
 }
 
 /** \brief Parse the command-line arguments and check the values of the 
@@ -212,7 +211,7 @@ parseArgs (
   string & smallGridFile,
   string & whichBfs,
   bool & mvlr,
-  bool & fitNull,
+  float & propFitSigma,
   size_t & nbPerms,
   size_t & seed,
   int & trick,
@@ -247,7 +246,7 @@ parseArgs (
 	{"gridS", required_argument, 0, 0},
 	{"bfs", required_argument, 0, 0},
 	{"mvlr", no_argument, 0, 0},
-	{"fitnull", no_argument, 0, 0},
+	{"fitsigma", required_argument, 0, 0},
 	{"nperm", required_argument, 0, 0},
 	{"seed", required_argument, 0, 0},
 	{"trick", required_argument, 0, 0},
@@ -333,9 +332,9 @@ parseArgs (
 	mvlr = true;
 	break;
       }
-      if (strcmp(long_options[option_index].name, "fitnull") == 0)
+      if (strcmp(long_options[option_index].name, "fitsigma") == 0)
       {
-	fitNull = true;
+	propFitSigma = atof (optarg);
 	break;
       }
       if (strcmp(long_options[option_index].name, "nperm") == 0)
@@ -517,8 +516,6 @@ parseArgs (
     help (argv);
     exit (1);
   }
-  if (mvlr && ! fitNull)
-    fprintf (stderr, "WARNING: --mvlr should be use with --fitnull\n\n");
   if (mvlr && whichStep == 5)
     fprintf (stderr, "WARNING: separate analysis won't be performed with --mvlr\n\n");
   if ((whichStep == 2 || whichStep == 4 || whichStep == 5) && nbPerms == 0)
@@ -1055,8 +1052,7 @@ ResFtrSnp_getSstatsOneSbgrp (
   const vector<vector<size_t> > & vvSampleIdxPhenos,
   const vector<vector<size_t> > & vvSampleIdxGenos,
   const bool & needQnorm,
-  const vector<map<string, vector<double> > > & vSbgrp2Covars,
-  const bool & fitNull)
+  const vector<map<string, vector<double> > > & vSbgrp2Covars)
 {
   vector<double> vY, vG;
   size_t idxPheno, idxGeno, j;
@@ -1093,7 +1089,7 @@ ResFtrSnp_getSstatsOneSbgrp (
     vector<vector<double> > vvResPredictors (
       1 + vvCovars.size(),
       vector<double> (3, numeric_limits<double>::quiet_NaN()));
-    fitMultipleLinearRegression (vG, vY, vvCovars, fitNull,
+    fitMultipleLinearRegression (vG, vY, vvCovars,
 				 iResFtrSnp.vPves[s],
 				 iResFtrSnp.vSigmahats[s],
 				 vvResPredictors);
@@ -1228,7 +1224,6 @@ ResFtrSnp_getSstatsPermOneSbgrp (
 void
 ResFtrSnp_getStdStatsAndCorrSmallSampleSize (
   const ResFtrSnp & iResFtrSnp,
-  const bool & fitNull,
   vector<vector<double> > & vvStdSstats)
 {
   for (size_t s = 0; s < iResFtrSnp.vNs.size(); ++s)
@@ -1241,9 +1236,9 @@ ResFtrSnp_getStdStatsAndCorrSmallSampleSize (
 	sebhat = iResFtrSnp.vMapPredictors[s].find("genotype")->second[1] /
 	iResFtrSnp.vSigmahats[s],
 	t = bhat / sebhat;
-      if (! fitNull) // apply quantile-quantile transformation
-	t = gsl_cdf_gaussian_Pinv (gsl_cdf_tdist_P (-fabs(bhat/sebhat),
-						    n-2), 1.0);
+      // apply quantile-quantile transformation
+      t = gsl_cdf_gaussian_Pinv (gsl_cdf_tdist_P (-fabs(bhat/sebhat),
+						  n-2), 1.0);
       vector<double> vStdSstats;
       if (fabs(t) > 1e-8)
       {
@@ -1589,11 +1584,10 @@ ResFtrSnp_calcAbfs (
   ResFtrSnp & iResFtrSnp,
   const string & whichBfs,
   const vector<vector<double> > & vvGridL,
-  const vector<vector<double> > & vvGridS,
-  const bool & fitNull)
+  const vector<vector<double> > & vvGridS)
 {
   vector<vector<double> > vvStdSstats;
-  ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
+  ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp,
 					       vvStdSstats);
   ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
   if (whichBfs.compare("sin") == 0)
@@ -1707,12 +1701,11 @@ void
 ResFtrSnp_calcAbfsConstLargeGridMvlr (
   ResFtrSnp & iResFtrSnp,
   const vector<vector<double> > & vvGridL,
-  const bool & fitNull,
+  const float & propFitSigma,
   vector<vector<double> > & Y,
   vector<vector<double> > & Xg,
   vector<vector<double> > & Xc)
 {
-#ifdef LIB_MVLR
   vector<double> vL10AbfsConst (vvGridL.size(),
 				numeric_limits<double>::quiet_NaN()),
     vL10AbfsConstFix (vvGridL.size(),
@@ -1720,28 +1713,28 @@ ResFtrSnp_calcAbfsConstLargeGridMvlr (
     vL10AbfsConstMaxh (vvGridL.size(),
 		       numeric_limits<double>::quiet_NaN());
   
-  MVLR iMvlr (Y, Xg, Xc, 1); // standardized effect sizes (ES model)
-  if (! fitNull)
-    iMvlr.set_Sigma_option (1);
-  else
-    iMvlr.set_Sigma_option (2);
+#ifdef LIB_MVLR
+  MVLR iMvlr;
+  iMvlr.set_sigma_option (propFitSigma);
+  iMvlr.init (Y, Xg, Xc);
   vector<vector<int> > vvGamma (1, vector<int> (iResFtrSnp.vNs.size(), 1));
   
   for (size_t gridIdx = 0; gridIdx < vvGridL.size(); ++gridIdx)
   {
     vL10AbfsConst[gridIdx] =
-      iMvlr.compute_log10_ABF (vvGridL[gridIdx][0],
-			       vvGridL[gridIdx][1],
-			       vvGamma);
+      iMvlr.compute_log10_ABF (vvGamma,
+			       vvGridL[gridIdx][0],
+			       vvGridL[gridIdx][1]);
     vL10AbfsConstFix[gridIdx] =
-      iMvlr.compute_log10_ABF (0,
-			       vvGridL[gridIdx][0] + vvGridL[gridIdx][1],
-			       vvGamma);
-    vL10AbfsConstMaxh[gridIdx] =
-      iMvlr.compute_log10_ABF (vvGridL[gridIdx][0] + vvGridL[gridIdx][1],
+      iMvlr.compute_log10_ABF (vvGamma,
 			       0,
-			       vvGamma);
+			       vvGridL[gridIdx][0] + vvGridL[gridIdx][1]);
+    vL10AbfsConstMaxh[gridIdx] =
+      iMvlr.compute_log10_ABF (vvGamma,
+			       vvGridL[gridIdx][0] + vvGridL[gridIdx][1],
+			       0);
   }
+#endif
   iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen",
 						vL10AbfsConst));
   iResFtrSnp.mUnweightedAbfs.insert (make_pair ("gen-fix",
@@ -1761,19 +1754,17 @@ ResFtrSnp_calcAbfsConstLargeGridMvlr (
 					      log10_weighted_sum (
 						&(vL10AbfsConstMaxh[0]),
 						vvGridL.size())));
-#endif
 }
 
 void
 ResFtrSnp_calcAbfsSingletonsMvlr (
   ResFtrSnp & iResFtrSnp,
   const vector<vector<double> > & vvGridS,
-  const bool & fitNull,
+  const float & propFitSigma,
   vector<vector<double> > & Y,
   vector<vector<double> > & Xg,
   vector<vector<double> > & Xc)
 {
-#ifdef LIB_MVLR
   stringstream ssConfig;
   vector<vector<int> > vvGamma (1, vector<int> ());
   vector<double> vL10Abfs (vvGridS.size(),
@@ -1792,15 +1783,15 @@ ResFtrSnp_calcAbfsSingletonsMvlr (
     vvGamma[0][i] = 1;
     ++i;
     
-    MVLR iMvlr (Y, Xg, Xc, 1);
-    if (! fitNull)
-      iMvlr.set_Sigma_option (1);
-    else
-      iMvlr.set_Sigma_option (2);
+#ifdef LIB_MVLR
+    MVLR iMvlr;
+    iMvlr.set_sigma_option (propFitSigma);
+    iMvlr.init (Y, Xg, Xc);
     for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
-      vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
-						   vvGridS[gridIdx][1],
-						   vvGamma);
+      vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGamma,
+						   vvGridS[gridIdx][0],
+						   vvGridS[gridIdx][1]);
+#endif
     iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
 						  vL10Abfs));
     iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
@@ -1808,19 +1799,17 @@ ResFtrSnp_calcAbfsSingletonsMvlr (
 						 &(vL10Abfs[0]),
 						 vL10Abfs.size())));
   }
-#endif
 }
 
 void
 ResFtrSnp_calcAbfsAllConfigsMvlr (
   ResFtrSnp & iResFtrSnp,
   const vector<vector<double> > & vvGridS,
-  const bool & fitNull,
+  const float & propFitSigma,
   vector<vector<double> > & Y,
   vector<vector<double> > & Xg,
   vector<vector<double> > & Xc)
 {
-#ifdef LIB_MVLR
   gsl_combination * comb;
   stringstream ssConfig;
   vector<bool> vIsEqtlInConfig; // T,T,F if S=3 and config="1-2"
@@ -1862,15 +1851,15 @@ ResFtrSnp_calcAbfsAllConfigsMvlr (
 	  ++i;
 	}
       vL10Abfs.assign (vvGridS.size(), numeric_limits<double>::quiet_NaN());
-      MVLR iMvlr (Y, Xg, Xc, 1);
-      if (! fitNull)
-	iMvlr.set_Sigma_option (1);
-      else
-	iMvlr.set_Sigma_option (2);
+#ifdef LIB_MVLR
+      MVLR iMvlr;
+      iMvlr.set_sigma_option (propFitSigma);
+      iMvlr.init (Y, Xg, Xc);
       for (size_t gridIdx = 0; gridIdx < vvGridS.size(); ++gridIdx)
-	vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGridS[gridIdx][0],
-						     vvGridS[gridIdx][1],
-						     vvGamma);
+	vL10Abfs[gridIdx] = iMvlr.compute_log10_ABF (vvGamma,
+						     vvGridS[gridIdx][0],
+						     vvGridS[gridIdx][1]);
+#endif
       iResFtrSnp.mUnweightedAbfs.insert (make_pair (ssConfig.str(),
 						    vL10Abfs));
       iResFtrSnp.mWeightedAbfs.insert (make_pair(ssConfig.str(),
@@ -1882,7 +1871,6 @@ ResFtrSnp_calcAbfsAllConfigsMvlr (
     }
     gsl_combination_free (comb);
   }
-#endif
 }
 
 void
@@ -1894,18 +1882,20 @@ ResFtrSnp_calcAbfsMvlr (
   const string & whichBfs,
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
-  const bool & fitNull)
+  const float & propFitSigma)
 {
-  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull, Y, Xg,
-					Xc);
+  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, propFitSigma,
+					Y, Xg, Xc);
   if (whichBfs.compare("sin") == 0)
   {
-    ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull, Y, Xg, Xc);
+    ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, propFitSigma,
+				      Y, Xg, Xc);
     ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
   }
   else if (whichBfs.compare("all") == 0)
   {
-    ResFtrSnp_calcAbfsAllConfigsMvlr (iResFtrSnp, vvGridS, fitNull, Y, Xg, Xc);
+    ResFtrSnp_calcAbfsAllConfigsMvlr (iResFtrSnp, vvGridS, propFitSigma,
+				      Y, Xg, Xc);
     ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
     ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
   }
@@ -2003,7 +1993,7 @@ Ftr_inferAssos (
   const vector<vector<double> > & vvGridS,
   const string & whichBfs,
   const bool & mvlr,
-  const bool & fitNull,
+  const float & propFitSigma,
   const int & verbose)
 {
   size_t nbSubgroups = iFtr.vvPhenos.size();
@@ -2024,11 +2014,11 @@ Ftr_inferAssos (
 	  ResFtrSnp_getSstatsOneSbgrp (iResFtrSnp, iFtr,
 				       *(iFtr.vPtCisSnps[snpId]), s,
 				       vvSampleIdxPhenos, vvSampleIdxGenos,
-				       needQnorm, vSbgrp2Covars, fitNull);
+				       needQnorm, vSbgrp2Covars);
 	}
       }
       if (whichStep == 3 || whichStep == 4 || whichStep == 5)
-	ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, vvGridL, vvGridS, fitNull);
+	ResFtrSnp_calcAbfs (iResFtrSnp, whichBfs, vvGridL, vvGridS);
     }
     else // multivariate model with BFs only (no summary stats)
     {
@@ -2037,7 +2027,7 @@ Ftr_inferAssos (
 				    vvSampleIdxPhenos, vvSampleIdxGenos,
 				    vSbgrp2Covars, needQnorm, Y, Xg, Xc);
       ResFtrSnp_calcAbfsMvlr (iResFtrSnp, Y, Xg, Xc, whichBfs, vvGridL, vvGridS,
-			      fitNull);
+			      propFitSigma);
     }
     iFtr.vResFtrSnps.push_back (iResFtrSnp);
   }
@@ -2284,7 +2274,7 @@ Ftr_makePermsJoint (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const bool & mvlr,
-  const bool & fitNull,
+  const float & propFitSigma,
   const size_t & nbPerms,
   const int & trick,
   const string & whichPermBf,
@@ -2345,7 +2335,7 @@ Ftr_makePermsJoint (
 					     vvSampleIdxGenos,
 					     needQnorm, vSbgrp2Covars, perm);
 	vector<vector<double> > vvStdSstats;
-	ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp, fitNull,
+	ResFtrSnp_getStdStatsAndCorrSmallSampleSize (iResFtrSnp,
 						     vvStdSstats);
 	if (whichPermBf.compare("gen") == 0)
 	  ResFtrSnp_calcAbfsConstLargeGrid (iResFtrSnp, vvGridL, vvStdSstats);
@@ -2374,25 +2364,25 @@ Ftr_makePermsJoint (
 					  vSbgrp2Covars, needQnorm, perm,
 					  Y, Xg, Xc);
 	if (whichPermBf.compare("gen") == 0)
-	  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull,
+	  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, propFitSigma,
 						Y, Xg, Xc);
 	else if (whichPermBf.compare("sin") == 0)
 	{
-	  ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull,
+	  ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, propFitSigma,
 					    Y, Xg, Xc);
 	  ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
 	}
 	else if (whichPermBf.compare("gen-sin") == 0)
 	{
-	  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, fitNull,
+	  ResFtrSnp_calcAbfsConstLargeGridMvlr (iResFtrSnp, vvGridL, propFitSigma,
 						Y, Xg, Xc);
-	  ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, fitNull,
+	  ResFtrSnp_calcAbfsSingletonsMvlr (iResFtrSnp, vvGridS, propFitSigma,
 					    Y, Xg, Xc);
 	  ResFtrSnp_calcAbfsAvgSinAndGenSin (iResFtrSnp);
 	}
 	else if (whichPermBf.compare("all") == 0)
 	{
-	  ResFtrSnp_calcAbfsAllConfigsMvlr (iResFtrSnp, vvGridS, fitNull,
+	  ResFtrSnp_calcAbfsAllConfigsMvlr (iResFtrSnp, vvGridS, propFitSigma,
 					    Y, Xg, Xc);
 	  ResFtrSnp_calcAbfAvgAll (iResFtrSnp);
 	}
@@ -3578,7 +3568,7 @@ inferAssos (
   const vector<vector<double> > & vvGridS,
   const string & whichBfs,
   const bool & mvlr,
-  const bool & fitNull,
+  const float & propFitSigma,
   const int & verbose)
 {
   if (verbose > 0)
@@ -3587,7 +3577,7 @@ inferAssos (
 	 << "anchor=" << anchor << " lenCis=" << lenCis;
     if (whichStep == 3 || whichStep == 4 || whichStep == 5)
       cout << " multivariate=" << boolalpha << mvlr
-	   << " fitnull=" << fitNull;
+	   << " propFitSigma=" << propFitSigma;
     cout << endl << flush;
   }
   
@@ -3609,7 +3599,7 @@ inferAssos (
     {
       Ftr_inferAssos (itF->second, vvSampleIdxPhenos, vvSampleIdxGenos,
 		      whichStep, needQnorm, vSbgrp2Covars, vvGridL, vvGridS,
-		      whichBfs, mvlr, fitNull, verbose-1);
+		      whichBfs, mvlr, propFitSigma, verbose-1);
       nbAnalyzedPairs += itF->second.vResFtrSnps.size();
     }
   }
@@ -3707,7 +3697,7 @@ makePermsJoint (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const bool & mvlr,
-  const bool & fitNull,
+  const float & propFitSigma,
   const size_t & nbPerms,
   const size_t & seed,
   const int & trick,
@@ -3731,7 +3721,7 @@ makePermsJoint (
     if (itF->second.vResFtrSnps.size() > 0)
       Ftr_makePermsJoint (itF->second, vvSampleIdxPhenos,
 			  vvSampleIdxGenos, needQnorm, vSbgrp2Covars, vvGridL,
-			  vvGridS, mvlr, fitNull, nbPerms, trick, whichPermBf,
+			  vvGridS, mvlr, propFitSigma, nbPerms, trick, whichPermBf,
 			  useMaxBfOverSnps, rngPerm, rngTrick);
   }
   if (verbose == 1)
@@ -3752,7 +3742,7 @@ makePerms (
   const vector<vector<double> > & vvGridL,
   const vector<vector<double> > & vvGridS,
   const bool & mvlr,
-  const bool & fitNull,
+  const float & propFitSigma,
   const size_t & nbPerms,
   const size_t & seed,
   const int & trick,
@@ -3799,7 +3789,7 @@ makePerms (
   
   if (whichStep == 4 || whichStep == 5)
     makePermsJoint (mFtrs, vvSampleIdxPhenos, vvSampleIdxPhenos,
-		    needQnorm, vSbgrp2Covars, vvGridL, vvGridS, mvlr, fitNull,
+		    needQnorm, vSbgrp2Covars, vvGridL, vvGridS, mvlr, propFitSigma,
 		    nbPerms, seed, trick, whichPermBf, useMaxBfOverSnps,
 		    rngPerm, rngTrick, verbose);
   
@@ -4152,6 +4142,7 @@ writeResAbfsAvgGrids (
 	if (gsl_combination_next (comb) != GSL_SUCCESS)
 	  break;
       }
+      gsl_combination_free (comb);
       if (whichBfs.compare("sin") == 0)
 	break;
     }
@@ -4210,6 +4201,7 @@ writeResAbfsAvgGrids (
 	      if (gsl_combination_next (comb) != GSL_SUCCESS)
 		break;
 	    }
+	    gsl_combination_free (comb);
 	    if (whichBfs.compare("sin") == 0)
 	      break;
 	  }
@@ -4333,7 +4325,7 @@ run (
   const string & smallGridFile,
   const string & whichBfs,
   const bool & mvlr,
-  const bool & fitNull,
+  const float & propFitSigma,
   const size_t & nbPerms,
   const size_t & seed,
   const int & trick,
@@ -4381,10 +4373,10 @@ run (
   
   inferAssos (mFtrs, mChr2VecPtSnps, vvSampleIdxPhenos, vvSampleIdxGenos,
 	      anchor, lenCis, whichStep, needQnorm, vSbgrp2Covars, vvGridL,
-	      vvGridS, whichBfs, mvlr, fitNull, verbose);
+	      vvGridS, whichBfs, mvlr, propFitSigma, verbose);
   if (whichStep == 2 || whichStep == 4 || whichStep == 5)
     makePerms (mFtrs, vvSampleIdxPhenos, whichStep, needQnorm, vSbgrp2Covars,
-	       vvGridL, vvGridS, mvlr, fitNull, nbPerms, seed, trick,
+	       vvGridL, vvGridS, mvlr, propFitSigma, nbPerms, seed, trick,
 	       whichPermSep, whichPermBf, useMaxBfOverSnps, verbose);
   
   writeRes (outPrefix, outRaw, mFtrs, mSnps, vSubgroups, vSbgrp2Covars,
@@ -4398,8 +4390,8 @@ int main (int argc, char ** argv)
 {
   int verbose = 1, whichStep = 0, trick = 0, whichPermSep = 1;
   size_t lenCis = 100000, nbPerms = 0, seed = string::npos;
-  float minMaf = 0.0;
-  bool outRaw = false, needQnorm = false, fitNull = false, mvlr = false,
+  float minMaf = 0.0, propFitSigma = 0.0;
+  bool outRaw = false, needQnorm = false, mvlr = false,
     useMaxBfOverSnps = false;
   string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
     anchor = "FSS", outPrefix, covarPathsFile, largeGridFile, smallGridFile,
@@ -4408,7 +4400,7 @@ int main (int argc, char ** argv)
   parseArgs (argc, argv, genoPathsFile, snpCoordFile, phenoPathsFile,
 	     ftrCoordsFile, anchor, lenCis, outPrefix, outRaw, whichStep,
 	     needQnorm, minMaf, covarPathsFile, largeGridFile, smallGridFile,
-	     whichBfs, mvlr, fitNull, nbPerms, seed, trick, whichPermSep,
+	     whichBfs, mvlr, propFitSigma, nbPerms, seed, trick, whichPermSep,
 	     whichPermBf, useMaxBfOverSnps, ftrsToKeepFile, snpsToKeepFile, 
 	     verbose);
   
@@ -4425,7 +4417,7 @@ int main (int argc, char ** argv)
   
   run (genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile, anchor,
        lenCis, outPrefix, outRaw, whichStep, needQnorm, minMaf, covarPathsFile,
-       largeGridFile, smallGridFile, whichBfs, mvlr, fitNull, nbPerms, seed,
+       largeGridFile, smallGridFile, whichBfs, mvlr, propFitSigma, nbPerms, seed,
        trick, whichPermSep, whichPermBf, useMaxBfOverSnps, ftrsToKeepFile,
        snpsToKeepFile, verbose);
   

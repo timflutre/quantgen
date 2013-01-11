@@ -1,7 +1,7 @@
 /** \file MVLR.h
  *
  *  `MVLR' is a class implementing the multivariate linear regression
- *  Copyright (C) 2012 Xioaquan (William) Wen
+ *  Copyright (C) 2012-2013 Xioaquan Wen
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,6 +22,7 @@
 #include <vector>
 
 
+
 class MVLR {
   
  private:
@@ -33,10 +34,7 @@ class MVLR {
 
   int m; // wishart prior default m = s-1
 
-  int es_option;  // if scale the effect size by noise level
-
-  int sigma_option;
-
+  int ep; //effective genotype size
 
   gsl_matrix *Y; // phenotype matrix nxs
   gsl_matrix *Xg; // genotype matrix nxp
@@ -44,68 +42,100 @@ class MVLR {
   gsl_matrix *H; // wishart prior sxs 
 
 
-  gsl_matrix *XctXc;
-  gsl_matrix *XctXc_inv;
+  // used throughout
+  gsl_matrix *T;
+  gsl_matrix *Sigma0;
+  gsl_matrix *Sigma0_inv;
+  
+  // used per configuration
+  gsl_matrix *eVb; 
+  gsl_matrix *eVg_inv;
+  gsl_matrix *Gamma;
 
-  gsl_matrix *Pg;  // effect prior constructor s x s
-  gsl_matrix *Wg; // effect prior ps x ps 
+  // used per (phi, omg) value
+  gsl_matrix *Wg; // effect prior  
 
+  // maybe used in either case (depends on option)
   gsl_matrix *Sigma; // residual covariance estimate sxs
   gsl_matrix *Sigma_inv; // Sigma^{-1}
-
-  gsl_matrix *Sigma0; // residual covariance estimate sxs
-  gsl_matrix *Sigma0_inv; // Sigma^{-1}
-
-  double log_det_Sigma;
-  double log_det_Sigma0;
-
-  gsl_matrix *bVi; // (\hat bv)'(Vg^{-1}) 1 x ps
-  gsl_matrix *Vg_inv; //  Var(\hat bv) ps x ps
-  gsl_matrix *tBc; // \tilde Bc, pxs
-  gsl_matrix *hB;  // \hat B
-  gsl_matrix *Kg; // part of  Vg^{-1}  pxp 
+ 
+  
+  vector<double> omg2_vec; //effect size grid
+  vector<double> phi2_vec; //effect size grid
 
 
-  vector<vector<int> > skeleton;
+ private:
+  // options
+  double sigma_option;  // o to 1, mixture fraction of mle of Sigma under the alternative model, default 0
+  int prior_option;  // 1-- meta prior      2-- diagonal prior
+
 
  private:
   
-
-  void compute_Sigma1();
-  void invert_Sigma1();
-  void compute_Sigma2();
+  void compute_common();
   
-  void compute_common_core();
-  void compute_bVi();
+  // utilites for computing residual error cov
+  void compute_Sigma(vector<vector<int> >& config);
+  void compute_Sigma_null();
+  void compute_Sigma_mle(vector<vector<int> >& config);
+  void invert_Sigma();
+  gsl_matrix *compute_residual(gsl_matrix *y, gsl_matrix *X, int size, double &factor);
 
-
-  gsl_matrix *multiple_regression(gsl_matrix * Ys, int sindex);
   
-  double log10_weighted_sum(vector<double> &vec, vector<double> &wts);
+  // utilites for configuration specific computation
+  
+  void construct_Gamma(vector<vector<int> >& config, vector<int> &noz_vec);
+  void construct_meta_Gamma(vector<vector<int> >& config, vector<int> &noz_vec);
+  void construct_diag_Gamma(vector<vector<int> >& config, vector<int> &noz_vec);
+  
+  void set_Wg(double phi2, double omg2);
+  
+  // compute stats common for a configuration
+  void compute_stats(vector<int> &noz_vec);
+  
+  // evaluating ABF
+  double compute_log10_ABF(gsl_matrix *Wg);
+  
   gsl_matrix *vec(gsl_matrix *M, int a, int b);
   gsl_matrix *kron (gsl_matrix *M, gsl_matrix *L, int a, int b);
   gsl_matrix *kron2 (gsl_matrix *M, int mr, int mc, gsl_matrix *L, int lr, int lc);
+  double log10_weighted_sum(vector<double> &vec, vector<double> &wts);
   void print_matrix(gsl_matrix *M, int a, int b);
   
   
  public:
   
-  MVLR(vector<vector<double> > & Y_in, vector<vector<double> > & Xg_in, vector<vector<double> > & Xc_in,int es);
+  // interface
+  // empty constructor, assign default options
+  MVLR(){
+    sigma_option = 0.0; 
+    prior_option=1;
+  }
+
+
+  // init
+  void init(vector<vector<double> > & Y_in, vector<vector<double> > & Xg_in, vector<vector<double> > & Xc_in);
+  
+  // options
+  void set_IW_prior(gsl_matrix *H_in, int m_in);
+  void set_effect_vec(vector<double> &phi2,vector<double>& omg2_vec);
+  void set_sigma_option(double option){
+    sigma_option = option;
+  }
+  void set_prior_option(int option){
+    prior_option = option;
+  }
+  
+
+
+  double compute_log10_ABF(vector<vector<int> > &indicator);
+  
+  double compute_log10_ABF(vector<vector<int> >& indicator, double phi2, double omg2);
+ 
   ~MVLR();
   
-  void set_skeleton(vector<vector<int> > & GammaV);
-  void set_IW_prior(gsl_matrix *H_in, int m_in);
-  void set_effect_prior(double phi2, double omg2);
-  void set_Sigma_option(int option){
-    if(bVi!=0)
-      gsl_matrix_free(bVi);
-    bVi = 0;
-    sigma_option = option;
-  };
 
-  double compute_log10_ABF();
-  double compute_log10_ABF(double phi2, double omg2, vector<vector<int> > & GammaV);
-  double compute_log10_ABF(vector<double> &phi2_vec, vector<double> &omg2_vec);
-  
 
 };
+
+
