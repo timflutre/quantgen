@@ -171,6 +171,8 @@ void help (char ** argv)
        << "\t\tallows to easily parallelize a whole analyzis" << endl
        << "  -s, --snp\tfile with a list of SNPs to analyze" << endl
        << "\t\tone SNP name per line" << endl
+       << "      --sbgrp\tidentifier of the subgroup to analyze" << endl
+       << "\t\tuseful for quick analysis and debugging" << endl
        << endl;
 }
 
@@ -220,6 +222,7 @@ parseArgs (
   bool & useMaxBfOverSnps,
   string & ftrsToKeepFile,
   string & snpsToKeepFile,
+  string & sbgrpToKeep,
   int & verbose)
 {
   int c = 0;
@@ -255,6 +258,7 @@ parseArgs (
 	{"maxbf", no_argument, 0, 0},
 	{"ftr", required_argument, 0, 'f'},
 	{"snp", required_argument, 0, 's'},
+	{"sbgrp", required_argument, 0, 0},
 	{0, 0, 0, 0}
       };
     int option_index = 0;
@@ -365,6 +369,11 @@ parseArgs (
       if (strcmp(long_options[option_index].name, "maxbf") == 0)
       {
 	useMaxBfOverSnps = true;
+	break;
+      }
+      if (strcmp(long_options[option_index].name, "sbgrp") == 0)
+      {
+	sbgrpToKeep = optarg;
 	break;
       }
     case 'h':
@@ -2432,13 +2441,18 @@ void
 loadListsGenoAndPhenoFiles (
   const string & genoPathsFile,
   const string & phenoPathsFile,
+  const string & sbgrpToKeep,
   map<string, string> & mGenoPaths,
   map<string, string> & mPhenoPaths,
   vector<string> & vSubgroups,
   const bool & mvlr,
   const int & verbose)
 {
-  loadTwoColumnFile (phenoPathsFile, mPhenoPaths, vSubgroups, verbose);
+  mPhenoPaths = loadTwoColumnFile (phenoPathsFile, verbose);
+  for (map<string, string>::const_iterator it = mPhenoPaths.begin();
+       it != mPhenoPaths.end(); ++it)
+    if (sbgrpToKeep.empty() || sbgrpToKeep.compare(it->first) == 0)
+      vSubgroups.push_back (it->first);
   
   mGenoPaths = loadTwoColumnFile (genoPathsFile, verbose);
   if (mGenoPaths.size() > 1 && mGenoPaths.size() != mPhenoPaths.size())
@@ -2456,6 +2470,10 @@ loadListsGenoAndPhenoFiles (
 	     << endl;
 	exit (1);
       }
+  
+  if (! sbgrpToKeep.empty())
+    if (verbose > 0)
+      cout << "analyze a single subgroup: " << sbgrpToKeep << endl;
 }
 
 void
@@ -3372,6 +3390,7 @@ loadSnpInfo (
 void
 loadListCovarFiles (
   const string & covarPathsFile,
+  const string & sbgrpToKeep,
   const vector<string> & vSubgroups,
   map<string, string> & mCovarPaths,
   const int & verbose)
@@ -3381,6 +3400,11 @@ loadListCovarFiles (
   map<string, string>::iterator it = mCovarPaths.begin();
   while (it != mCovarPaths.end())
   {
+    if (! sbgrpToKeep.empty() && sbgrpToKeep.compare(it->first) != 0)
+    {
+      mCovarPaths.erase (it++);
+      continue;
+    }
     if (find (vSubgroups.begin(), vSubgroups.end(), it->first)
 	== vSubgroups.end())
     {
@@ -3525,6 +3549,7 @@ loadCovarsFromFiles (
 void
 loadCovariates (
   const string & covarPathsFile,
+  const string & sbgrpToKeep,
   const vector<string> & vSubgroups,
   const vector<string> & vSamples,
   const vector<vector<size_t> > & vvSampleIdxGenos,
@@ -3540,7 +3565,8 @@ loadCovariates (
     if (verbose > 0)
       cout << "load covariates ..." << endl << flush;
     map<string, string> mCovarPaths;
-    loadListCovarFiles (covarPathsFile, vSubgroups, mCovarPaths, verbose);
+    loadListCovarFiles (covarPathsFile, sbgrpToKeep, vSubgroups, mCovarPaths,
+			verbose);
     loadCovarsFromFiles (vSubgroups, vSamples, vvSampleIdxGenos,
 			 vvSampleIdxPhenos, mCovarPaths, vSbgrp2Covars);
     if (verbose > 0)
@@ -4334,6 +4360,7 @@ run (
   const bool & useMaxBfOverSnps,
   const string & ftrsToKeepFile,
   const string & snpsToKeepFile,
+  const string & sbgrpToKeep,
   const int & verbose)
 {
   vector<string> vFtrsToKeep = loadOneColumnFile (ftrsToKeepFile, verbose);
@@ -4343,13 +4370,19 @@ run (
   
   map<string, string> mGenoPaths, mPhenoPaths;
   vector<string> vSubgroups;
-  loadListsGenoAndPhenoFiles (genoPathsFile, phenoPathsFile, mGenoPaths,
-			      mPhenoPaths, vSubgroups, mvlr, verbose);
+  loadListsGenoAndPhenoFiles (genoPathsFile, phenoPathsFile, sbgrpToKeep,
+			      mGenoPaths, mPhenoPaths, vSubgroups, mvlr,
+			      verbose);
   
   vector<string> vSamples;
   vector<vector<size_t> > vvSampleIdxGenos, vvSampleIdxPhenos;
   loadSamples (mGenoPaths, mPhenoPaths, vSubgroups, vSamples,
 	        vvSampleIdxGenos, vvSampleIdxPhenos, verbose);
+  
+  vector<map<string, vector<double> > > vSbgrp2Covars;
+  loadCovariates (covarPathsFile, sbgrpToKeep, vSubgroups, vSamples,
+		  vvSampleIdxGenos, vvSampleIdxPhenos, vSbgrp2Covars,
+		  verbose);
   
   map<string, Ftr> mFtrs;
   map<string, vector<Ftr*> > mChr2VecPtFtrs;
@@ -4366,10 +4399,6 @@ run (
     loadGenos (mGenoPaths, minMaf, vSubgroups, vSnpsToKeep, mSnps, verbose);
     loadSnpInfo (snpCoordFile, mSnps, mChr2VecPtSnps, verbose);
   }
-  
-  vector<map<string, vector<double> > > vSbgrp2Covars;
-  loadCovariates (covarPathsFile, vSubgroups, vSamples, vvSampleIdxGenos,
-		  vvSampleIdxPhenos, vSbgrp2Covars, verbose);
   
   inferAssos (mFtrs, mChr2VecPtSnps, vvSampleIdxPhenos, vvSampleIdxGenos,
 	      anchor, lenCis, whichStep, needQnorm, vSbgrp2Covars, vvGridL,
@@ -4395,14 +4424,15 @@ int main (int argc, char ** argv)
     useMaxBfOverSnps = false;
   string genoPathsFile, snpCoordFile, phenoPathsFile, ftrCoordsFile,
     anchor = "FSS", outPrefix, covarPathsFile, largeGridFile, smallGridFile,
-    whichBfs = "gen", whichPermBf = "gen", ftrsToKeepFile, snpsToKeepFile;
+    whichBfs = "gen", whichPermBf = "gen", ftrsToKeepFile, snpsToKeepFile,
+    sbgrpToKeep;
   
   parseArgs (argc, argv, genoPathsFile, snpCoordFile, phenoPathsFile,
 	     ftrCoordsFile, anchor, lenCis, outPrefix, outRaw, whichStep,
 	     needQnorm, minMaf, covarPathsFile, largeGridFile, smallGridFile,
 	     whichBfs, mvlr, propFitSigma, nbPerms, seed, trick, whichPermSep,
 	     whichPermBf, useMaxBfOverSnps, ftrsToKeepFile, snpsToKeepFile, 
-	     verbose);
+	     sbgrpToKeep, verbose);
   
   time_t startRawTime, endRawTime;
   if (verbose > 0)
@@ -4419,7 +4449,7 @@ int main (int argc, char ** argv)
        lenCis, outPrefix, outRaw, whichStep, needQnorm, minMaf, covarPathsFile,
        largeGridFile, smallGridFile, whichBfs, mvlr, propFitSigma, nbPerms, seed,
        trick, whichPermSep, whichPermBf, useMaxBfOverSnps, ftrsToKeepFile,
-       snpsToKeepFile, verbose);
+       snpsToKeepFile, sbgrpToKeep, verbose);
   
   if (verbose > 0)
   {
