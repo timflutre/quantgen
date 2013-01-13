@@ -118,7 +118,7 @@ class MVLR {
   
   // options
   void set_IW_prior(gsl_matrix *H_in, int m_in);
-  void set_effect_vec(vector<double> &phi2,vector<double>& omg2_vec);
+  void set_effect_vec(const vector<double> &phi2,const vector<double>& omg2_vec);
   void set_sigma_option(double option){
     sigma_option = option;
   }
@@ -132,6 +132,8 @@ class MVLR {
   
   double compute_log10_ABF(vector<vector<int> >& indicator, double phi2, double omg2);
  
+  vector<double> compute_log10_ABF_vec(vector<vector<int> >& indicator);
+
   ~MVLR();
   
 

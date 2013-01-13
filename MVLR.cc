@@ -82,7 +82,7 @@ void MVLR::init(vector<vector<double> > & Y_in, vector<vector<double> > & Xg_in,
 // ================ Setting parmaeters/options ======================== //
 
 
-void MVLR::set_effect_vec(vector<double> &phi2_vec_in , vector<double> &omg2_vec_in){ 
+void MVLR::set_effect_vec(const vector<double> &phi2_vec_in , const vector<double> &omg2_vec_in){ 
 
   phi2_vec = phi2_vec_in;
   omg2_vec = omg2_vec_in;
@@ -714,6 +714,57 @@ double MVLR::compute_log10_ABF(vector<vector<int> >& indicator, double phi2, dou
 } 
 
 
+vector<double> MVLR::compute_log10_ABF_vec(vector<vector<int> >& indicator){
+  
+  vector<double> rst_vec;
+  
+    
+  // construct the skeleton from the indicator
+  vector<int> noz_vec; // non_zero prior SNP index
+  
+  for(int i=0;i<p;i++){
+    int flag = 0;
+    for(int j=0;j<s;j++){
+      if(indicator[i][j]!=0){
+	flag=1;
+	break;
+      }
+    } 
+    if(flag==1)
+      noz_vec.push_back(i);
+  }
+  
+  ep = noz_vec.size();
+  if(ep == 0)
+    return rst_vec;
+
+
+  // 1. first compute Sigma
+  compute_Sigma(indicator);
+  // 2. pre-compute necessary pieces common to all (phi2,omg2)
+  compute_stats(noz_vec);
+
+  // 2. scaled skeleton cov
+  construct_Gamma(indicator,noz_vec); 
+   
+  int size = omg2_vec.size();
+  
+  for(int i=0;i<size;i++){
+    set_Wg(phi2_vec[i], omg2_vec[i]);
+    rst_vec.push_back(compute_log10_ABF(Wg));
+    gsl_matrix_free(Wg);
+    Wg = 0;
+  }
+  
+  gsl_matrix_free(eVb);
+  gsl_matrix_free(eVg_inv);
+  gsl_matrix_free(Gamma);
+  eVb=eVg_inv=Gamma=0;
+
+  return rst_vec;
+
+} 
+		      
 
 
 
