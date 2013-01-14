@@ -3923,13 +3923,14 @@ writeResSepPermPval (
     for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
 	 itF != mFtrs.end(); ++itF)
     {
-      if (itF->second.vMinTruePvals[s] == itF->second.vMinTruePvals[s])
+      const Ftr * ptF = &(itF->second);
+      size_t nbCisSnps = Ftr_getNbCisSnpsInGivenSubgroup (*ptF, s);
+      if (nbCisSnps > 0)
       {
-	const Ftr * ptF = &(itF->second);
 	ssTxt.str("");
 	++lineId;
 	ssTxt << ptF->name
-	      << " " << Ftr_getNbCisSnpsInGivenSubgroup (*ptF, s)
+	      << " " << nbCisSnps
 	      << " " << ptF->vPermPvalsSep[s]
 	      << " " << ptF->vNbPermsSoFar[s]
 	      << " " << ptF->vMinTruePvals[s]
@@ -3973,15 +3974,18 @@ writeResSepPermPval (
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
-    ssTxt.str("");
-    ++lineId;
-    ssTxt << itF->second.name
-	  << " " << itF->second.vPtCisSnps.size()
-	  << " " << itF->second.sepPermPval
-	  << " " << itF->second.nbPermsSoFarSep
-	  << " " << itF->second.minTruePval
-	  << endl;
-    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+    if (itF->second.vPtCisSnps.size() > 0)
+    {
+      ssTxt.str("");
+      ++lineId;
+      ssTxt << itF->second.name
+	    << " " << itF->second.vPtCisSnps.size()
+	    << " " << itF->second.sepPermPval
+	    << " " << itF->second.nbPermsSoFarSep
+	    << " " << itF->second.minTruePval
+	    << endl;
+      gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+    }
   }
   
   closeFile (ssOutFile.str(), outStream);
@@ -4267,16 +4271,19 @@ writeResJointPermPval (
   for (map<string, Ftr>::const_iterator itF = mFtrs.begin();
        itF != mFtrs.end(); ++itF)
   {
-    ssTxt.str("");
-    ++lineId;
-    ssTxt << itF->second.name
-	  << " " << itF->second.vPtCisSnps.size()
-	  << " " << itF->second.jointPermPval
-	  << " " << itF->second.nbPermsSoFarJoint
-	  << " " << itF->second.maxL10TrueAbf
-	  << " " << itF->second.avgL10TrueAbf
-	  << endl;
-    gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+    if (itF->second.vPtCisSnps.size() > 0)
+    {
+      ssTxt.str("");
+      ++lineId;
+      ssTxt << itF->second.name
+	    << " " << itF->second.vPtCisSnps.size()
+	    << " " << itF->second.jointPermPval
+	    << " " << itF->second.nbPermsSoFarJoint
+	    << " " << itF->second.maxL10TrueAbf
+	    << " " << itF->second.avgL10TrueAbf
+	    << endl;
+      gzwriteLine (outStream, ssTxt.str(), ssOutFile.str(), lineId);
+    }
   }
   
   closeFile (ssOutFile.str(), outStream);
