@@ -139,7 +139,7 @@ void help (char ** argv)
        << "\t\tallows for correlation between samples in the errors" << endl
        << "\t\tespecially useful when subgroups come from same individuals" << endl
        << "\t\tcaution, no separate analysis can be performed with this option" << endl
-       << "      --fitsigma\tparam used when estimating the variance of the errors with --mvlr" << endl
+       << "      --fitsig\tparam used when estimating the variance of the errors with --mvlr" << endl
        << "\t\tdefault=0 (null model), but can be between 0 and 1" << endl
 #endif
        << "      --nperm\tnumber of permutations" << endl
@@ -249,7 +249,7 @@ parseArgs (
 	{"gridS", required_argument, 0, 0},
 	{"bfs", required_argument, 0, 0},
 	{"mvlr", no_argument, 0, 0},
-	{"fitsigma", required_argument, 0, 0},
+	{"fitsig", required_argument, 0, 0},
 	{"nperm", required_argument, 0, 0},
 	{"seed", required_argument, 0, 0},
 	{"trick", required_argument, 0, 0},
@@ -336,7 +336,7 @@ parseArgs (
 	mvlr = true;
 	break;
       }
-      if (strcmp(long_options[option_index].name, "fitsigma") == 0)
+      if (strcmp(long_options[option_index].name, "fitsig") == 0)
       {
 	propFitSigma = atof (optarg);
 	break;
