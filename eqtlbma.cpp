@@ -764,53 +764,6 @@ fitMultipleLinearRegression (
   gsl_multifit_linear_free (work);
 }
 
-/** \brief Fit a multiple linear regression model.
- *  \note y_i = beta_0 + beta_1 * g_i + beta_2 * c_i + ... + e_i with e_i ~ N(0,sigma^2)
- *  \note missing values should have been already filtered out
- *  \note allow to estimate the error variance on the null model
- */
-void
-fitMultipleLinearRegression (
-  const vector<double> & vG,
-  const vector<double> & vY,
-  const vector<vector<double> > & vvCovars,
-  const bool estimSigmaWithNullModel,
-  double & pve,
-  double & sigmahat,
-  vector<vector<double> > & vvResPredictors)
-{
-  fitMultipleLinearRegression (vG, vY, vvCovars, pve, sigmahat, vvResPredictors);
-  
-  if (estimSigmaWithNullModel)
-  {
-    size_t N = vY.size(), P = 1 + vvCovars.size();
-    gsl_vector * Y = gsl_vector_alloc (N), * Bhat = gsl_vector_alloc (P);
-    gsl_matrix * X = gsl_matrix_alloc (N, P),
-      * covBhat = gsl_matrix_alloc (P, P);
-    gsl_multifit_linear_workspace * work = gsl_multifit_linear_alloc (N, P);
-    
-    for (size_t n = 0; n < N; ++n)
-    {
-      gsl_vector_set (Y, n, vY[n]);
-      gsl_matrix_set (X, n, 0, 1.0);
-      for (size_t p = 2; p < P; ++p)
-	gsl_matrix_set (X, n, p, vvCovars[(p-2)][n]);
-    }
-    
-    double rss;
-    size_t rank;
-    gsl_multifit_linear_svd (X, Y, GSL_DBL_EPSILON, &rank, Bhat, covBhat,
-			     &rss, work);
-    sigmahat = sqrt (rss / (N-rank));
-    
-    gsl_vector_free (Y);
-    gsl_vector_free (Bhat);
-    gsl_matrix_free (X);
-    gsl_matrix_free (covBhat);
-    gsl_multifit_linear_free (work);
-  }
-}
-
 /** \brief Return the approximate Bayes Factor from Wen and Stephens (2011)
  *  \note univariate version of the ABF
  *  \param vvStdSstats vector of vectors, one per subgroup, with betahat as
@@ -2733,6 +2686,7 @@ loadPhenos (
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
     nbFtrsToKeepPerSubgroup = 0;
+    nbLines = 0;
     openFile (mPhenoPaths.find(vSubgroups[s])->second, phenoStream, "rb");
     if (! getline (phenoStream, line))
     {
@@ -2740,12 +2694,12 @@ loadPhenos (
 	   << mPhenoPaths.find(vSubgroups[s])->second << endl;
       exit (1);
     }
+    ++nbLines;
     split (line, " \t", tokens);
     if (tokens[0].compare("Id") == 0)
       nbSamples = tokens.size() - 1;
     else
       nbSamples = tokens.size();
-    nbLines = 1;
     
     while (getline (phenoStream, line))
     {
@@ -2755,6 +2709,7 @@ loadPhenos (
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
 	     << " of file " << mPhenoPaths.find(vSubgroups[s])->second
+	     << " (" << tokens.size() << " != " << nbSamples + 1 << ")"
 	     << endl;
 	exit (1);
       }
@@ -2910,6 +2865,7 @@ loadGenosAndSnpInfoFromImpute (
     {
       cerr << "ERROR: not enough columns on line " << nbLines
 	   << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	   << " (" << tokens.size() << " != " << (3 * nbSamples + 5 ) << ")"
 	   << endl;
       exit (1);
     }
@@ -3009,6 +2965,7 @@ loadGenosAndSnpInfoFromVcf (
   
   while (getline (genoStream, line))
   {
+    ++nbLines;
     if (line.find("#CHROM") == string::npos)
       continue;
     split (line, " \t", tokens);
@@ -3024,6 +2981,7 @@ loadGenosAndSnpInfoFromVcf (
     {
       cerr << "ERROR: not enough columns on line " << nbLines
 	   << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	   << " (" << tokens.size() << " != " << nbSamples + 9 << ")"
 	   << endl;
       exit (1);
     }
@@ -3138,6 +3096,7 @@ loadGenosAndSnpInfo (
   {
     clock_t timeBegin = clock();
     nbSnpsToKeepPerSubgroup = 0;
+    nbLines = 0;
     openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream, "rb");
     if (! getline (genoStream, line))
     {
@@ -3145,7 +3104,7 @@ loadGenosAndSnpInfo (
 	   << mGenoPaths.find(vSubgroups[s])->second << endl;
       exit (1);
     }
-    nbLines = 1;
+    ++nbLines;
     
     if (line.find("##fileformat=VCF") != string::npos) // VCF format
       loadGenosAndSnpInfoFromVcf (genoStream, line, nbLines, mGenoPaths,
@@ -3209,6 +3168,7 @@ loadGenos (
   for (size_t s = 0; s < vSubgroups.size(); ++s)
   {
     clock_t timeBegin = clock();
+    nbLines = 0;
     openFile (mGenoPaths.find(vSubgroups[s])->second, genoStream, "rb");
     if (! getline (genoStream, line))
     {
@@ -3216,12 +3176,12 @@ loadGenos (
 	   << mGenoPaths.find(vSubgroups[s])->second << endl;
       exit (1);
     }
+    ++nbLines;
     split (line, " \t", tokens);
     if (tokens[0].compare("Id") == 0)
       nbSamples = tokens.size() - 1;
     else
       nbSamples = tokens.size();
-    nbLines = 1;
     
     while (getline (genoStream, line))
     {
@@ -3231,6 +3191,7 @@ loadGenos (
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
 	     << " of file " << mGenoPaths.find(vSubgroups[s])->second
+	     << " (" << tokens.size() << " != " << nbSamples + 1 << ")"
 	     << endl;
 	exit (1);
       }
@@ -3430,6 +3391,7 @@ loadCovarsFromFiles (
     if (mCovarPaths.find(vSubgroups[s]) == mCovarPaths.end())
       continue;
     
+    nbLines = 0;
     openFile (mCovarPaths.find(vSubgroups[s])->second, covarStream, "rb");
     
     // parse the header line to get covar names and order
@@ -3445,7 +3407,7 @@ loadCovarsFromFiles (
 	   << " is empty" << endl;
       exit (1);
     }
-    nbLines = 1;
+    ++nbLines;
     vector<string> vCovars;
     split (line, " \t", vCovars);
     if (vCovars[0].compare ("sample") == 0)
@@ -3467,6 +3429,7 @@ loadCovarsFromFiles (
       {
 	cerr << "ERROR: not enough columns on line " << nbLines
 	     << " of file " << mCovarPaths.find(vSubgroups[s])->second
+	     << " (" << tokens.size() << " != " << vCovars.size() + 1 << ")"
 	     << endl;
 	exit (1);
       }
