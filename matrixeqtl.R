@@ -1,4 +1,4 @@
-#!/usr/bin/env Rscript --vanilla --default-packages=utils
+#!/usr/bin/env Rscript
 
 ## Aim: launch MatrixEQTL
 ## Author: Timothee Flutre
@@ -341,6 +341,7 @@ launchMatrixeqtl <- function(genos, phenos, cvrt, out.file,
 }
 
 callEqtlsByStoreyMethod <- function(res, fdr, cis.out.file, verbose){
+  set.seed(1859)
   qobj <- qvalue(p=res$pvalue, fdr.level=fdr, pi0.method="bootstrap", robust=TRUE)
   if(verbose > 0){
     message(paste0("pFDR=", fdr))
@@ -351,8 +352,22 @@ callEqtlsByStoreyMethod <- function(res, fdr, cis.out.file, verbose){
   }
   res <- cbind(res, qobj$qvalues)
   colnames(res)[ncol(res)] <- "qvalue.storey"
-  tmp <- strsplit(cis.out.file, "\\.")[[1]]
-  if(tmp[length(tmp)] == "gz"){
+  
+  ## adjustment of gene p-values as min ~ Beta(1,N)
+  res.g <- cbind(aggregate(pvalue ~ gene, res, length),
+                 aggregate(pvalue ~ gene, res, min)$pvalue)
+  names(res.g) <- c("gene", "nb.snps", "pvalue")
+  res.g$pvalue.adj <- pbeta(q=res.g$pvalue, shape1=1,
+                            shape2=res.g$nb.snps)
+  set.seed(1859)
+  qobj.adj <- qvalue(p=res.g$pvalue.adj, fdr.level=fdr,
+                     pi0.method="bootstrap", robust=TRUE)
+  if(verbose > 0)
+    message(paste0("nb of significant genes (after adjustment): ",
+                   sum(qobj.adj$significant)))
+  
+  extension <- (tmp <- strsplit(cis.out.file, "\\.")[[1]])[length(tmp)]
+  if(extension == "gz"){
     write.table(x=res, file=gzfile(cis.out.file), quote=FALSE, sep="\t",
                 row.names=FALSE, col.names=TRUE)
   } else
