@@ -215,8 +215,9 @@ plotHistPvalues <- function(data=NULL,
   
   fdr <- getFdr(data)
   pi0.perc <- sprintf("%.2f", 100 * fdr$prop.true.null.tests)
-  txt <- bquote(paste("proportion of null tests (", pi[0], "): ",
-                      .(pi0.perc), "%"))
+  ## txt <- bquote(paste("estimated proportion of null tests (", hat(pi)[0], "): ",
+  ##                     .(pi0.perc), "%"))
+  txt <- bquote(paste(hat(pi)[0], " = ", .(pi0.perc), "%"))
   if(writePi0){
     if(is.null(ylim)){
       text(x=0.5, y=floor(tmp$counts[1] - 1 * step), labels=txt)
@@ -229,25 +230,28 @@ plotHistPvalues <- function(data=NULL,
   i <- 2
   cex.fdr <- 1 # 0.8
   tmp2 <- lapply(fdrs, function(fdr){
+    set.seed(1859)
     qres <- qvalue(p=data, fdr.level=fdr, robust=TRUE, pi0.method="bootstrap")
     txt <- paste("FDR=", fdr, " : ",
                  sum(qres$significant), " tests", sep="")
     if(is.null(ylim)){
-      txt <- sprintf("FDR=%.2f", fdr)
+      ## txt <- sprintf("FDR=%.2f", fdr)
+      txt <- bquote(paste(hat(FDR), " = ", .(sprintf("%.2f", fdr))))
       text(x=0.33, y=floor(tmp$counts[1] - i * step), pos=4, labels=txt, cex=cex.fdr)
-      arrows(x0=0.51, y0=1.005 * floor(tmp$counts[1] - i * step),
-             x1=0.59, y1=1.005 * floor(tmp$counts[1] - i * step),
+      arrows(x0=0.52, y0=1.003 * floor(tmp$counts[1] - i * step),
+             x1=0.59, y1=1.003 * floor(tmp$counts[1] - i * step),
              length=0.03, lwd=0.5)
       txt <- paste0(sum(qres$significant), " tests")
-      text(x=0.6, y=floor(tmp$counts[1] - i * step), pos=4, labels=txt, cex=cex.fdr)
+      text(x=0.6, y=0.997*floor(tmp$counts[1] - i * step), pos=4, labels=txt, cex=cex.fdr)
     } else{
-      txt <- sprintf("FDR=%.2f", fdr)
+      ## txt <- sprintf("FDR=%.2f", fdr)
+      txt <- bquote(paste(hat(FDR), " = ", .(sprintf("%.2f", fdr))))
       text(x=0.33, y=custom.at[4] - i * step, pos=4, labels=txt, cex=cex.fdr)
-      arrows(x0=0.51, y0=custom.at[4] - i * step,
+      arrows(x0=0.52, y0=custom.at[4] - i * step,
              x1=0.59, y1=custom.at[4] - i * step,
              length=0.03, lwd=0.5)
       txt <- paste0(sum(qres$significant), " tests")
-      text(x=0.6, y=custom.at[4] - i * step, pos=4, labels=txt, cex=cex.fdr)
+      text(x=0.6, y=0.997*(custom.at[4] - i * step), pos=4, labels=txt, cex=cex.fdr)
     }
     i <<- i + 1
     qres
