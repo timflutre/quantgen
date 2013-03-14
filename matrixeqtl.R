@@ -15,26 +15,34 @@ help <- function(){
   txt <- paste0("`", prog.name, "' launches MatrixEQTL.\n")
   txt <- paste0(txt, "\nUsage: ", prog.name, " [OPTIONS] ...\n")
   txt <- paste0(txt, "\nOptions:\n")
-  txt <- paste0(txt, "  -h, --help\tdisplay the help and exit\n")
-  txt <- paste0(txt, "  -V, --version\toutput version information and exit\n")
-  txt <- paste0(txt, "  -v, --verbose\tverbosity level (0/default=1/2/3)\n")
-  txt <- paste0(txt, "      --genos-file\tfile with genotypes\n")
-  txt <- paste0(txt, "      --phenos-file\tfile with phenotypes (columns will be re-ordered if necessary)\n")
-  txt <- paste0(txt, "      --cvrt-file\tfile with covariates (columns will be re-ordered if necessary)\n")
-  txt <- paste0(txt, "      --out-file\t\n")
-  txt <- paste0(txt, "      --pv-threshold\t10^{-5}\n")
-  txt <- paste0(txt, "      --model\tdefault=linear\n")
-  txt <- paste0(txt, "      --err-cvrt-file\t\n")
-  txt <- paste0(txt, "      --cis-out-file\t\n")
+  txt <- paste0(txt, "  -h, --help\t\tdisplay the help and exit\n")
+  txt <- paste0(txt, "  -V, --version\t\toutput version information and exit\n")
+  txt <- paste0(txt, "  -v, --verbose\t\tverbosity level (0/default=1/2/3)\n")
+  txt <- paste0(txt, "      --genos-file\t\tfile with genotypes\n")
+  txt <- paste0(txt, "      --phenos-file\t\tfile with phenotypes\n")
+  txt <- paste0(txt, "\t\t\t\tcolumns will be re-ordered as in genotype file\n")
+  txt <- paste0(txt, "      --cvrt-file\t\tfile with covariates\n")
+  txt <- paste0(txt, "\t\t\t\tcolumns will be re-ordered as in genotype file\n")
+  txt <- paste0(txt, "      --out-file\t\twill contain all gene-SNP pairs (cis and trans, optional)\n")
+  txt <- paste0(txt, "      --pv-threshold\t\t10^{-5}\n")
+  txt <- paste0(txt, "      --model\t\t\tdefault=linear\n")
+  txt <- paste0(txt, "      --err-cvrt-file\t\t\n")
+  txt <- paste0(txt, "      --cis-out-file\t\twill contain only the cis gene-SNP pairs\n")
   txt <- paste0(txt, "      --cis-pv-threshold\tdefault=0\n")
-  txt <- paste0(txt, "      --snpspos-file\tBED file\n")
-  txt <- paste0(txt, "      --genepos-file\tBED file\n")
-  txt <- paste0(txt, "      --cis-dist\tdefault=1000000\n")
-  txt <- paste0(txt, "      --pvalue-hist\t\n")
-  txt <- paste0(txt, "      --only-tss\t\n")
-  txt <- paste0(txt, "      --fdr-storey\trequires 'qvalue'\n")
-  txt <- paste0(txt, "      --perm-pheno-samples\t\n")
-  txt <- paste0(txt, "      --seed\tdefault=1859\n")
+  txt <- paste0(txt, "      --snpspos-file\t\tBED file (should be 0-based)\n")
+  txt <- paste0(txt, "      --genepos-file\t\tBED file (should be 0-based)\n")
+  txt <- paste0(txt, "      --cis-dist\t\tdefault=1000001 (to behave like BEDtools)\n")
+  txt <- paste0(txt, "      --pvalue-hist\t\t\n")
+  txt <- paste0(txt, "      --only-tss\t\t\n")
+  txt <- paste0(txt, "      --esnps-storey\t\tadd a column in the output file with Storey's qvalues\n")
+  txt <- paste0(txt, "      --egenes\t\t\tmethod(s) to call genes with at least one eQTL (e.g. 1-2)\n")
+  txt <- paste0(txt, "\t\t\t\t1a: pool all gene-SNP pairs, call eSNPs with BH, count eGenes\n")
+  txt <- paste0(txt, "\t\t\t\t1b: pool all gene-SNP pairs, call eSNPs with Storey, count eGenes\n")
+  txt <- paste0(txt, "\t\t\t\t2: call best SNP(s) per gene with Bonferroni, pool them, call eGenes with Storey\n")
+  txt <- paste0(txt, "\t\t\t\t3: take best SNP per gene, adjust p-values with Beta(1,N), call eGenes with Storey\n")
+  txt <- paste0(txt, "      --egenes-file\t\twill contain the eGenes (compressed if finishes by 'gz')\n")
+  txt <- paste0(txt, "      --perm-pheno-samples\t\tnot yet available\n")
+  txt <- paste0(txt, "      --seed\t\t\tdefault=1859\n")
   message(txt)
 }
 
@@ -54,7 +62,9 @@ parseArgs <- function(){
                  cis.dist=10^6,
                  pvalue.hist=FALSE,
                  only.tss=FALSE,
-                 fdr.storey=FALSE,
+                 esnps.storey=FALSE,
+                 egenes.method=NULL,
+                 egenes.file=NULL,
                  perm.pheno.samples=FALSE,
                  seed=1859)
   
@@ -126,8 +136,16 @@ parseArgs <- function(){
     }
     else if(args[i] == "--only-tss")
       params$only.tss <- TRUE
-    else if(args[i] == "--fdr-storey")
-      params$fdr.storey <- TRUE
+    else if(args[i] == "--esnps-storey")
+      params$esnps.storey <- TRUE
+    else if(args[i] == "--egenes"){
+      params$egenes.method <- strsplit(args[i+1], "-")[[1]]
+      i <- i + 1
+    }
+    else if(args[i] == "--egenes-file"){
+      params$egenes.file <- args[i+1]
+      i <- i + 1
+    }
     else if(args[i] == "--perm-pheno-samples")
       params$perm.pheno.samples <- TRUE
     else if(args[i] == "--seed"){
@@ -163,15 +181,19 @@ parseArgs <- function(){
               ! is.null(params$genepos.file),
               file.exists(params$genepos.file))
   }
-  if(! is.null(params$cvrt.file)){
-    tmp <- strsplit(params$cvrt.file, "\\.")[[1]]
-    if(tmp[length(tmp)] =="gz")
-      stop("--cvrt-file should not be gzipped", call.=FALSE)
+  if(params$esnps.storey)
+    suppressPackageStartupMessages(require(qvalue))
+  if(! is.null(params$egenes.method) && is.null(params$egenes.file))
+    stop("--egenes is specified but not --egenes-file", call.=FALSE)
+  if(is.null(params$egenes.method) && ! is.null(params$egenes.file))
+    stop("--egenes-file is specified but not --egenes", call.=FALSE)
+  if(! is.null(params$egenes.method)){
+    for(x in params$egenes.method)
+      if(! x %in% c("1a","1b","2","3"))
+        stop(paste0("--egenes ", x, " is not valid"), call.=FALSE)
   }
   if(params$perm.pheno.samples)
     warning("--perm-pheno-samples is not yet implemented", call.=FALSE)
-  if(params$fdr.storey)
-    suppressPackageStartupMessages(require(qvalue))
   
   return(params)
 }
@@ -193,15 +215,6 @@ loadPhenotypes <- function(phenos.file, genos, perm.pheno.samples, seed,
                            verbose=0){
   if(verbose > 0)
     message("load phenotypes ...")
-  ## tmp <- strsplit(basename(params$phenos.file), "\\.")[[1]]
-  ## if(tmp[length(tmp)] == "gz"){
-  ##   new.phenos.file <- paste(tmp[1:(length(tmp)-1)], collapse=".")
-  ##   if(! file.exists(new.phenos.file)){
-  ##     cmd <- paste0("zcat ", params$phenos.file, " > ", new.phenos.file)
-  ##     system(cmd)
-  ##   }
-  ##   params$phenos.file <- new.phenos.file
-  ## }
   phenos <- SlicedData$new()
   phenos$fileDelimiter <- "\t"
   phenos$fileOmitCharacters <- "NA"
@@ -249,7 +262,7 @@ loadCovariates <- function(cvrt.file, genos, verbose=0){
 #    cvrt$fileSliceSize <- 2000
     cvrt$LoadFile(cvrt.file)
     
-    ## reorder phenos columns if necessary
+    ## reorder columns if necessary
     nb.cols <- genos$nCols()
     same.order <- (sum(colnames(cvrt) == colnames(genos)) == nb.cols)
     if(! same.order){
@@ -340,31 +353,20 @@ launchMatrixeqtl <- function(genos, phenos, cvrt, out.file,
   return(res)
 }
 
-callEqtlsByStoreyMethod <- function(res, fdr, cis.out.file, verbose){
+callEsnpsByStoreyMethod <- function(res, fdr, cis.out.file, verbose){
+  if(verbose > 0)
+    message("call eSNPs by controlling the FDR with Storey's method ...")
   set.seed(1859)
   qobj <- qvalue(p=res$pvalue, fdr.level=fdr, pi0.method="bootstrap", robust=TRUE)
   if(verbose > 0){
-    message(paste0("pFDR=", fdr))
+    message(paste0("FDR=", fdr))
     message(paste0("pi0=", format(qobj$pi0, digits=7)))
     message(paste0("nb of significant gene-SNP pairs: ", sum(qobj$significant)))
     message(paste0("nb of genes with at least one significant gene-SNP pairs: ",
                    length(unique(res$gene[qobj$significant]))))
   }
   res <- cbind(res, qobj$qvalues)
-  colnames(res)[ncol(res)] <- "qvalue.storey"
-  
-  ## adjustment of gene p-values as min ~ Beta(1,N)
-  res.g <- cbind(aggregate(pvalue ~ gene, res, length),
-                 aggregate(pvalue ~ gene, res, min)$pvalue)
-  names(res.g) <- c("gene", "nb.snps", "pvalue")
-  res.g$pvalue.adj <- pbeta(q=res.g$pvalue, shape1=1,
-                            shape2=res.g$nb.snps)
-  set.seed(1859)
-  qobj.adj <- qvalue(p=res.g$pvalue.adj, fdr.level=fdr,
-                     pi0.method="bootstrap", robust=TRUE)
-  if(verbose > 0)
-    message(paste0("nb of significant genes (after adjustment): ",
-                   sum(qobj.adj$significant)))
+  colnames(res)[ncol(res)] <- "qvalue"
   
   extension <- (tmp <- strsplit(cis.out.file, "\\.")[[1]])[length(tmp)]
   if(extension == "gz"){
@@ -372,6 +374,75 @@ callEqtlsByStoreyMethod <- function(res, fdr, cis.out.file, verbose){
                 row.names=FALSE, col.names=TRUE)
   } else
     write.table(x=res, file=cis.out.file, quote=FALSE, sep="\t",
+                row.names=FALSE, col.names=TRUE)
+}
+
+callEgenes <- function(res, fdr, egenes.method, egenes.file, verbose){
+  if(verbose > 0)
+    message(paste0("call eGenes at FDR=", format(fdr, digits=2), "..."))
+  res.genes <- cbind(aggregate(pvalue ~ gene, res, length))
+  colnames(res.genes) <- c("gene", "nb.snps")
+  
+  ## pool all gene-SNP pairs, call eSNPs with BH, count eGenes
+  if("1a" %in% egenes.method){
+    tmp <- aggregate(FDR ~ gene, res, min)
+    if(verbose > 0)
+      message("method 1a: ", sum(tmp$FDR <= fdr), " eGenes")
+    res.genes <- cbind(res.genes, tmp$FDR)
+    colnames(res.genes)[ncol(res.genes)] <- "egenes.1a"
+  }
+  
+  ## pool all gene-SNP pairs, call eSNPs with Storey, count eGenes
+  if("1b" %in% egenes.method){
+    if(! "qvalue" %in% colnames(res)){
+      set.seed(1859)
+      qobj <- qvalue(p=res$pvalue, pi0.method="bootstrap", robust=TRUE)
+      res <- cbind(res, qobj$qvalues)
+      colnames(res)[ncol(res)] <- "qvalue"
+    }
+    tmp <- aggregate(qvalue ~ gene, res, min)
+    if(verbose > 0)
+      message("method 1b: ", sum(tmp$qvalue <= fdr), " eGenes (pi0=",
+              format(x=qobj$pi0, digits=7), ")")
+    res.genes <- cbind(res.genes, tmp$qvalue)
+    colnames(res.genes)[ncol(res.genes)] <- "egenes.1b"
+  }
+  
+  ## call best SNP(s) per gene with Bonferroni, pool them, call eGenes with Storey
+  if("2" %in% egenes.method){
+    pval.adj <- do.call(c, by(res, factor(res$gene), function(X){
+      p.adjust(p=X$pvalue, method="bonferroni")
+    }))
+    set.seed(1859)
+    qobj <- qvalue(p=pval.adj, pi0.method="bootstrap", robust=TRUE)
+    tmp.df <- data.frame(gene=res$gene, qvalue=qobj$qvalues)
+    tmp <- aggregate(qvalue ~ gene, tmp.df, min)
+    if(verbose > 0)
+      message("method 2: ", sum(tmp$qvalue <= fdr), " eGenes (pi0=",
+              format(x=qobj$pi0, digits=7), ")")
+    res.genes <- cbind(res.genes, tmp$qvalue)
+    colnames(res.genes)[ncol(res.genes)] <- "egenes.2"
+  }
+  
+  ## take best SNP per gene, adjust p-values with Beta(1,N), call eGenes with Storey
+  if("3" %in% egenes.method){
+    tmp <- aggregate(pvalue ~ gene, res, min)
+    tmp.adj <- pbeta(q=tmp$pvalue, shape1=1, shape2=res.genes$nb.snps)
+    set.seed(1859)
+    qobj <- qvalue(p=tmp.adj, pi0.method="bootstrap", robust=TRUE)
+    if(verbose > 0)
+      message("method 3: ", sum(qobj$qvalues <= fdr), " eGenes (pi0=",
+              format(x=qobj$pi0, digits=7), ")")
+    res.genes <- cbind(res.genes, qobj$qvalues)
+    colnames(res.genes)[ncol(res.genes)] <- "egenes.3"
+  }
+  
+  extension <- (tmp <- strsplit(egenes.file, "\\.")[[1]])[length(tmp)]
+  if(extension == "gz"){
+    write.table(x=res.genes, file=gzfile(egenes.file), quote=FALSE, sep="\t",
+                row.names=FALSE, col.names=TRUE)
+  } else
+    write.table(x=res.genes, file=egenes.file, quote=FALSE, sep="\t",
                 row.names=FALSE, col.names=TRUE)
 }
 
@@ -393,9 +464,13 @@ run <- function(){
                           params$cis.out.file, params$cis.pv.threshold,
                           snpspos, genepos, params$cis.dist,
                           params$pvalue.hist, params$verbose)
-  if(params$fdr.storey)
-    callEqtlsByStoreyMethod(res=res$cis$eqtls, fdr=0.05, params$cis.out.file,
+  if(params$esnps.storey)
+    callEsnpsByStoreyMethod(res=res$cis$eqtls, fdr=0.05,
+                            cis.out.file=params$cis.out.file,
                             params$verbose)
+  if(! is.null(params$egenes.method))
+    callEgenes(res=res$cis$eqtls, fdr=0.05, params$egenes.method,
+               params$egenes.file, params$verbose)
   if(params$verbose > 0)
     message(paste0("END ", prog.name, " (", date(), ")"))
 }
