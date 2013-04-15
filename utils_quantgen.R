@@ -215,9 +215,47 @@ rm.confound.genexp <- function(X=NULL, confounders=NULL){
   stopifnot(! is.null(X), is.matrix(X),
             ! is.null(confounders), is.matrix(confounders),
             nrow(X) == nrow(confounders))
-  if(nrow(X)> ncol(X))
+  if(nrow(X) > ncol(X))
     warning("input matrix doesn't seem to have samples in rows and genes in columns")
   
   res <- lm.fit(x=confounders, y=scale(X, center=TRUE, scale=TRUE))
   return(t(res$residuals))
+}
+
+## Impute missing expression levels per subgroup and per gene using the mean
+## (only genes expressed in all subgroups are considered)
+##
+## list.mat: list of matrices, one per subgroup with genes in rows
+##           and samples in columns
+imp.miss.genexp <- function(list.mat=NULL){
+  stopifnot(! is.null(list.mat), is.list(list.mat))
+  for(subgroup in names(list.mat)){
+    X <- list.mat[[subgroup]]
+    stopifnot(is.matrix(X), ! is.null(rownames(X)), ! is.null(colnames(X)))
+    if(nrow(X) < ncol(X))
+      warning("input matrix doesn't seem to have genes in rows and samples in columns")
+  }
+  
+  ## identify all individuals and genes expressed in all subgroups
+  all.inds <- sort(unique(do.call(c, lapply(list.mat, colnames))))
+  message(paste0("total nb of individuals: ", length(all.inds)))
+  all.genes <- table(do.call(c, lapply(list.mat, rownames)))
+  message(paste0("total nb of genes: ", length(all.genes)))
+  com.genes <- sort(names(all.genes[which(all.genes == length(list.mat))]))
+  message(paste0("nb of genes expressed in all subgroups: ", length(com.genes)))
+  
+  ## impute per subgroup and per gene
+  lapply(list.mat, function(X){
+    X.impM <- matrix(nrow=length(com.genes), ncol=length(all.inds))
+    rownames(X.impM) <- com.genes
+    colnames(X.impM) <- all.inds
+    X.impM[rownames(X)[which(rownames(X) %in% com.genes)],colnames(X)] <-
+      X[rownames(X)[which(rownames(X) %in% com.genes)],]
+    X.impM <- t(apply(X.impM, 1, function(x){
+      imp.explevels <- x
+      imp.explevels[which(is.na(x))] <- mean(x[which(! is.na(x))])
+      imp.explevels
+    }))
+    X.impM
+  })
 }
