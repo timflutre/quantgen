@@ -25,6 +25,12 @@ log10.weighted.sum <- function(x, weights=NULL){
   max + log10(sum(weights * 10^(x - max)))
 }
 
+## Return the Moore-Penrose pseudo-inverse of a matrix
+mp.inv <- function()mat{
+  mat.svd <- svd(mat)
+  mat.svd$v %*% diag(1/mat.svd$d) %*% t(mat.svd$u)
+}
+
 ## GCT format: http://www.broadinstitute.org/cancer/software/genepattern/gp_guides/file-formats
 read.table.gct <- function(file=NULL){
   stopifnot(! is.null(file))
