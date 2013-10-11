@@ -28,6 +28,7 @@
 #include <string>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 
 #include "zlib.h"
 
@@ -65,6 +66,8 @@ namespace utils {
 
   int getline (gzFile & fileStream, std::string & line);
 
+  int readFile (const std::string & pathToFile, std::vector<std::string> & lines);
+
   void gzwriteLine (gzFile & fileStream, const std::string & line,
 		    const std::string & pathToFile, const size_t & lineId);
 
@@ -76,7 +79,15 @@ namespace utils {
 
   void progressBar (std::string msg, double currentIter, double nbIterations);
 
-  template <class T> inline std::string toString (const T & t);
+/** \brief Convert int, float, etc into a string.
+ *  \note http://notfaq.wordpress.com/2006/08/30/c-convert-int-to-string/
+ */
+  template <class T> inline std::string toString (const T & t)
+  {
+    std::stringstream ss;
+    ss << t;
+    return ss.str();
+  }
 
   std::string copyString (const std::string input);
 
@@ -97,6 +108,8 @@ namespace utils {
   int removeDir (std::string path);
 
   void removeFiles (const std::vector<std::string> & vFileNames);
+  
+  std::vector<std::string> glob (const std::string & pattern);
 
   double getMaxMemUsedByProcess (void);
 

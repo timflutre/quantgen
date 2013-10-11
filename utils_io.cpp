@@ -18,17 +18,19 @@
  */
 
 #include <cstdlib>
+#include <cstring>
 #include <cmath>
 #include <cerrno>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <dirent.h>
+#include <glob.h>
 
 #include <iomanip>
 #include <algorithm>
 #include <sstream>
 
-#include "utils/utils_io.hpp"
+#include "utils_io.hpp"
 
 using namespace std;
 
@@ -163,7 +165,7 @@ namespace utils {
     const time_t & inTime)
   {
     struct tm * ptTm = localtime (&inTime);
-    char buffer[100];
+    char buffer[128];
     snprintf (buffer, 126, "%i-%02i-%02i %02i:%02i:%02i",
 	      1900 + ptTm->tm_year, ptTm->tm_mon + 1, ptTm->tm_mday,
 	      ptTm->tm_hour, ptTm->tm_min, ptTm->tm_sec);
@@ -293,6 +295,49 @@ namespace utils {
     return res;
   }
 
+/** \brief Read the whole file in a vector of lines
+ *  \note could be speed-up by reading blocks rather than lines
+ */
+  int
+  readFile (
+    const string & pathToFile,
+    vector<string> & lines)
+  {
+    gzFile stream;
+    string line;
+    size_t line_id = 0; //, nb_lines = 0;
+    
+    openFile(pathToFile, stream, "rb");
+    
+    // while(getline(stream, line))
+    //   ++nb_lines;
+    
+    // if(! gzeof(stream)){
+    //   cerr << "ERROR: can't read successfully file "
+    // 	   << pathToFile << " up to the end" << endl;
+    //   exit (1);
+    // }
+    
+    // lines.reserve(nb_lines);
+    
+    // gzrewind(stream); // go back to beginning of file
+    
+    while(getline(stream, line)){
+      lines.push_back(line);
+      ++line_id;
+    }
+    
+    if(! gzeof(stream)){
+      cerr << "ERROR: can't read successfully file "
+	   << pathToFile << " up to the end" << endl;
+      exit (1);
+    }
+    
+    closeFile(pathToFile, stream);
+    
+    return 0;
+  }
+
   void
   gzwriteLine (
     gzFile & fileStream,
@@ -377,17 +422,6 @@ namespace utils {
       cout << bar[i];
     }
     cout << setprecision(2) << fixed << progress << "%" << flush;
-  }
-
-/** \brief Convert int, float, etc into a string.
- *  \note http://notfaq.wordpress.com/2006/08/30/c-convert-int-to-string/
- */
-  template <class T>
-  inline string toString (const T & t)
-  {
-    stringstream ss;
-    ss << t;
-    return ss.str();
   }
 
 /** \brief Copy a string into another.
@@ -643,6 +677,20 @@ namespace utils {
 	exit (1);
       }
     }
+  }
+
+  // http://stackoverflow.com/a/8615450/597069
+  vector<string>
+  glob (
+    const string & pattern)
+  {
+    glob_t glob_result;
+    glob(pattern.c_str(), GLOB_TILDE, NULL, &glob_result);
+    vector<string> res;
+    for(size_t i = 0; i < glob_result.gl_pathc; ++i)
+      res.push_back(string(glob_result.gl_pathv[i]));
+    globfree(&glob_result);
+    return res;
   }
 
   double
