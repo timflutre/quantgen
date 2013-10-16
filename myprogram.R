@@ -9,21 +9,33 @@
 ## License: GPLv3+
 
 rm(list=ls())
-prog.name <- "myscript.R"
+prog.name <- "myprogram.R"
+prog.version <- "1.0"
 
+## Display the help on stdout.
+## The format complies with help2man (http://www.gnu.org/s/help2man)
 help <- function(){
   txt <- paste0("`", prog.name, "' does this and that.\n")
-  txt <- paste0(txt, "\nUsage: ", prog.name, " [OPTIONS] ...\n")
-  txt <- paste0(txt, "\nOptions:\n")
+  txt <- paste0(txt, "\n")
+  txt <- paste0(txt, "Usage: ", prog.name, " [OPTIONS] ...\n")
+  txt <- paste0(txt, "\n")
+  txt <- paste0(txt, "Options:\n")
   txt <- paste0(txt, "  -h, --help\tdisplay the help and exit\n")
   txt <- paste0(txt, "  -V, --version\toutput version information and exit\n")
   txt <- paste0(txt, "  -v, --verbose\tverbosity level (0/default=1/2/3)\n")
-  txt <- paste0(txt, "  -i\t\tinput\n")
+  txt <- paste0(txt, "  -i, --input\tpath to the input file\n")
+  txt <- paste0(txt, "\n")
+  txt <- paste0(txt, "Examples:\n")
+  txt <- paste0(txt, "  ", prog.name, " -i <input>\n")
+  txt <- paste0(txt, "\n")
+  txt <- paste0(txt, "Remarks:\n")
+  txt <- paste0(txt, "  This is my typical template file for R.")
   message(txt)
 }
 
+## Display version and license information on stdout.
 version <- function(){
-  txt <- paste0(prog.name, " 1.0\n")
+  txt <- paste0(prog.name, " ", prog.version, "\n")
   txt <- paste0(txt, "\n")
   txt <- paste0(txt, "Written by Timothee Flutre.\n")
   txt <- paste0(txt, "\n")
@@ -37,7 +49,8 @@ version <- function(){
   message(txt)
 }
 
-parseArgs <- function(params){
+## Parse the command-line arguments.
+parseCmdLine <- function(params){
   args <- commandArgs(trailingOnly=TRUE)
   ## print(args)
   
@@ -56,40 +69,61 @@ parseArgs <- function(params){
       params$verbose <- as.numeric(args[i+1])
       i <- i + 1
     }
-    else if(args[i] == "-i"){
+    else if(args[i] == "-i" || args[i] == "--input"){
       params$in.file <- args[i+1]
       i <- i + 1
     }
-    else
-      stop(paste0("unknown option ", args[i]))
-  }
-  
-  if(params$verbose > 0){
-    message("parameters:")
-    print(params)
+    else{
+      write(paste0(prog.name, ": invalid option -- ", args[i], "\n"), stderr())
+      help()
+      quit("no", status=1)
+    }
   }
   
   return(params)
 }
 
+## Check the values of the command-line parameters.
 checkParams <- function(params){
-  stopifnot(! is.null(params$input),
-            file.exists(params$input))
+  if(is.null(params$in.file)){
+    write("ERROR: missing compulsory option --input\n", stderr())
+    help()
+    quit("no", status=1)
+  }
+  if(! file.exists(params$in.file)){
+    write(paste0("ERROR: can't find file ", params$in.file, "\n"), stderr())
+    help()
+    quit("no", status=1)
+  }
+}
+
+run <- function(params){
+  
+  ## specific code ...
+  
 }
 
 main <- function(){
   params <- list(verbose=1,
-                 input=NULL)
-  params <- parseArgs(params)
+                 in.file=NULL)
+  
+  params <- parseCmdLine(params)
+  
   checkParams(params)
-  if(params$verbose > 0)
-    message(paste0("START ", prog.name, " (", date(), ")"))
   
-  ## ... specific code ...
+  if(params$verbose > 0){
+    message(paste0("START ", prog.name, " ",
+                   format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+    message(paste0("cwd: ", getwd()))
+  }
   
-  if(params$verbose > 0)
-    message(paste0("END ", prog.name, " (", date(), ")"))
+  system.time(run(params))
+  
+  if(params$verbose > 0){
+    message(paste0("END ", prog.name, " ",
+                   format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+    ## print(object.size(x=lapply(ls(), get)), units="Kb") # return an error I don't understand
+  }
 }
 
-system.time(main())
-print(object.size(x=lapply(ls(), get)), units="Kb")
+main()

@@ -1,6 +1,10 @@
 /** \file myprogram.cpp
  *
  *  `myprogram' does this and that.
+ * choose between:
+ * Author: Timothee Flutre
+ * Not copyrighted -- provided to the public domain
+ * or:
  *  Copyright (C) 2011-2013 Timothee Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -16,7 +20,8 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *  g++ -Wall -g utils_io.cpp myprogram.cpp -lgsl -lgslcblas -lz -o myprogram
+ *  Compile with: g++ -Wall -g utils_io.cpp myprogram.cpp -lgsl -lgslcblas -lz -o myprogram
+ *  "-lgsl -lgslcblas" are just provided as example
  */
 
 #include <cmath>
@@ -35,6 +40,7 @@ using namespace utils;
 #endif
 
 /** \brief Display the help on stdout.
+ *  \note The format complies with help2man (http://www.gnu.org/s/help2man)
  */
 void help(char ** argv)
 {
@@ -47,10 +53,10 @@ void help(char ** argv)
        << "  -h, --help\tdisplay the help and exit" << endl
        << "  -V, --version\toutput version information and exit" << endl
        << "  -v, --verbose\tverbosity level (0/default=1/2/3)" << endl
-       << "      --in\tinput" << endl
+       << "  -i, --input\tpath to the input file" << endl
        << endl
        << "Examples:" << endl
-       << "  " << argv[0] << " --in <input>" << endl
+       << "  " << argv[0] << " -i <input>" << endl
        << endl
        << "Remarks:" << endl
        << "  This is my typical template file for C++." << endl
@@ -63,12 +69,14 @@ void version(char ** argv)
 {
   cout << argv[0] << " " << VERSION << endl
        << endl
+       << "Written by Timothee Flutre." << endl
+       << endl
        << "Copyright (C) 2011-2013 Timothee Flutre." << endl
        << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
        << "This is free software; see the source for copying conditions.  There is NO" << endl
        << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
-       << endl
-       << "Written by Timothee Flutre." << endl;
+    ;
+  // or choose "Not copyrighted -- provided to the public domain"
 }
 
 /** \brief Parse the command-line arguments and check the values of the 
@@ -89,11 +97,11 @@ parseCmdLine(
       {"help", no_argument, 0, 'h'},
       {"version", no_argument, 0, 'V'},
       {"verbose", required_argument, 0, 'v'},
-      {"in", required_argument, 0, 0},
+      {"input", required_argument, 0, 0},
       {0, 0, 0, 0}
     };
     int option_index = 0;
-    c = getopt_long(argc, argv, "hVv:",
+    c = getopt_long(argc, argv, "hVv:i:",
                     long_options, &option_index);
     if(c == -1)
       break;
@@ -102,7 +110,7 @@ parseCmdLine(
     case 0:
       if(long_options[option_index].flag != 0)
         break;
-      if(strcmp(long_options[option_index].name, "in") == 0)
+      if(strcmp(long_options[option_index].name, "input") == 0)
       {
         input = optarg;
         break;
@@ -116,6 +124,9 @@ parseCmdLine(
     case 'v':
       verbose = atoi(optarg);
       break;
+    case 'i':
+      input = optarg;
+      break;
     case '?':
       printf("\n"); help(argv);
       abort();
@@ -126,16 +137,23 @@ parseCmdLine(
   }
   if(input.empty()){
     cerr << "cmd-line: " << getCmdLine(argc, argv) << endl << endl
-	 << "ERROR: missing compulsory option --in" << endl << endl;
+	 << "ERROR: missing compulsory option --input" << endl << endl;
     help(argv);
     exit(1);
   }
   if(! doesFileExist(input)){
     cerr << "cmd-line: " << getCmdLine(argc, argv) << endl << endl
-	 << "ERROR: can't find " << input << endl << endl;
+	 << "ERROR: can't find file " << input << endl << endl;
     help(argv);
     exit(1);
   }
+}
+
+void run(const string & input, const int & verbose)
+{
+  
+  // specific code ...
+  
 }
 
 int main(int argc, char ** argv)
@@ -146,8 +164,7 @@ int main(int argc, char ** argv)
   parseCmdLine(argc, argv, input, verbose);
   
   time_t startRawTime, endRawTime;
-  if(verbose > 0)
-  {
+  if(verbose > 0){
     time(&startRawTime);
     cout << "START " << basename(argv[0])
          << " " << getDateTime(startRawTime) << endl
@@ -158,10 +175,9 @@ int main(int argc, char ** argv)
     cout << flush;
   }
   
-  // ... specific code ...
+  run(input, verbose);
   
-  if(verbose > 0)
-  {
+  if(verbose > 0){
     time(&endRawTime);
     cout << "END " << basename(argv[0])
          << " " << getDateTime(endRawTime) << endl

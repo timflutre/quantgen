@@ -8,6 +8,10 @@
 # Copyright (C) 2011-2013 Timothee Flutre
 # License: GPLv3+
 
+progVersion="1.0"
+
+# Display the help on stdout.
+# The format complies with help2man (http://www.gnu.org/s/help2man)
 function help () {
     msg="\`${0##*/}' does this and that.\n"
     msg+="\n"
@@ -17,26 +21,28 @@ function help () {
     msg+="  -h, --help\tdisplay the help and exit\n"
     msg+="  -V, --version\toutput version information and exit\n"
     msg+="  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
-    msg+="  -i, --in\tinput\n"
+    msg+="  -i, --input\tpath to the input file\n"
     msg+="\n"
     msg+="Examples:\n"
     msg+="  ${0##*/} -i <input>\n"
+    msg+="\n"
+    msg+="Remarks:\n"
+    msg+="  This is my typical template file for bash."
     echo -e "$msg"
 }
 
+# Display version and license information on stdout.
 function version () {
-    msg="${0##*/} 1.0\n"
+    msg="${0##*/} ${progVersion}\n"
     msg+="\n"
     msg+="Written by Timothee Flutre.\n"
     msg+="\n"
-# choose between:
-    msg += "Not copyrighted -- provided to the public domain\n"
-# or:
     msg+="Copyright (C) 2011-2013 Timothee Flutre.\n"
     msg+="License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
     msg+="This is free software; see the source for copying conditions.  There is NO\n"
     msg+="warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
     echo -e "$msg"
+# or choose "Not copyrighted -- provided to the public domain\n"
 }
 
 # http://www.linuxjournal.com/content/use-date-command-measure-elapsed-time
@@ -56,45 +62,54 @@ function timer () {
     fi
 }
 
-function parseArgs () {
-    TEMP=`getopt -o hVv:i: -l help,version,verbose:,in: \
+# Parse the command-line arguments.
+function parseCmdLine () {
+    TEMP=`getopt -o hVv:i: -l help,version,verbose:,input: \
         -n "$0" -- "$@"`
-    if [ $? != 0 ] ; then echo "ERROR: getopt failed" >&2 ; exit 1 ; fi
+    if [ $? != 0 ] ; then echo; help; exit 1 ; fi
     eval set -- "$TEMP"
     while true; do
         case "$1" in
             -h|--help) help; exit 0; shift;;
             -V|--version) version; exit 0; shift;;
             -v|--verbose) verbose=$2; shift 2;;
-            -i|--in) input=$2; shift 2;;
+            -i|--input) inFile=$2; shift 2;;
             --) shift; break;;
             *) echo "ERROR: options parsing failed"; exit 1;;
         esac
     done
-    if [ -z "${input}" ]; then
-        echo -e "ERROR: missing compulsory option -i\n"
+    if [ -z "${inFile}" ]; then
+        echo -e "ERROR: missing compulsory option --input\n"
         help
         exit 1
     fi
-    if [ ! -f "${input}" ]; then
-        echo -e "ERROR: can't find '${input}'\n"
+    if [ ! -f "${inFile}" ]; then
+        echo -e "ERROR: can't find file ${inFile}\n"
         help
         exit 1
     fi
 }
 
+function run () {
+    
+    # specific code ...
+    true # to avoid an error when the function is empty: http://stackoverflow.com/a/2421637/597069
+    
+}
+
 verbose=1
-input=""
-parseArgs "$@"
+inFile=""
+parseCmdLine "$@"
 
 if [ $verbose -gt "0" ]; then
     startTime=$(timer)
     msg="START ${0##*/} $(date +"%Y-%m-%d") $(date +"%H:%M:%S")"
     msg+="\ncmd-line: $0 "$@ # comment if an option takes a glob as argument
+    msg+="\ncwd: $(pwd)"
     echo -e $msg
 fi
 
-# ... specific code ...
+run inFile verbose
 
 if [ $verbose -gt "0" ]; then
     msg="END ${0##*/} $(date +"%Y-%m-%d") $(date +"%H:%M:%S")"
