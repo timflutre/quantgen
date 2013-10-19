@@ -27,6 +27,7 @@
 #include <cmath>
 #include <ctime>
 #include <getopt.h>
+#include <libgen.h>
 
 #include <iostream>
 #include <string>

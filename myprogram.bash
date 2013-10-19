@@ -63,19 +63,33 @@ function timer () {
 }
 
 # Parse the command-line arguments.
+# http://stackoverflow.com/a/4300224/597069
 function parseCmdLine () {
-    TEMP=`getopt -o hVv:i: -l help,version,verbose:,input: \
+    getopt -T > /dev/null # portability check (say, Linux or Mac OS?)
+    if [ $? -eq 4 ]; then # GNU enhanced getopt is available
+	TEMP=`getopt -o hVv:i: -l help,version,verbose:,input: \
         -n "$0" -- "$@"`
-    if [ $? != 0 ] ; then echo; help; exit 1 ; fi
+    else # original getopt is available (no long options, whitespace, sorting)
+	TEMP=`getopt hVv:i: "$@"`
+    fi
+    if [ $? -ne 0 ]; then
+	echo "ERROR: "$(which getopt)" failed"
+	getopt -T > /dev/null
+	if [ $? -ne 4 ]; then
+	    echo "did you use long options? they are not handled \
+on your system, use -h for help"
+	fi
+	exit 2
+    fi
     eval set -- "$TEMP"
-    while true; do
+    while [ $# -gt 0 ]; do
         case "$1" in
-            -h|--help) help; exit 0; shift;;
-            -V|--version) version; exit 0; shift;;
-            -v|--verbose) verbose=$2; shift 2;;
-            -i|--input) inFile=$2; shift 2;;
+            -h | --help) help; exit 0; shift;;
+            -V | --version) version; exit 0; shift;;
+            -v | --verbose) verbose=$2; shift 2;;
+            -i | --input) inFile=$2; shift 2;;
             --) shift; break;;
-            *) echo "ERROR: options parsing failed"; exit 1;;
+            *) echo "ERROR: options parsing failed, use -h for help"; exit 1;;
         esac
     done
     if [ -z "${inFile}" ]; then
