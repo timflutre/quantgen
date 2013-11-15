@@ -419,3 +419,91 @@ hinton <- function(m, main="", max.sqrt.m=NULL){
   if(ylab != "")
     mtext(ylab, side=2, line=2)
 }
+
+plot.scale <- function(z, zlim, col = heat.colors(12),
+                        breaks, horiz=TRUE, ylim=NULL, xlim=NULL, ...){
+  ## Plot a scale, e.g. to add on the side of image()
+  ##
+  ## Note:
+  ##  takes some time to draw (there is one polygon per break...)
+  ##
+  ## Ref:
+  ##  http://menugget.blogspot.de/2011/08/adding-scale-to-image-plot.html
+  
+  if(! missing(breaks))
+    if(length(breaks) != (length(col)+1))
+      stop("must have one more break than colour")
+  
+  if(missing(breaks) & ! missing(zlim))
+    breaks <- seq(zlim[1], zlim[2], length.out=(length(col)+1))
+  
+  if(missing(breaks) & missing(zlim)){
+    zlim <- range(z, na.rm=TRUE)
+    zlim[2] <- zlim[2] + c(zlim[2]-zlim[1])*(1E-3)#adds a bit to the range in both directions
+    zlim[1] <- zlim[1] - c(zlim[2]-zlim[1])*(1E-3)
+    breaks <- seq(zlim[1], zlim[2], length.out=(length(col)+1))
+  }
+  
+  poly <- vector(mode="list", length(col))
+  for(i in seq(poly))
+    poly[[i]] <- c(breaks[i], breaks[i+1], breaks[i+1], breaks[i])
+  
+  xaxt <- ifelse(horiz, "s", "n")
+  yaxt <- ifelse(horiz, "n", "s")
+  if(horiz){
+    YLIM <- c(0,1)
+    XLIM <- range(breaks)
+  } else{
+    YLIM <- range(breaks)
+    XLIM <- c(0,1)
+  }
+  if(missing(xlim))
+    xlim <- XLIM
+  if(missing(ylim))
+    ylim <- YLIM
+  
+  plot(1, 1, t="n", ylim=ylim, xlim=xlim, xaxt=xaxt, yaxt=yaxt,
+       xaxs="i", yaxs="i", bty="n", ...)
+  
+  for(i in seq(poly)){
+    if(horiz){
+      polygon(poly[[i]], c(0,0,1,1), col=col[i], border=NA)
+    } else
+      polygon(c(0,0,1,1), poly[[i]], col=col[i], border=NA)
+  }
+}
+
+image.scale <- function(z, main=NULL, breaks=NULL){
+  ## Plot a matrix as a heatmap in its natural orientation,
+  ## using its dimension names for rows and columns,
+  ## and with a colored scale on the right side
+  ##
+  ## Args:
+  ##  z: matrix
+  ##  main: title to appear above the heatmap
+  ##  breaks: vector (default=seq(min(z), max(z), length.out=100))
+  
+  layout(matrix(c(1,2), nrow=1, ncol=2), widths=c(7,1))
+  ## layout.show(2)
+  
+  col.pal <- colorRampPalette(c("black", "red", "yellow"), space="rgb")
+  if(is.null(breaks))
+    breaks <- seq(min(z), max(z), length.out=100)
+  
+  ## plot the heatmap
+  par(mar=c(1, 5, 6, 1))
+  image(t(z)[,nrow(z):1], axes=FALSE, col=col.pal(length(breaks)-1))
+  if(! is.null(main))
+    mtext(text=main, side=3, line=4, font=2, cex=1.3)
+  text(x=seq(0,1,length.out=nrow(z)), y=par("usr")[4]+0.02, srt=45, adj=0,
+       labels=rownames(z), xpd=TRUE)
+  mtext(text=rev(colnames(z)), side=2, line=1, at=seq(0,1,length.out=nrow(z)),
+        las=2) # left side
+  
+  ## plot the scale
+  par(mar=c(1,0,6,3))
+  plot.scale(z, col=col.pal(length(breaks)-1), breaks=breaks, horiz=FALSE,
+             yaxt="n")
+  axis(4, at=format(breaks[seq.int(from=1,to=100,length.out=5)], digits=2),
+       las=2, lwd=0, lwd.ticks=1)
+}
