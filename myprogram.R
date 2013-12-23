@@ -12,8 +12,15 @@ rm(list=ls())
 prog.name <- "myprogram.R"
 prog.version <- "1.0"
 
-## Display the help on stdout.
-## The format complies with help2man (http://www.gnu.org/s/help2man)
+R.v.maj <- as.numeric(R.version$major)
+R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
+if(R.v.maj < 2 || (R.v.maj == 2 && R.v.min.1 < 15))
+    stop("require R >= 2.15 (for paste0)", call.=FALSE)
+
+##' Display the help on stdout
+##'
+##' The format complies with help2man (http://www.gnu.org/s/help2man)
+##' @title Help
 help <- function(){
   txt <- paste0("`", prog.name, "' does this and that.\n")
   txt <- paste0(txt, "\n")
@@ -33,7 +40,10 @@ help <- function(){
   message(txt)
 }
 
-## Display version and license information on stdout.
+##' Display version and license information on stdout
+##'
+##' To comply with help2man (http://www.gnu.org/s/help2man)
+##' @title Version
 version <- function(){
   txt <- paste0(prog.name, " ", prog.version, "\n")
   txt <- paste0(txt, "\n")
@@ -49,7 +59,12 @@ version <- function(){
   message(txt)
 }
 
-## Parse the command-line arguments.
+##' Parse the command-line arguments
+##'
+##' Allow short and long options
+##' @title Command-line
+##' @param params list of parameters initialized with default values
+##' @return List of parameters
 parseCmdLine <- function(params){
   args <- commandArgs(trailingOnly=TRUE)
   ## print(args)
@@ -83,7 +98,9 @@ parseCmdLine <- function(params){
   return(params)
 }
 
-## Check the values of the command-line parameters.
+##' Check the values of the command-line parameters
+##'
+##' @param params list of parameters
 checkParams <- function(params){
   if(is.null(params$in.file)){
     write("ERROR: missing compulsory option --input\n", stderr())
@@ -126,4 +143,5 @@ main <- function(){
   }
 }
 
-main()
+if(! interactive())
+    main()
