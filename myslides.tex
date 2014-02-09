@@ -1,0 +1,102 @@
+% Copyright (C) 2014 Timothee Flutre.
+
+% \documentclass[t]{beamer} % "t" to top-justified body text by default
+\documentclass[t,handout]{beamer}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\hypersetup{colorlinks, linkcolor=black, urlcolor=gray}
+\usepackage{amsmath}
+\usepackage{bm} % to have mathematical symbols in bold
+\usepackage{multirow}
+\usepackage{tikz}
+\usepackage[francais]{babel}
+\usepackage[utf8]{inputenc}
+
+\graphicspath{{./figures/}}
+
+% -----------------------------------------------------------------------------
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamercolor{alerted text}{fg=purple}
+\setbeamertemplate{caption}[numbered]
+\setbeamerfont{caption}{size=\scriptsize}
+% \setbeameroption{hide notes}
+\setbeameroption{show notes}
+\setbeamertemplate{note page}[plain]
+
+\setbeamertemplate{footline}
+{
+  \leavevmode
+  \hbox{
+    \hspace*{-0.06cm}
+    \begin{beamercolorbox}[wd=.2\paperwidth,ht=2.25ex,dp=1ex,center]{author in head/foot}
+      \usebeamerfont{author in head/foot}\insertshortauthor \hspace*{1em} \insertshortinstitute
+    \end{beamercolorbox}
+    \begin{beamercolorbox}[wd=.50\paperwidth,ht=2.25ex,dp=1ex,center]{section in head/foot}
+      \usebeamerfont{section in head/foot}\insertshorttitle
+    \end{beamercolorbox}
+    \begin{beamercolorbox}[wd=.27\paperwidth,ht=2.25ex,dp=1ex,right]{section in head/foot}%
+      \usebeamerfont{section in head/foot}\insertshortdate{}\hspace*{2em}
+      \insertframenumber{} / \inserttotalframenumber\hspace*{2ex}
+    \end{beamercolorbox}
+  }
+  \vskip0pt
+}
+
+\AtBeginSection[]
+{
+  \begin{frame}
+    \frametitle{Outline}
+    \addtocounter{framenumber}{-1}
+    \tableofcontents[currentsection]
+  \end{frame}
+}
+
+% -----------------------------------------------------------------------------
+
+\title[Short title]{Long title}
+\author[T. Flutre]{Timoth\'{e}e Flutre}
+\institute[Short affiliation]{Long affiliation}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}                                                                                                                       
+
+\begin{frame}
+  \frametitle{Outline}
+  \tableofcontents
+\end{frame}
+
+\section{First section}
+\begin{frame}
+  \frametitle{I.1.}
+  \begin{itemize}
+  \item 
+  \end{itemize}
+  \note{On this slide, I will talk about X.}
+\end{frame}
+
+\section{Second section}
+
+\begin{frame}
+  \frametitle{II.1.}
+  \begin{center}
+    % \includegraphics[width=0.95\textwidth,height=0.90\textheight,keepaspectratio=true]{myplot}%
+  \end{center}
+\end{frame}
+
+% After your last numbered slide
+\appendix
+\newcounter{finalframe}
+\setcounter{finalframe}{\value{framenumber}}
+
+\begin{frame}
+  \frametitle{Appendix}
+\end{frame}
+
+\setcounter{framenumber}{\value{finalframe}}
+
+\end{document}
