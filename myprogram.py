@@ -9,6 +9,10 @@
 # Copyright (C) 2011-2013 Timothee Flutre
 # License: GPLv3+
 
+# to allow code to work with Python 2 and 3
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import sys
 import os
 import getopt
@@ -46,7 +50,7 @@ class MyClass(object):
         msg += "\n"
         msg += "Remarks:\n"
         msg += "  This is my typical template file for python."
-        print msg; sys.stdout.flush()
+        print(msg); sys.stdout.flush()
         
         
     def version(self):
@@ -64,7 +68,7 @@ class MyClass(object):
         msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "This is free software; see the source for copying conditions.  There is NO\n"
         msg += "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
-        print msg; sys.stdout.flush()
+        print(msg); sys.stdout.flush()
         
         
     def setAttributesFromCmdLine(self):
@@ -75,7 +79,7 @@ class MyClass(object):
             opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
                                         ["help", "version", "verbose=",
                                          "input="])
-        except getopt.GetoptError, err:
+        except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
             sys.exit(2)
@@ -127,7 +131,7 @@ if __name__ == "__main__":
                                time.strftime("%Y-%m-%d %H:%M:%S"))
         msg += "\ncmd-line: %s" % ' '.join(sys.argv)
         msg += "\ncwd: %s" % os.getcwd()
-        print msg; sys.stdout.flush()
+        print(msg); sys.stdout.flush()
         
     i.run()
     
@@ -138,5 +142,4 @@ if __name__ == "__main__":
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))
         msg += " (%s)" % str(runLength)
-        print msg; sys.stdout.flush()
-        
+        print(msg); sys.stdout.flush()
