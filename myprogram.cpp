@@ -2,10 +2,10 @@
  *
  *  `myprogram' does this and that.
  * choose between:
- * Author: Timothee Flutre
+ * Author: Timothée Flutre
  * Not copyrighted -- provided to the public domain
  * or:
- *  Copyright (C) 2011-2013 Timothee Flutre
+ *  Copyright (C) 2011-2014 Timothée Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -60,8 +60,7 @@ void help(char ** argv)
        << "Examples:" << endl
        << "  " << argv[0] << " -i <input>" << endl
        << endl
-       << "Remarks:" << endl
-       << "  This is my typical template file for C++." << endl
+       << "Report bugs to <>." << endl
     ;
 }
 
@@ -71,12 +70,12 @@ void version(char ** argv)
 {
   cout << argv[0] << " " << VERSION << endl
        << endl
-       << "Written by Timothee Flutre." << endl
-       << endl
-       << "Copyright (C) 2011-2013 Timothee Flutre." << endl
+       << "Copyright (C) 2011-2014 Timothée Flutre." << endl
        << "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>" << endl
        << "This is free software; see the source for copying conditions.  There is NO" << endl
        << "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE." << endl
+       << endl
+       << "Written by Timothée Flutre." << endl
     ;
   // or choose "Not copyrighted -- provided to the public domain"
 }
