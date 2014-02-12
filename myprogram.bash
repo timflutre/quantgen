@@ -2,10 +2,10 @@
 
 # Aim: does this and that
 # choose between:
-# Author: Timothee Flutre
+# Author: Timothée Flutre
 # Not copyrighted -- provided to the public domain
 # or:
-# Copyright (C) 2011-2013 Timothee Flutre
+# Copyright (C) 2011-2013 Timothée Flutre
 # License: GPLv3+
 
 progVersion="1.0"
@@ -26,8 +26,7 @@ function help () {
     msg+="Examples:\n"
     msg+="  ${0##*/} -i <input>\n"
     msg+="\n"
-    msg+="Remarks:\n"
-    msg+="  This is my typical template file for bash."
+    msg+="Report bugs to <>."
     echo -e "$msg"
 }
 
@@ -35,12 +34,12 @@ function help () {
 function version () {
     msg="${0##*/} ${progVersion}\n"
     msg+="\n"
-    msg+="Written by Timothee Flutre.\n"
-    msg+="\n"
-    msg+="Copyright (C) 2011-2013 Timothee Flutre.\n"
+    msg+="Copyright (C) 2011-2013 Timothée Flutre.\n"
     msg+="License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
     msg+="This is free software; see the source for copying conditions.  There is NO\n"
     msg+="warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
+    msg+="\n"
+    msg+="Written by Timothée Flutre."
     echo -e "$msg"
 # or choose "Not copyrighted -- provided to the public domain\n"
 }
