@@ -2,10 +2,10 @@
 
 ## Aim: does this and that
 ## choose between:
-## Author: Timothee Flutre
+## Author: Timothée Flutre
 ## Not copyrighted -- provided to the public domain
 ## or:
-## Copyright (C) 2011-2013 Timothee Flutre
+## Copyright (C) 2011-2014 Timothée Flutre
 ## License: GPLv3+
 
 rm(list=ls())
@@ -19,7 +19,7 @@ if(R.v.maj < 2 || (R.v.maj == 2 && R.v.min.1 < 15))
 
 ##' Display the help on stdout
 ##'
-##' The format complies with help2man (http://www.gnu.org/s/help2man)
+##' The format complies with help2man (http://www.gnu.org/s/help2man) but use --no-discard-stderr
 ##' @title Help
 help <- function(){
   txt <- paste0("`", prog.name, "' does this and that.\n")
@@ -35,27 +35,26 @@ help <- function(){
   txt <- paste0(txt, "Examples:\n")
   txt <- paste0(txt, "  ", prog.name, " -i <input>\n")
   txt <- paste0(txt, "\n")
-  txt <- paste0(txt, "Remarks:\n")
-  txt <- paste0(txt, "  This is my typical template file for R.")
+  txt <- paste0(txt, "Report bugs to <>.")
   message(txt)
 }
 
 ##' Display version and license information on stdout
 ##'
-##' To comply with help2man (http://www.gnu.org/s/help2man)
+##' To comply with help2man (http://www.gnu.org/s/help2man) but use --no-discard-stderr
 ##' @title Version
 version <- function(){
   txt <- paste0(prog.name, " ", prog.version, "\n")
   txt <- paste0(txt, "\n")
-  txt <- paste0(txt, "Written by Timothee Flutre.\n")
-  txt <- paste0(txt, "\n")
   ## choose between:
-  txt <- paste0(txt, "Not copyrighted -- provided to the public domain\n")
+  ## txt <- paste0(txt, "Not copyrighted -- provided to the public domain\n")
   ## or:
-  txt <- paste0(txt, "Copyright (C) 2011-2013 Timothee Flutre.\n")
+  txt <- paste0(txt, "Copyright (C) 2011-2014 Timothée Flutre.\n")
   txt <- paste0(txt, "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n")
   txt <- paste0(txt, "This is free software; see the source for copying conditions.  There is NO\n")
   txt <- paste0(txt, "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n")
+  txt <- paste0(txt, "\n")
+  txt <- paste0(txt, "Written by Timothée Flutre.")
   message(txt)
 }
 
