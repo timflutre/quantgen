@@ -3,15 +3,15 @@
 
 # Aim: does this and that
 # choose between:
-# Author: Timothee Flutre
+# Author: Timothée Flutre
 # Not copyrighted -- provided to the public domain
 # or:
-# Copyright (C) 2011-2013 Timothee Flutre
+# Copyright (C) 2011-2013 Timothée Flutre
 # License: GPLv3+
 
 # to allow code to work with Python 2 and 3
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import print_function   # print is a function in python3
+from __future__ import unicode_literals # avoid adding "u" to each string
 
 import sys
 import os
@@ -48,8 +48,7 @@ class MyClass(object):
         msg += "Examples:\n"
         msg += "  %s -i <input>\n" % os.path.basename(sys.argv[0])
         msg += "\n"
-        msg += "Remarks:\n"
-        msg += "  This is my typical template file for python."
+        msg += "Report bugs to <>."
         print(msg); sys.stdout.flush()
         
         
@@ -59,16 +58,16 @@ class MyClass(object):
         """
         msg = "%s 1.0\n" % os.path.basename(sys.argv[0])
         msg += "\n"
-        msg += "Written by Timothee Flutre.\n"
-        msg += "\n"
 # choose between:
-        msg += "Not copyrighted -- provided to the public domain\n"
+        # msg += "Not copyrighted -- provided to the public domain\n"
 # or:
-        msg += "Copyright (C) 2011-2013 Timothee Flutre.\n"
+        msg += "Copyright (C) 2011-2013 Timothée Flutre.\n"
         msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "This is free software; see the source for copying conditions.  There is NO\n"
         msg += "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
-        print(msg); sys.stdout.flush()
+        msg += "\n"
+        msg += "Written by Timothée Flutre."
+        print(msg.encode("utf8")); sys.stdout.flush()
         
         
     def setAttributesFromCmdLine(self):
