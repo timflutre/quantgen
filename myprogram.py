@@ -12,6 +12,7 @@
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
 from __future__ import unicode_literals # avoid adding "u" to each string
+from __future__ import division # avoid writing float(x) when dividing by x
 
 import sys
 import os
@@ -20,6 +21,10 @@ import time
 import datetime
 import math
 import gzip
+from subprocess import Popen, PIPE
+# import resource # see http://stackoverflow.com/q/21885545/597069
+# import numpy as np
+# import scipy as sp
 
 
 class MyClass(object):
@@ -140,5 +145,14 @@ if __name__ == "__main__":
         endTime = time.time()
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))
-        msg += " (%s)" % str(runLength)
+        msg += " (%s" % str(runLength)
+        # maxMem = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        # msg += "; %i kB)" % maxMem
+        if "linux" in sys.platform:
+            p = Popen(["grep", "VmHWM", "/proc/%s/status" % os.getpid()],
+                      shell=False, stdout=PIPE).communicate()
+            maxMem = p[0].split()[1]
+            msg += "; %s kB)" % maxMem
+        else:
+            msg += ")"
         print(msg); sys.stdout.flush()
