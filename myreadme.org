@@ -1,0 +1,47 @@
+#+title: Project "Test"
+#+author: Timothée Flutre
+
+#+latex_header: \usepackage{parskip}
+#+latex_header: \setlength{\parindent}{0pt}
+#+latex_header: \usepackage{underscore}
+
+* Overview
+This document contains the documentation for the project "Test".
+The goal of this project is to ...
+
+The project directory is organized as advised by Noble (PLoS Computational Biology 2009):
+#+begin_src bash
+mkdir -p doc data src bin results
+#+end_src
+
+It can also be easily transfered, for instance:
+#+begin_src bash
+cd ..; tar -czvf test.tar.gz \
+--exclude=test/data/data_extern \
+--exclude=test/results/preprocessing \
+--exclude="*~" --exclude=".*" test
+#+end_src
+
+* Data
+** External data
+In this directory, data don't need to be backed up:
+#+begin_src bash
+cd data/data_extern/
+#+end_src
+
+** Internal data
+In this directory, data do need to be backed up:
+#+begin_src bash
+cd data/data_intern/
+#+end_src
+
+* Results
+** Preprocessing
+#+begin_src bash
+cd results/preprocessing/
+#+end_src
+
+** Analysis
+#+begin_src bash
+cd results/analysis/
+#+end_src
