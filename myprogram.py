@@ -18,10 +18,19 @@ import os
 import getopt
 import time
 import datetime
+from subprocess import Popen, PIPE
 import math
 import gzip
+# import numpy as np
+# import scipy as sp
 
-
+if sys.version_info[0] == 2:
+    if sys.version_info[1] < 7:
+        msg = "ERROR: Python should be in version 2.7 or higher"
+        sys.stderr.write("%s\n\n" % msg)
+        sys.exit(1)
+        
+        
 class MyClass(object):
     
     def __init__(self):
@@ -115,8 +124,8 @@ class MyClass(object):
             
     def run(self):
         pass
-    
-    
+        
+        
 if __name__ == "__main__":
     i = MyClass()
     
@@ -140,5 +149,12 @@ if __name__ == "__main__":
         endTime = time.time()
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))
-        msg += " (%s)" % str(runLength)
+        msg += " (%s" % str(runLength)
+        if "linux" in sys.platform:
+            p = Popen(["grep", "VmHWM", "/proc/%s/status" % os.getpid()],
+                      shell=False, stdout=PIPE).communicate()
+            maxMem = p[0].split()[1]
+            msg += "; %s kB)" % maxMem
+        else:
+            msg += ")"
         print(msg); sys.stdout.flush()
