@@ -128,16 +128,27 @@ main <- function(){
   checkParams(params)
   
   if(params$verbose > 0){
-    message(paste0("START ", prog.name, " ",
-                   format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+    start.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    message(paste0("START ", prog.name, " ", start.time))
     message(paste0("cwd: ", getwd()))
   }
   
   system.time(run(params))
   
   if(params$verbose > 0){
-    message(paste0("END ", prog.name, " ",
-                   format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+    end.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    difft <- as.numeric(
+        difftime(as.POSIXct(end.time, format="%Y-%m-%d %H:%M:%S"),
+                 as.POSIXct(start.time, format="%Y-%m-%d %H:%M:%S"),
+                 units="days"))
+    ## difft <- 1 + 2/24 + 3/(24*60) + 3/(24*3600) # 1d 2h 3m 4s in days
+    difft.d <- floor(difft)
+    difft.h <- floor(((difft - difft.d) * 24) %% 24)
+    difft.m <- floor(((difft - difft.d - difft.h/24) * 24*60) %% (24 * 60))
+    difft.s <- floor(((difft - difft.d - difft.h/24 - difft.m/(24*60)) *
+                      24*60*60) %% (24 * 60 * 60))
+    run.length <- sprintf("%02i:%02i:%02i", difft.h, difft.m, difft.s)
+    message(paste0("END ", prog.name, " ", end.time, " (", run.length, ")"))
     ## print(object.size(x=lapply(ls(), get)), units="Kb") # return an error I don't understand
   }
 }
