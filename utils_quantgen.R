@@ -631,3 +631,57 @@ image.scale <- function(z, main=NULL, breaks=NULL){
   axis(4, at=format(breaks[seq.int(from=1,to=100,length.out=5)], digits=2),
        las=2, lwd=0, lwd.ticks=1)
 }
+
+##' Returns the genetic map contained in a BioMercator TXT file.
+##'
+##' http://moulon.inra.fr/index.php/en/tranverse-team/atelier-de-bioinformatique/projects/projets/135
+##' @title 
+##' @param file the name of the file which the data are to be read from
+##' @return list
+##' @author Timothée Flutre
+read.biomercator <- function(file){
+    stopifnot(file.exists(file))
+    
+    gmap <- list()
+    
+    lines <- readLines(file)
+    
+    ## load meta-data
+    i <- 1
+    while(! grepl("chr=", lines[i])){
+        tokens <- strsplit(lines[i], "=")[[1]]
+        key <- gsub(" ", "", tokens[1])
+        if(key %in% names(gmap))
+            key <- paste(key, sum(key == names(gmap)) + 1, sep=".")
+        val <- tokens[2]
+        gmap[[key]] <- val
+        i <- i + 1
+    }
+    
+    ## load chromosomes (can have several linkage groups)
+    chrs <- split(lines[-(1:(i-1))], cumsum(grepl("^chr=", lines[-(1:(i-1))])))
+    gmap[["map"]] <- lapply(chrs, function(chr){
+        lgs <- split(chr[-1], cumsum(grepl("^lg=", chr[-1])))
+        data <- lapply(lgs, function(lg){
+            tmp <- as.data.frame(do.call(rbind, strsplit(lg[-1], "\t")))
+            tmp <- tmp[,-1] # discard column of identifiers
+            tmp <- tmp[! duplicated(tmp[,1]),] # discard redundant marker names
+            df <- as.numeric(as.character(tmp[,2]))
+            names(df) <- as.character(tmp[,1])
+            df[order(df)]
+        })
+        names(data) <- paste("lg",
+                             sapply(lgs, function(lg){
+                                 strsplit(lg[1], "=")[[1]][2]
+                             }),
+                             sep=".")
+        data
+    })
+    names(gmap[["map"]]) <- paste("chr",
+                                  sapply(chrs, function(chr){
+                                      strsplit(chr[1], "=")[[1]][2]
+                                  }),
+                                  sep=".")
+    
+    return(gmap)
+}
