@@ -1,0 +1,87 @@
+---
+title: "Statistical analysis with R for project \"Test\""
+author: "Timothée Flutre"
+date: "01/01/2014"
+output:
+  html_document:
+    toc: true
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE)
+options(digits=3)
+seed <- 1859; set.seed(seed)
+## suppressPackageStartupMessages(library(MASS))
+```
+
+
+## Preamble
+
+For this document to be successfully exported to HTML and PDF, read [this page](http://rmarkdown.rstudio.com/).
+
+Practically, to export it outside of RStudio, open R and type:
+```{r, eval=FALSE}
+library(rmarkdown)
+render("myanalysis.Rmd", "all")
+```
+
+Example of an equation written in LaTeX: $y_i \sim \mathcal{N}(\mu, \sigma^2)$
+
+Example of a plot from R:
+```{r hist}
+hist(rnorm(10^4), breaks="FD")
+```
+
+Example of a table from R:
+```{r, results='asis'}
+knitr::kable(mtcars[1:5,])
+```
+
+
+## Overview
+
+This document contains the statistical analysis for the project "Test".
+The goal of this project is to ...
+
+
+## Define the question
+
+...
+
+
+## Design the experiment
+
+...
+
+
+## Simulate some data
+
+...
+
+
+## Load the real data (and format them)
+
+...
+
+
+## Explore the data
+
+...
+
+
+## Write the model
+
+...
+
+
+## Perform inference
+
+...
+
+
+## Check assumptions and improve the model
+
+...
