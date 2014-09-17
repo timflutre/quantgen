@@ -683,5 +683,26 @@ read.biomercator <- function(file){
                                   }),
                                   sep=".")
     
+    txt <- paste0("map '", gmap$mapName, "':")
+    txt <- paste0(txt, "\n\tnb of individuals: ", gmap$popSize)
+    txt <- paste0(txt, "\n\tnb of markers: ",
+                  sum(sapply(gmap$map, function(chr){
+                      sapply(chr, function(lg){length(lg)})
+                  })))
+    txt <- paste0(txt, "\n\tnb of chromosomes: ", length(gmap$map))
+    txt <- paste0(txt, "\n\tnb of linkage groups: ",
+                  sum(sapply(gmap$map, function(chr){length(chr)})))
+    txt <- paste0(txt, "\n\ttotal genetic distance: ",
+                  sum(sapply(gmap$map, function(chr){
+                      sapply(chr, function(lg){lg[length(lg)]})
+                  })), " ", gmap$mapUnit)
+    mean.dist <- do.call(c, lapply(gmap$map, function(chr){
+        sapply(chr, function(lg){
+            rev(lg)[1:(length(lg)-1)] - lg[(length(lg)-1):1]
+        })}))
+    txt <- paste0(txt, "\n\tmean distances per linkage group:")
+    message(paste0(txt))
+    print(summary(mean.dist))
+    
     return(gmap)
 }
