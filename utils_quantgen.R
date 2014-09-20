@@ -706,3 +706,28 @@ read.biomercator <- function(file){
     
     return(gmap)
 }
+
+##' Convert genotype data to the "mean genotype" file format from BimBam
+##'
+##' The format is specified in BimBam's manual http://www.haplotype.org/download/bimbam-manual.pdf#page=6
+##' @title 
+##' @param X matrix with individuals in rows and SNPs in columns
+##' @param tX matrix with SNPs in rows and individuals in columns
+##' @param alleles data.frame with SNPs in rows (names as row names) and
+##' alleles in columns (first is "minor", second is "major")
+##' @param file prints the genotype data to this file if non NULL (for instance
+##' 'genotypes_bimbam.txt' or gzfile('genotypes_bimbam.txt.gz'))
+##' @return data.frame
+##' @author Timothée Flutre
+genotypes.dose2bimbam <- function(X=NULL, tX=NULL, alleles, file=NULL){
+    stopifnot(xor(is.null(X), is.null(tX)),
+              ! is.null(row.names(alleles)),
+              colnames(alleles) == c("minor","major"))
+    if(is.null(tX))
+        tX <- t(X)
+    tmp <- cbind(alleles, tX)
+    if(! is.null(file))
+        write.table(x=tmp, file=file, quote=FALSE, sep="\t", row.names=TRUE,
+                    col.names=FALSE)
+    return(tmp)
+}
