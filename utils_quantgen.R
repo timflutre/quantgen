@@ -683,19 +683,21 @@ read.biomercator <- function(file){
                                   }),
                                   sep=".")
     
+    ## add useful numbers
+    gmap$nbMarkers <- sum(sapply(gmap$map, function(chr){
+        sapply(chr, function(lg){length(lg)})
+    }))
+    gmap$nbLinkageGroups <- sum(sapply(gmap$map, function(chr){length(chr)}))
+    gmap$mapSize <- sum(sapply(gmap$map, function(chr){
+        sapply(chr, function(lg){lg[length(lg)]})
+    }))
+    
     txt <- paste0("map '", gmap$mapName, "':")
     txt <- paste0(txt, "\n\tnb of individuals: ", gmap$popSize)
-    txt <- paste0(txt, "\n\tnb of markers: ",
-                  sum(sapply(gmap$map, function(chr){
-                      sapply(chr, function(lg){length(lg)})
-                  })))
+    txt <- paste0(txt, "\n\tnb of markers: ", gmap$nbMarkers)
     txt <- paste0(txt, "\n\tnb of chromosomes: ", length(gmap$map))
-    txt <- paste0(txt, "\n\tnb of linkage groups: ",
-                  sum(sapply(gmap$map, function(chr){length(chr)})))
-    txt <- paste0(txt, "\n\ttotal genetic distance: ",
-                  sum(sapply(gmap$map, function(chr){
-                      sapply(chr, function(lg){lg[length(lg)]})
-                  })), " ", gmap$mapUnit)
+    txt <- paste0(txt, "\n\tnb of linkage groups: ", gmap$nbLinkageGroups)
+    txt <- paste0(txt, "\n\tmap size: ", gmap$mapSize, " ", gmap$mapUnit)
     mean.dist <- do.call(c, lapply(gmap$map, function(chr){
         sapply(chr, function(lg){
             rev(lg)[1:(length(lg)-1)] - lg[(length(lg)-1):1]
