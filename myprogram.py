@@ -19,14 +19,19 @@ import os
 import getopt
 import time
 import datetime
+from subprocess import Popen, PIPE
 import math
 import gzip
-from subprocess import Popen, PIPE
-# import resource # see http://stackoverflow.com/q/21885545/597069
 # import numpy as np
 # import scipy as sp
 
-
+if sys.version_info[0] == 2:
+    if sys.version_info[1] < 7:
+        msg = "ERROR: Python should be in version 2.7 or higher"
+        sys.stderr.write("%s\n\n" % msg)
+        sys.exit(1)
+        
+        
 class MyClass(object):
     
     def __init__(self):
@@ -120,8 +125,8 @@ class MyClass(object):
             
     def run(self):
         pass
-    
-    
+        
+        
 if __name__ == "__main__":
     i = MyClass()
     
@@ -146,8 +151,6 @@ if __name__ == "__main__":
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))
         msg += " (%s" % str(runLength)
-        # maxMem = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-        # msg += "; %i kB)" % maxMem
         if "linux" in sys.platform:
             p = Popen(["grep", "VmHWM", "/proc/%s/status" % os.getpid()],
                       shell=False, stdout=PIPE).communicate()

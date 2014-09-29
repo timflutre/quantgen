@@ -1,9 +1,31 @@
-## Gather useful functions in quantitative genetics/genomics
-## Author: Timothee Flutre
-## License: GPL-3
+## `utils_quantgen.R' contains utility functions for quantitative genetics/omics
+## Copyright (C) 2012-2014 Timothée Flutre
+## License: GPL-3+
+##
+## This program is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+##' Read a large file as fast as possible
+##'
+##' .. content for \details{} ..
+##' @title 
+##' @param file 
+##' @param header 
+##' @param sep 
+##' @param ... 
+##' @return data.frame
+##' @author Timothée Flutre
 read.table.fast <- function(file, header, sep="", ...){
-  ## Read a large file as fast as possible
   tmp <- read.table(file, header=header, nrows=5)
   colClasses <- sapply(tmp, class)
   if((tmp <- strsplit(p2f, "\\.")[[1]])[length(tmp)] == "gz"){
@@ -13,47 +35,54 @@ read.table.fast <- function(file, header, sep="", ...){
   read.table(file, header=header, nrows=nb.lines, colClasses=colClasses, sep=sep)
 }
 
+##' Return the Root Mean Squared Error
+##'
+##' .. content for \details{} ..
+##' @title Root Mean Squared Error
+##' @param error vector \hat{\theta}_i - \theta_i
+##' @return numeric
+##' @author Timothée Flutre
 rmse <- function(error){
-  ## Return the Root Mean Squared Error
-  ##
-  ## Args:
-  ##  error: vector \hat{\theta}_i - \theta_i
   sqrt(mean(error^2))
 }
 
+##' Return the Mean Absolute Error
+##'
+##' .. content for \details{} ..
+##' @title Mean Absolute Error
+##' @param error vector \hat{\theta}_i - \theta_i
+##' @return numeric
+##' @author Timothée Flutre
 mae <- function(error){
-  ## Return the Mean Absolute Error
-  ##
-  ## Args:
-  ##  error: vector \hat{\theta}_i - \theta_i
   mean(abs(error))
 }
 
+##' Return the Mean Signed Difference
+##'
+##' .. content for \details{} ..
+##' @title Mean Signed Difference
+##' @param error vector \hat{\theta}_i - \theta_i
+##' @return numeric
+##' @author Timothée Flutre
 msd <- function(error){
-  ## Return the Mean Signed Difference
-  ##
-  ## Args:
-  ##  error: vector \hat{\theta}_i - \theta_i
   mean(error)
 }
 
+##' Return the number of true positives, false positives, true negatives,
+##' false negatives, true positive proportion (sensitivity), false positive
+##' proportion, accuracy, true negative proportion (specificity), false
+##' discovery proportion, false negative proportion and positive predictive
+##' value (precision)
+##'
+##' Both input vectors should be sorted beforehand
+##' @title Binary classification
+##' @param known.nulls vector of booleans (TRUE if the null is true)
+##' @param called.nulls vector of booleans (TRUE if the null is accepted)
+##' @return vector with names
+##' @author Timothée Flutre
 binary.classif <- function(known.nulls, called.nulls){
-  ## Return the number of true positives, false positives, true negatives,
-  ## false negatives, true positive proportion (sensitivity), false positive
-  ## proportion, accuracy, true negative proportion (specificity), false
-  ## discovery proportion, false negative proportion and positive predictive
-  ## value (precision)
-  ##
-  ## Args:
-  ##  known.nulls: vector of booleans (TRUE if the null is true)
-  ##  called.nulls: vector of booleans (TRUE if the null is accepted)
-  ##
-  ## Notes:
-  ##  both vectors should be sorted beforehand
-  ##
-  ## Returns:
-  ##  vector with names
-  ##
+  ## http://en.wikipedia.org/wiki/Sensitivity_and_specificity
+  ## 
   ##                                  CALLED
   ##                     Accepted null     Rejected null
   ##
@@ -62,7 +91,6 @@ binary.classif <- function(known.nulls, called.nulls){
   ##       false null        FN (T)            TP (S)          n1
   ##
   ##                         a                 r               n
-  
   stopifnot(is.vector(known.nulls), is.vector(called.nulls),
             length(known.nulls) == length(called.nulls),
             sum(! is.logical(known.nulls)) == 0,
@@ -99,12 +127,20 @@ binary.classif <- function(known.nulls, called.nulls){
            tpp=tpp, fpp=fpp, acc=acc, tnp=tnp, fdp=fdp, fnp=fnp, ppv=ppv))
 }
 
+##' Random generation for the matrix normal distribution
+##' 
+##' https://stat.ethz.ch/pipermail/r-help/2012-February/302442.html
+##' http://en.wikipedia.org/wiki/Matrix_normal_distribution
+##' @title Matrix normal distribution
+##' @param nrow number of rows
+##' @param ncol number of columns
+##' @param n number of observations
+##' @param M matrix of mean
+##' @param U covariance matrix among rows
+##' @param V covariance matrix among columns
+##' @return matrix
+##' @author Timothée Flutre
 rmatvnorm <- function(nrow, ncol, n, M=NULL, U=NULL, V=NULL){
-  ## Random generation for the matrix-variate normal distribution
-  ## with mean equal to M, among-row covariance equal to U and
-  ## among-column covariance equal to V
-  ## https://stat.ethz.ch/pipermail/r-help/2012-February/302442.html
-  ## http://en.wikipedia.org/wiki/Matrix_normal_distribution
   if(is.null(M))
     M <- matrix(data=0, nrow=nrow, ncol=ncol)
   if(is.null(U))
@@ -116,17 +152,29 @@ rmatvnorm <- function(nrow, ncol, n, M=NULL, U=NULL, V=NULL){
   return(M + sqrt(U) %*% Z %*% sqrt(V))
 }
 
+##' Stable computation of log_{10}(\sum_i w_i 10^x_i)
+##' 
+##' Use equal weights if not specified
+##' @title Log of weighted sum
+##' @param x vector
+##' @param weights weights
+##' @return numeric
+##' @author Timothée Flutre
 log10.weighted.sum <- function(x, weights=NULL){
-  ## Stable computation of log_{10}(\sum_i w_i 10^x_i)
-  ## use equal weights if not specified
   if(is.null(weights))
     weights <- rep(1/length(x), length(x))
   max <- max(x)
   max + log10(sum(weights * 10^(x - max)))
 }
 
+##' Return the Moore-Penrose pseudo-inverse of a matrix
+##'
+##' .. content for \details{} ..
+##' @title Pseudo-inverse
+##' @param mat matrix
+##' @return matrix
+##' @author Timothée Flutre
 mp.inv <- function(mat){
-  ## Return the Moore-Penrose pseudo-inverse of a matrix
   mat.svd <- svd(mat)
   mat.svd$v %*% diag(1/mat.svd$d) %*% t(mat.svd$u)
 }
@@ -170,12 +218,15 @@ write.table.gct <- function(x=NULL, file=NULL, gzipped=TRUE){
                 col.names=FALSE, sep="\t")
 }
 
+##' Return the number of PCs that minimizes the average squared partial
+##' correlation
+##'
+##' Shriner (Heredity, 2011)
+##' @title 
+##' @param X genotype matrix (0,1,2) with SNPs in rows and individuals in columns
+##' @return 
+##' @author Shriner
 getNbPCsMinimAvgSqPartCor <- function(X){
-  ## Return the number of PCs that minimizes the average squared partial
-  ##  correlation (Shriner, Heredity, 2011)
-  ##
-  ## Args:
-  ##  dat: genotype matrix (0,1,2) with SNPs in rows and individuals in columns
   if(nrow(X) < ncol(X))
     warning("input matrix doesn't seem to have genes/snps in rows and samples in columns")
   mu <- apply(X, 1, mean, na.rm=TRUE)
@@ -306,13 +357,16 @@ rm.confound.genexp <- function(X=NULL, confounders=NULL){
   return(t(res$residuals))
 }
 
+##' Impute missing expression levels per subgroup and per gene using the mean
+##' (only genes expressed in all subgroups are considered)
+##'
+##' .. content for \details{} ..
+##' @title 
+##' @param list.mat list of matrices, one per subgroup with genes in rows
+##' and samples in columns
+##' @return 
+##' @author Timothée Flutre
 imp.miss.genexp <- function(list.mat=NULL){
-  ## Impute missing expression levels per subgroup and per gene using the mean
-  ## (only genes expressed in all subgroups are considered)
-  ##
-  ## Args:
-  ##  list.mat: list of matrices, one per subgroup with genes in rows
-  ##            and samples in columns
   stopifnot(! is.null(list.mat), is.list(list.mat))
   for(subgroup in names(list.mat)){
     X <- list.mat[[subgroup]]
@@ -345,17 +399,77 @@ imp.miss.genexp <- function(list.mat=NULL){
   })
 }
 
+##' Estimate kinship matrix K via the Astle-Balding model
+##'
+##' eqn 2.2 of Astle & Balding (Statistical Science, 2009)
+##' @title Astle-Balding matrix
+##' @param genos.dose matrix with SNPs in rows and individuals in columns,
+##' and genotypes coded as allele dose (i.e. in [0,2]),
+##' but no missing data is allowed
+##' @return Kinship matrix
+estimKinshipAstleBalding <- function(genos.dose){
+    allele.freqs <- apply(genos.dose, 1, function(x){
+        sum(x) / (2 * length(x))
+    })
+    tmp <- sweep(genos.dose, 1, 2 * allele.freqs, FUN="-")
+    tmp <- sweep(tmp, 1, 2 * sqrt(allele.freqs * (1 - allele.freqs)), FUN="/")
+    K <- (1/nrow(genos.dose)) * crossprod(tmp, tmp)
+    return(K)
+}
+
+##' Produce a quantile-quantile plot for p values and display its confidence
+##' interval
+##'
+##' A quantile is an order statistic, and the j-th order statistic from a
+##' Uniform(0,1) sample has a Beta(j,N-j+1) distribution (Casella & Berger,
+##' 2001, 2nd edition, p230).
+##' Let us assume we have N independent p values, $\{p_1,\ldots,p_N\}$, for
+##' instance: pvalues <- c(runif(99000,0,1), rbeta(1000,0.5,1)). Under the
+##' null, they are identically uniformly distributed:
+##' $\forall i \; p_i \overset{\text{i.i.d.}{\sim}} \mathcal{U}_{[0,1]}$.
+##' Therefore, the 95% confidence interval for the j-th quantile of the set
+##' of p values can be calculated with: qbeta(0.95, j, N-j+1).
+##' TODO: look at this https://github.com/stephenturner/qqman/blob/v0.0.0/qqman.r
+##' @title 
+##' @param pvalues vector of raw p values
+##' @param main main title (default="Q-Q plot")
+##' @return 
+##' @author Timothée Flutre (inspired from an anonymous comment to http://gettinggeneticsdone.blogspot.fr/2009/11/qq-plots-of-p-values-in-r-using-ggplot2.html)
+qqplot.pval <- function(pvalues, main="Q-Q plot", ...){
+    N <- length(pvalues)
+    c95 <- rep(0, N)
+    c05 <- rep(0, N)
+    for(j in 1:N){
+        c95[j] <- qbeta(0.95, j, N-j+1)
+        c05[j] <- qbeta(0.05, j, N-j+1)
+    }
+    
+    pvalues <- -log10(pvalues)
+    null <- -log10(1:N/N)
+    MAX <- max(c(pvalues, null))
+    
+    plot(null, -log(c95,10), ylim=c(0,MAX), xlim=c(0,MAX), type="l",
+         axes=FALSE, xlab="", ylab="")
+    par(new=T)
+    plot(null, -log(c05,10), ylim=c(0,MAX), xlim=c(0,MAX), type="l",
+         axes=FALSE, xlab="", ylab="")
+    abline(0, 1, col="red") # diagonal
+    par(new=T)
+    qqplot(x=null, y=pvalues, ylim=c(0,MAX), xlim=c(0,MAX), las=1,
+           main=main, xlab=expression(Expected~~-log[10](italic(p)~values)),
+           ylab=expression(Observed~~-log[10](italic(p)~values)), ...)
+}
+
+##' Plot a Hinton diagram
+##'
+##' Modified from http://www.cs.princeton.edu/~mimno/factor-analysis.R
+##' @title Hinton diagram
+##' @param m matrix
+##' @param main main title
+##' @param max.sqrt.m to play with the scaling
+##' @return 
+##' @author Timothée Flutre
 hinton <- function(m, main="", max.sqrt.m=NULL){
-  ## Plot a Hinton diagram
-  ##
-  ## Args:
-  ##  m: matrix
-  ##  main: main title (default="")
-  ##  max.sqrt.m: to play with the scaling
-  ##
-  ## Refs:
-  ##  modified from http://www.cs.princeton.edu/~mimno/factor-analysis.R
-  
   rows <- dim(m)[1]
   cols <- dim(m)[2]
   
@@ -420,16 +534,23 @@ hinton <- function(m, main="", max.sqrt.m=NULL){
     mtext(ylab, side=2, line=2)
 }
 
+##' Plot a scale, e.g. to add on the side of image()
+##'
+##' Takes some time to draw (there is one polygon per break...)
+##' http://menugget.blogspot.de/2011/08/adding-scale-to-image-plot.html
+##' @title 
+##' @param z 
+##' @param zlim 
+##' @param col 
+##' @param breaks 
+##' @param horiz 
+##' @param ylim 
+##' @param xlim 
+##' @param ... 
+##' @return 
+##' @author Timothée Flutre
 plot.scale <- function(z, zlim, col = heat.colors(12),
                         breaks, horiz=TRUE, ylim=NULL, xlim=NULL, ...){
-  ## Plot a scale, e.g. to add on the side of image()
-  ##
-  ## Note:
-  ##  takes some time to draw (there is one polygon per break...)
-  ##
-  ## Ref:
-  ##  http://menugget.blogspot.de/2011/08/adding-scale-to-image-plot.html
-  
   if(! missing(breaks))
     if(length(breaks) != (length(col)+1))
       stop("must have one more break than colour")
@@ -473,15 +594,18 @@ plot.scale <- function(z, zlim, col = heat.colors(12),
   }
 }
 
+##' Plot a matrix as a heatmap in its natural orientation,
+##' using its dimension names for rows and columns,
+##' and with a colored scale on the right side
+##'
+##' .. content for \details{} ..
+##' @title 
+##' @param z matrix
+##' @param main title to appear above the heatmap
+##' @param breaks vector (default=seq(min(z), max(z), length.out=100))
+##' @return 
+##' @author Timothée Flutre
 image.scale <- function(z, main=NULL, breaks=NULL){
-  ## Plot a matrix as a heatmap in its natural orientation,
-  ## using its dimension names for rows and columns,
-  ## and with a colored scale on the right side
-  ##
-  ## Args:
-  ##  z: matrix
-  ##  main: title to appear above the heatmap
-  ##  breaks: vector (default=seq(min(z), max(z), length.out=100))
   
   layout(matrix(c(1,2), nrow=1, ncol=2), widths=c(7,1))
   ## layout.show(2)
@@ -506,4 +630,106 @@ image.scale <- function(z, main=NULL, breaks=NULL){
              yaxt="n")
   axis(4, at=format(breaks[seq.int(from=1,to=100,length.out=5)], digits=2),
        las=2, lwd=0, lwd.ticks=1)
+}
+
+##' Returns the genetic map contained in a BioMercator TXT file.
+##'
+##' http://moulon.inra.fr/index.php/en/tranverse-team/atelier-de-bioinformatique/projects/projets/135
+##' @title 
+##' @param file the name of the file which the data are to be read from
+##' @return list
+##' @author Timothée Flutre
+read.biomercator <- function(file){
+    stopifnot(file.exists(file))
+    
+    gmap <- list()
+    
+    lines <- readLines(file)
+    
+    ## load meta-data
+    i <- 1
+    while(! grepl("chr=", lines[i])){
+        tokens <- strsplit(lines[i], "=")[[1]]
+        key <- gsub(" ", "", tokens[1])
+        if(key %in% names(gmap))
+            key <- paste(key, sum(key == names(gmap)) + 1, sep=".")
+        val <- tokens[2]
+        gmap[[key]] <- val
+        i <- i + 1
+    }
+    
+    ## load chromosomes (can have several linkage groups)
+    chrs <- split(lines[-(1:(i-1))], cumsum(grepl("^chr=", lines[-(1:(i-1))])))
+    gmap[["map"]] <- lapply(chrs, function(chr){
+        lgs <- split(chr[-1], cumsum(grepl("^lg=", chr[-1])))
+        data <- lapply(lgs, function(lg){
+            tmp <- as.data.frame(do.call(rbind, strsplit(lg[-1], "\t")))
+            tmp <- tmp[,-1] # discard column of identifiers
+            tmp <- tmp[! duplicated(tmp[,1]),] # discard redundant marker names
+            df <- as.numeric(as.character(tmp[,2]))
+            names(df) <- as.character(tmp[,1])
+            df[order(df)]
+        })
+        names(data) <- paste("lg",
+                             sapply(lgs, function(lg){
+                                 strsplit(lg[1], "=")[[1]][2]
+                             }),
+                             sep=".")
+        data
+    })
+    names(gmap[["map"]]) <- paste("chr",
+                                  sapply(chrs, function(chr){
+                                      strsplit(chr[1], "=")[[1]][2]
+                                  }),
+                                  sep=".")
+    
+    ## add useful numbers
+    gmap$nbMarkers <- sum(sapply(gmap$map, function(chr){
+        sapply(chr, function(lg){length(lg)})
+    }))
+    gmap$nbLinkageGroups <- sum(sapply(gmap$map, function(chr){length(chr)}))
+    gmap$mapSize <- sum(sapply(gmap$map, function(chr){
+        sapply(chr, function(lg){lg[length(lg)]})
+    }))
+    
+    txt <- paste0("map '", gmap$mapName, "':")
+    txt <- paste0(txt, "\n\tnb of individuals: ", gmap$popSize)
+    txt <- paste0(txt, "\n\tnb of markers: ", gmap$nbMarkers)
+    txt <- paste0(txt, "\n\tnb of chromosomes: ", length(gmap$map))
+    txt <- paste0(txt, "\n\tnb of linkage groups: ", gmap$nbLinkageGroups)
+    txt <- paste0(txt, "\n\tmap size: ", gmap$mapSize, " ", gmap$mapUnit)
+    mean.dist <- do.call(c, lapply(gmap$map, function(chr){
+        sapply(chr, function(lg){
+            rev(lg)[1:(length(lg)-1)] - lg[(length(lg)-1):1]
+        })}))
+    txt <- paste0(txt, "\n\tmean distances per linkage group:")
+    message(paste0(txt))
+    print(summary(mean.dist))
+    
+    return(gmap)
+}
+
+##' Convert genotype data to the "mean genotype" file format from BimBam
+##'
+##' The format is specified in BimBam's manual http://www.haplotype.org/download/bimbam-manual.pdf#page=6
+##' @title 
+##' @param X matrix with individuals in rows and SNPs in columns
+##' @param tX matrix with SNPs in rows and individuals in columns
+##' @param alleles data.frame with SNPs in rows (names as row names) and
+##' alleles in columns (first is "minor", second is "major")
+##' @param file prints the genotype data to this file if non NULL (for instance
+##' 'genotypes_bimbam.txt' or gzfile('genotypes_bimbam.txt.gz'))
+##' @return data.frame
+##' @author Timothée Flutre
+genotypes.dose2bimbam <- function(X=NULL, tX=NULL, alleles, file=NULL){
+    stopifnot(xor(is.null(X), is.null(tX)),
+              ! is.null(row.names(alleles)),
+              colnames(alleles) == c("minor","major"))
+    if(is.null(tX))
+        tX <- t(X)
+    tmp <- cbind(alleles, tX)
+    if(! is.null(file))
+        write.table(x=tmp, file=file, quote=FALSE, sep="\t", row.names=TRUE,
+                    col.names=FALSE)
+    return(tmp)
 }

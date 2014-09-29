@@ -72,7 +72,7 @@ function parseCmdLine () {
 	TEMP=`getopt hVv:i: "$@"`
     fi
     if [ $? -ne 0 ]; then
-	echo "ERROR: "$(which getopt)" failed"
+	echo "ERROR: "$(which getopt)" failed" 1>&2
 	getopt -T > /dev/null
 	if [ $? -ne 4 ]; then
 	    echo "did you use long options? they are not handled \
@@ -88,16 +88,16 @@ on your system, use -h for help"
             -v | --verbose) verbose=$2; shift 2;;
             -i | --input) inFile=$2; shift 2;;
             --) shift; break;;
-            *) echo "ERROR: options parsing failed, use -h for help"; exit 1;;
+            *) echo "ERROR: options parsing failed, use -h for help" 1>&2; exit 1;;
         esac
     done
     if [ -z "${inFile}" ]; then
-        echo -e "ERROR: missing compulsory option --input\n"
+        echo -e "ERROR: missing compulsory option --input\n" 1>&2
         help
         exit 1
     fi
     if [ ! -f "${inFile}" ]; then
-        echo -e "ERROR: can't find file ${inFile}\n"
+        echo -e "ERROR: can't find file ${inFile}\n" 1>&2
         help
         exit 1
     fi
