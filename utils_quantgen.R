@@ -594,35 +594,53 @@ plot.scale <- function(z, zlim, col = heat.colors(12),
   }
 }
 
-##' Plot a matrix as a heatmap in its natural orientation,
-##' using its dimension names for rows and columns,
-##' and with a colored scale on the right side
+##' Plot a matrix as a heatmap in its natural orientation, with a colored
+##' scale on the right side, and optionally using its dimension names for
+##' rows and columns
 ##'
-##' .. content for \details{} ..
+##' To print all row names, choose idx.rownames=1:nrow(z). To print a subset
+##' of 10 row names, choose idx.rownames=floor(seq(1, nrow(z), length.out=10)).
+##' Similarly for column names.
 ##' @title 
-##' @param z matrix
+##' @param z matrix to be plotted
 ##' @param main title to appear above the heatmap
+##' @param idx.rownames vector giving the indices of the row names of z to be added on the left side of the plot
+##' @param idx.colnames vector giving the indices of the column names of z to be added on top of the plot
 ##' @param breaks vector (default=seq(min(z), max(z), length.out=100))
-##' @return 
+##' @return nothing
 ##' @author Timothée Flutre
-image.scale <- function(z, main=NULL, breaks=NULL){
-  
-  layout(matrix(c(1,2), nrow=1, ncol=2), widths=c(7,1))
-  ## layout.show(2)
-  
-  col.pal <- colorRampPalette(c("black", "red", "yellow"), space="rgb")
+image.scale <- function(z, main=NULL, idx.rownames=NULL, idx.colnames=NULL,
+                        breaks=NULL){
+  if(! is.null(idx.rownames) & is.null(rownames(z)))
+    stop("non-null idx.rownames requires z to have row names", call.=FALSE)
+  if(! is.null(idx.colnames) & is.null(colnames(z)))
+    stop("non-null idx.colnames requires z to have column names", call.=FALSE)
   if(is.null(breaks))
     breaks <- seq(min(z), max(z), length.out=100)
   
+  layout(matrix(c(1,2), nrow=1, ncol=2), widths=c(7,1))
+  ## layout.show(2) # for debugging purposes
+  
+  col.pal <- colorRampPalette(c("black", "red", "yellow"), space="rgb")
+  
   ## plot the heatmap
-  par(mar=c(1, 5, 6, 1))
+  custom.mar <- c(1, 5, 6, 1)
+  if(is.null(idx.rownames))
+      custom.mar[2] <- 1
+  if(is.null(idx.colnames))
+      custom.mar[3] <- 3
+  par(mar=custom.mar)
   image(t(z)[,nrow(z):1], axes=FALSE, col=col.pal(length(breaks)-1))
   if(! is.null(main))
-    mtext(text=main, side=3, line=4, font=2, cex=1.3)
-  text(x=seq(0,1,length.out=nrow(z)), y=par("usr")[4]+0.02, srt=45, adj=0,
-       labels=rownames(z), xpd=TRUE)
-  mtext(text=rev(colnames(z)), side=2, line=1, at=seq(0,1,length.out=nrow(z)),
-        las=2) # left side
+    mtext(text=main, side=3, line=ifelse(is.null(idx.colnames), 1, 4),
+          font=2, cex=1.3)
+  if(! is.null(idx.colnames))
+      text(x=seq(0,1,length.out=length(idx.colnames)), y=par("usr")[4]+0.02,
+           srt=45, adj=0, labels=colnames(z)[idx.colnames], xpd=TRUE)
+  if(! is.null(idx.rownames))
+      mtext(text=rev(rownames(z)[idx.rownames]), side=2, line=1,
+            at=seq(0,1,length.out=length(idx.rownames)),
+            las=2)
   
   ## plot the scale
   par(mar=c(1,0,6,3))
