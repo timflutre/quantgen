@@ -399,6 +399,28 @@ imp.miss.genexp <- function(list.mat=NULL){
   })
 }
 
+##' Simulate a covariance matrix by drawing random numbers from a uniform distribution
+##'
+##' .. content for \details{} ..
+##' @title 
+##' @param d dimension of the matrix (number of rows and columns)
+##' @param u.min minimum for runif()
+##' @param u.max maximum for runif()
+##' @param names names of rows and columns
+##' @return matrix
+##' @author Timothée Flutre
+simul.covar.mat <- function(d, u.min=0, u.max=0.5, names=NULL){
+    library(Matrix)
+    if(! is.null(names))
+        stopifnot(length(names) == d)
+    mat <- round(nearPD(matrix(runif(n=d*d, min=0, max=0.5),
+                               nrow=d))$mat, 2)
+    diag(mat) <- diag(mat) / d + 1
+    if(! is.null(names))
+        rownames(mat) <- colnames(mat) <- names
+    return(mat)
+}
+
 ##' Estimate kinship matrix K via the Astle-Balding model
 ##'
 ##' eqn 2.2 of Astle & Balding (Statistical Science, 2009)
