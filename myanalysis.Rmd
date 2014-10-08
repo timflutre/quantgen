@@ -7,6 +7,7 @@ output:
     toc: true
   pdf_document:
     toc: true
+    toc_depth: 3
 ---
 
 ```{r setup, include=FALSE}
@@ -20,18 +21,27 @@ seed <- 1859; set.seed(seed)
 
 ## Preamble
 
-For this document to be successfully exported to HTML and PDF, read [this page](http://rmarkdown.rstudio.com/).
+For an Rmd file to be successfully exported to HTML and PDF, read [this page](http://rmarkdown.rstudio.com/).
 
-Practically, to export it outside of RStudio, open R and type:
+Practically, open R and type:
 ```{r, eval=FALSE}
 library(rmarkdown)
 render("myanalysis.Rmd", "all")
 ```
 
+Any Rmd file is best edited with RStudio, or Emacs with ESS, markdown and polymode.
+
+
 Example of an equation written in LaTeX: $y_i \sim \mathcal{N}(\mu, \sigma^2)$
 
+Example of a list:
+
+* $\mu$
+
+* $\sigma$
+
 Example of a plot from R:
-```{r hist}
+```{r plot_hist}
 hist(rnorm(10^4), breaks="FD")
 ```
 
@@ -62,7 +72,7 @@ The goal of this project is to ...
 ...
 
 
-## Load the real data (and format them)
+## Load and format the real data
 
 ...
 
