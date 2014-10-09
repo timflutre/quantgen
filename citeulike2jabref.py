@@ -31,6 +31,16 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
+def user_input(msg):
+    if sys.version_info[0] == 2:
+        return raw_input(msg)
+    elif sys.version_info[0] == 3:
+        return input(msg)
+    else:
+        msg = "ERROR: Python's major version should be 2 or 3"
+        sys.stderr.write("%s\n\n" % msg)
+        sys.exit(1)
+        
         
 class Citeulike2Jabref(object):
     
@@ -297,8 +307,11 @@ class Citeulike2Jabref(object):
                     sNewFiles.add(p)
         for f in lOldFiles:
             if f not in sNewFiles:
-                print(f)
-                os.remove(f)
+                wantRmvFile = user_input("Do you want to remove the file %s? [y/n] " % f)
+                if wantRmvFile.lower() == "y" or wantRmvFile.lower() == "yes":
+                    os.remove(f)
+                    print("=> done!")
+                    sys.stdout.flush()
         for f in sNewFiles:
             if f not in lOldFiles:
                 print(f)
