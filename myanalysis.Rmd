@@ -1,10 +1,11 @@
 ---
 title: "Statistical analysis with R for project \"Test\""
 author: "Timothée Flutre"
-date: "01/01/2014"
+date: '`r as.character(format(Sys.Date(), format="%d/%m/%Y"))`'
 output:
   html_document:
     toc: true
+    toc_depth: 3
   pdf_document:
     toc: true
     toc_depth: 3
@@ -12,14 +13,14 @@ output:
 
 ```{r setup, include=FALSE}
 library(knitr)
-opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE)
+opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE)#, fig.width=12, fig.height=8, fig.path=figures/")
 options(digits=3)
 seed <- 1859; set.seed(seed)
 ## suppressPackageStartupMessages(library(MASS))
 ```
 
 
-## Preamble
+# Preamble
 
 For an Rmd file to be successfully exported to HTML and PDF, read [this page](http://rmarkdown.rstudio.com/).
 
@@ -29,10 +30,10 @@ library(rmarkdown)
 render("myanalysis.Rmd", "all")
 ```
 
-Any Rmd file is best edited with RStudio, or Emacs with ESS, markdown and polymode.
+Any Rmd file is best edited with [RStudio](http://www.rstudio.com/), or [Emacs](http://www.gnu.org/software/emacs/) with [ESS](http://ess.r-project.org/), [markdown](http://jblevins.org/projects/markdown-mode/) and [polymode](https://github.com/vitoshka/polymode).
 
 
-Example of an equation written in LaTeX: $y_i \sim \mathcal{N}(\mu, \sigma^2)$
+Example of an equation written in [LaTeX](http://www.latex-project.org/): $y_i \sim \mathcal{N}(\mu, \sigma^2)$
 
 Example of a list:
 
@@ -51,47 +52,47 @@ knitr::kable(mtcars[1:5,])
 ```
 
 
-## Overview
+# Overview
 
 This document contains the statistical analysis for the project "Test".
 The goal of this project is to ...
 
 
-## Define the question
+# Define the question
 
 ...
 
 
-## Design the experiment
+# Design the experiment
 
 ...
 
 
-## Simulate some data
+# Simulate some data
 
 ...
 
 
-## Load and format the real data
+# Load and format the real data
 
 ...
 
 
-## Explore the data
+# Explore the data
 
 ...
 
 
-## Write the model
+# Write the model
 
 ...
 
 
-## Perform inference
+# Perform inference
 
 ...
 
 
-## Check assumptions and improve the model
+# Check assumptions and improve the model
 
 ...
