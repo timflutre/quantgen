@@ -12,7 +12,7 @@
 # http://news.open-bio.org/news/2009/12/interleaving-paired-fastq-files-with-biopython/ by Peter Cock
 
 # TODO:
-# convert tag.seq into str upon loading
+# add method using regexp (http://stackoverflow.com/a/12390748/597069) with n >= 1 nucleotide(s) between the start and the tag
 # try https://github.com/faircloth-lab/splitaake/blob/master/bin/splitaake_reads_many_gz.py
 # try https://humgenprojects.lumc.nl/svn/fastools/trunk/fastools/demultiplex.py
 # try https://github.com/pelinakan/UBD
@@ -32,8 +32,7 @@ import datetime
 from subprocess import Popen, PIPE
 import math
 import gzip
-import numpy as np
-# import scipy as sp
+import re
 
 import itertools # for izip
 from Bio import SeqIO
@@ -362,13 +361,16 @@ class Demultiplex(object):
         """
         assigned = False
         ind = None
+        idx = 0
         for tagId in self.tags:
-            if read1_seq.startswith(self.tags[tagId]) \
-               and read2_seq.startswith(self.tags[tagId]):
+            tag = self.tags[tagId]
+            if read1_seq.startswith(tag) \
+               and read2_seq.startswith(tag):
                 assigned = True
                 ind = tagId
+                idx = len(tag)
                 break
-        return assigned, tagId
+        return assigned, tagId, idx, idx
         
         
     def identifyIndividual_2(self, read1_seq, read2_seq):
@@ -377,13 +379,23 @@ class Demultiplex(object):
         """
         assigned = False
         ind = None
+        idx1 = 0
+        idx2 = 0
         for tagId in self.tags:
-            if read1_seq.startswith(self.tags[tagId]) \
-               or read2_seq.startswith(self.tags[tagId]):
+            tag = self.tags[tagId]
+            if read1_seq.startswith(tag):
                 assigned = True
                 ind = tagId
+                idx1 = len(tag)
+                if read2_seq.startswith(tag):
+                    idx2 = len(tag)
                 break
-        return assigned, ind
+            if read2_seq.startswith(tag):
+                assigned = True
+                ind = tagId
+                idx2 = len(tag)
+                break
+        return assigned, ind, idx1, idx2
         
         
     def identifyIndividual_3(self, read1_seq, read2_seq):
@@ -392,22 +404,30 @@ class Demultiplex(object):
         """
         assigned = False
         ind = None
+        idx1 = 0
+        idx2 = 0
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
         for tagId in self.tags:
-            if read1_seq.startswith(self.tags[tagId]) \
-               and read2_seq.startswith(self.tags[tagId]):
+            tag = self.tags[tagId]
+            if read1_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                nbAssignedPairsTwoTags += 1
+                idx1 = len(tag)
+                if read2_seq.startswith(tag):
+                    idx2 = len(tag)
+                    nbAssignedPairsTwoTags += 1
+                else:
+                    nbAssignedPairsOneTag += 1
                 break
-            elif read1_seq.startswith(self.tags[tagId]) \
-                 != read2_seq.startswith(self.tags[tagId]):
+            if read2_seq.startswith(tag):
                 assigned = True
                 ind = tagId
+                idx2 = len(tag)
                 nbAssignedPairsOneTag += 1
                 break
-        return assigned, ind, nbAssignedPairsTwoTags, nbAssignedPairsOneTag
+        return assigned, ind, idx1, idx2, nbAssignedPairsTwoTags, \
+            nbAssignedPairsOneTag
         
         
     def identifyIndividual_4(self, read1, read2):
@@ -480,7 +500,6 @@ class Demultiplex(object):
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
         meanQuals = []
-        readsAssigned = [] # 1 if assigned, 0 otherwise
         
         for (read1_id, read1_seq, read1_q), (read2_id, read2_seq, read2_q) \
             in itertools.izip(reads1, reads2):
@@ -493,38 +512,38 @@ class Demultiplex(object):
             
             assigned = False
             ind = None
-            if "1" in self.method:
-                assigned, ind = self.identifyIndividual_1(read1_seq, read2_seq)
-            elif "2" in self.method:
-                assigned, ind = self.identifyIndividual_2(read1_seq, read2_seq)
-            elif "3" in self.method:
-                assigned, ind, t2, t1 = self.identifyIndividual_3(read1_seq,
-                                                                  read2_seq)
-            elif "4" in self.method:
+            if self.method == "1":
+                assigned, ind, idx1, idx2 = self.identifyIndividual_1(
+                    read1_seq, read2_seq)
+            elif self.method == "2":
+                assigned, ind, idx1, idx2 = self.identifyIndividual_2(
+                    read1_seq, read2_seq)
+            elif self.method == "3":
+                assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_3(
+                    read1_seq, read2_seq)
+            elif self.method == "4":
                 assigned, ind = self.identifyIndividual_4(read1, read2)
                 
             if assigned:
                 nbAssignedPairs += 1
-                if "3" in self.method:
+                if self.method == "3":
                     nbAssignedPairsTwoTags += t2
                     nbAssignedPairsOneTag += t1
-                readsAssigned.append(1)
-                readsAssigned.append(1)
                 if ind not in dOutFqHandles:
                     dOutFqHandles[ind] = [
                         gzip.open("%s_%s_R1.fastq.gz" %
                                   (self.outFqPrefix, ind), "w"),
                         gzip.open("%s_%s_R2.fastq.gz" %
                                   (self.outFqPrefix, ind), "w")]
-                dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" % (read1_id,
-                                                                  read1_seq,
-                                                                  read1_q))
-                dOutFqHandles[ind][1].write("@%s\n%s\n+\n%s\n" % (read2_id,
-                                                                  read2_seq,
-                                                                  read2_q))
+                dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
+                                            (read1_id,
+                                             read1_seq[idx1:],
+                                             read1_q[idx1:]))
+                dOutFqHandles[ind][1].write("@%s\n%s\n+\n%s\n" %
+                                            (read2_id,
+                                             read2_seq[idx2:],
+                                             read2_q[idx2:]))
             else: # not assigned
-                readsAssigned.append(0)
-                readsAssigned.append(0)
                 if "unassigned" not in dOutFqHandles:
                     dOutFqHandles["unassigned"] = [
                         gzip.open("%s_unassigned_R1.fastq.gz" %
@@ -542,10 +561,10 @@ class Demultiplex(object):
                 
         inFqHandle1.close()
         inFqHandle2.close()
-        [handle.close() for (ind,handles) in dOutFqHandles.items() for handle in handles]
+        [handle.close() for (ind,handles) in dOutFqHandles.items() \
+         for handle in handles]
         
         if self.verbose > 0:
-            readsAssigned = np.array(readsAssigned, dtype=bool)
             msg = "total nb of read pairs: %i" % nbPairs
             msg += "\nnb of assigned read pairs: %i" % nbAssignedPairs
             if "3" in self.method:

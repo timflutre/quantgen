@@ -19,6 +19,7 @@ import datetime
 from subprocess import Popen, PIPE, check_output
 import math
 import gzip
+import tempfile
 import shutil
 import itertools
 # import numpy as np
@@ -125,6 +126,15 @@ class TestDemultiplex(object):
             sys.exit(1)
             
             
+    def beforeTest(self):
+        cwd = os.getcwd()
+        testDir = tempfile.mkdtemp(dir=cwd, prefix="tmp_test_")
+        os.chdir(testDir)
+        if self.verbose > 0:
+            print("temp dir: %s" % os.getcwd()); sys.stdout.flush()
+        return cwd, testDir
+        
+        
     def launchProg(self, ifq1, ifq2, it, met):
         args = [self.pathToProg,
                 "--idir", "./",
@@ -140,6 +150,12 @@ class TestDemultiplex(object):
         return msgs
         
         
+    def afterTest(self, cwd, testDir):
+        os.chdir(cwd)
+        if self.clean:
+            shutil.rmtree(testDir)
+            
+            
     def test_met1_prepare(self):
         ifq1 = "reads_R1.fastq.gz"
         ifq2 = "reads_R2.fastq.gz"
@@ -147,13 +163,13 @@ class TestDemultiplex(object):
         ifq2Handle = gzip.open(ifq2, "w")
         
         # both reads have perfect tag of ind 2
-        txt = "@INST1:1:FLOW1:2:2104:15343:197393 1:N:0\n"
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
         txt += "TTT"
         txt += "TCAACCTGGAGTTCCAC\n"
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~\n"
         ifq1Handle.write(txt)
-        txt = "@INST1:1:FLOW1:2:2104:15343:197393 2:N:0\n"
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 2:N:0\n"
         txt += "TTT"
         txt += "GTAGCTGAGATCGGAAG\n"
         txt += "+\n"
@@ -161,13 +177,13 @@ class TestDemultiplex(object):
         ifq2Handle.write(txt)
         
         # only read 1 has perfect tag of ind 1
-        txt = "@INST1:1:FLOW1:2:2104:15343:197393 1:N:0\n"
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
         txt += "AAA"
         txt += "TCAACCTGGAGTTCCAC\n"
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~\n"
         ifq1Handle.write(txt)
-        txt = "@INST1:1:FLOW1:2:2104:15343:197393 2:N:0\n"
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 2:N:0\n"
         txt += "ATA"
         txt += "GTAGCTGAGATCGGAAG\n"
         txt += "+\n"
@@ -196,6 +212,7 @@ class TestDemultiplex(object):
         if not os.path.exists("test_ind2_R1.fastq.gz") or \
            not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met1: fail (1)")
+            return
         else:
             with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
                  gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
@@ -204,39 +221,75 @@ class TestDemultiplex(object):
                 reads2 = SeqIO.parse(inFqHandle2, "fastq",
                                      alphabet=IUPAC.ambiguous_dna)
                 for (read1, read2) in itertools.izip(reads1, reads2):
-                    if read1.id != "INST1:1:FLOW1:2:2104:15343:197393" and \
-                       read2.id != "INST1:1:FLOW1:2:2104:15343:197393":
+                    if read1.id != "INST1:1:FLOW1:2:2104:15343:197391" and \
+                       read2.id != "INST1:1:FLOW1:2:2104:15343:197391":
                         print("test_met1: fail (2)")
+                        return
             print("test_met1: pass")
             
             
     def test_met1(self):
         if self.verbose > 0:
-            print("launch test 1 ...")
+            print("launch test met1 ...")
             sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
         msgs = self.launchProg(ifq1, ifq2, it, "1")
         self.test_met1_comp(msgs)
+        self.afterTest(cwd, testDir)
+        
+        
+    def test_met2_comp(self, msgs):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
+            print("test_met2: fail (1)")
+            return
+        else:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                if len(l1) != 1 or len(l2) != 1:
+                    print("test_met2: fail (2)")
+                    return
+                if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" or \
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
+                    print("test_met2: fail (3)")
+                    return
+            with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                if len(l1) != 1 or len(l2) != 1:
+                    print("test_met2: fail (4)")
+                    return
+                if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197392" or \
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197392":
+                    print("test_met2: fail (5)")
+                    return
+            print("test_met2: pass")
+            
+            
+    def test_met2(self):
+        if self.verbose > 0:
+            print("launch test met2 ...")
+            sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
+        ifq1, ifq2, it = self.test_met1_prepare()
+        msgs = self.launchProg(ifq1, ifq2, it, "2")
+        self.test_met2_comp(msgs)
+        self.afterTest(cwd, testDir)
         
         
     def run(self):
-        cwd = os.getcwd()
-        uniqId = os.getpid()
-        testDir = "tmp_test_%s" % uniqId
-        if os.path.exists(testDir):
-            shutil.rmtree(testDir)
-        os.mkdir(testDir)
-        os.chdir(testDir)
-        if self.verbose > 0:
-            print("temp dir: %s" % os.getcwd()); sys.stdout.flush()
-            
         self.test_met1()
+        self.test_met2()
         
-        os.chdir(cwd)
-        if self.clean:
-            shutil.rmtree(testDir)
-            
-            
+        
 if __name__ == "__main__":
     i = TestDemultiplex()
     
