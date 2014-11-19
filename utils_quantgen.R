@@ -775,35 +775,50 @@ genotypes.dose2bimbam <- function(X=NULL, tX=NULL, alleles, file=NULL){
     return(tmp)
 }
 
-##' Transform a data frame of pairwise relatedness into a symmetric matrix
+##' Return the additive relationship matrix, A, from the output of the coancestry() function in the "related" package.
 ##'
-##' You first need to install the "related" R package (http://frasierlab.wordpress.com/software/) and execute the coancestry() function.
-##' @param df "relatedness" data frame returned by coancestry()
-##' @param estim name of the estimator (e.g. "dyadml")
+##' The "related" package can be found here: http://frasierlab.wordpress.com/software/. The A matrix is also known as the numerator relationship matrix. It is calculated as explained in chapter 2 from Mrode (2005).
+##' @param x list returned by coancestry()
+##' @param estim.coancestry name of the coancestry estimator (e.g. "dyadml")
+##' @param estim.inbreeding name of the inbreeding estimator (e.g. "LR")
 ##' @param debug boolean (TRUE to check the output matrix is indeed symmetric)
 ##' @return matrix
 ##' @author Timothée Flutre
-relatedness.df2mat <- function(df, estim, debug=FALSE){
-  stopifnot(estim %in% colnames(df))
+coancestry2addrel <- function(x, estim.coancestry, estim.inbreeding=NULL,
+                              debug=FALSE){
+  stopifnot(estim.coancestry %in% colnames(x$relatedness))
+  if(! is.null(estim.inbreeding)){
+    stopifnot("inbreeding" %in% names(x))
+    stopifnot(estim.inbreeding %in% colnames(x$inbreeding))
+  }
 
-  ind.ids <- sort(unique(c(df$ind1.id, df$ind2.id)))
+  ind.ids <- sort(unique(c(x$relatedness$ind1.id,
+                           x$relatedness$ind2.id)))
   nb.inds <- length(ind.ids)
-  mat <- matrix(NA, nrow=nb.inds, ncol=nb.inds,
+  A <- matrix(NA, nrow=nb.inds, ncol=nb.inds,
                 dimnames=list(ind.ids, ind.ids))
-  diag(mat) <- 1
-  for(i in 1:nrow(df))
-    mat[df$ind1.id[i], df$ind2.id[i]] <- df[[estim]][i]
-  idx.na.upper <- which(upper.tri(mat) & is.na(mat))
-  idx.equiv.lower <- which(lower.tri(t(mat)) & is.na(t(mat)))
-  mat[idx.na.upper] <- mat[idx.equiv.lower]
-  mat[lower.tri(mat)] <- t(mat)[lower.tri(mat)]
+
+  diag(A) <- 1
+  if(! is.null(estim.inbreeding)){
+    for(i in 1:nrow(x$inbreeding))
+      A[x$inbreeding$ind.id[i], x$inbreeding$ind.id[i]] <-
+        1 + x$inbreeding[[estim.inbreeding]][i]
+  }
+
+  for(i in 1:nrow(x$relatedness))
+    A[x$relatedness$ind1.id[i], x$relatedness$ind2.id[i]] <-
+      x$relatedness[[estim.coancestry]][i]
+  idx.na.upper <- which(upper.tri(A) & is.na(A))
+  idx.equiv.lower <- which(lower.tri(t(A)) & is.na(t(A)))
+  A[idx.na.upper] <- A[idx.equiv.lower]
+  A[lower.tri(A)] <- t(A)[lower.tri(A)]
 
   if(debug){ # check that the matrix is symmetric
-    for(i in 1:(nrow(mat)-1))
-      for(j in (i+1):ncol(mat))
-        if(mat[i,j] != mat[j,i])
+    for(i in 1:(nrow(A)-1))
+      for(j in (i+1):ncol(A))
+        if(A[i,j] != A[j,i])
           stop(paste0("matrix not symmetric at (", i, ",", j, ")"), call.=FALSE)
   }
 
-  return(mat)
+  return(A)
 }
