@@ -2,6 +2,7 @@
 ## Copyright (C) 2012-2014 Institut National de la Recherche Agronomique (INRA)
 ## Author: Timothée Flutre
 ## License: GPL-3+
+## Original file available at https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -18,12 +19,11 @@
 
 ##' Read a large file as fast as possible
 ##'
-##' .. content for \details{} ..
-##' @title
+##'
 ##' @param file
 ##' @param header
 ##' @param sep
-##' @param ...
+##' @param ... optional arguments
 ##' @return data.frame
 ##' @author Timothée Flutre
 read.table.fast <- function(file, header, sep="", ...){
@@ -38,7 +38,7 @@ read.table.fast <- function(file, header, sep="", ...){
 
 ##' Return the Root Mean Squared Error
 ##'
-##' .. content for \details{} ..
+##'
 ##' @title Root Mean Squared Error
 ##' @param error vector \hat{\theta}_i - \theta_i
 ##' @return numeric
@@ -49,7 +49,7 @@ rmse <- function(error){
 
 ##' Return the Mean Absolute Error
 ##'
-##' .. content for \details{} ..
+##'
 ##' @title Mean Absolute Error
 ##' @param error vector \hat{\theta}_i - \theta_i
 ##' @return numeric
@@ -60,7 +60,7 @@ mae <- function(error){
 
 ##' Return the Mean Signed Difference
 ##'
-##' .. content for \details{} ..
+##'
 ##' @title Mean Signed Difference
 ##' @param error vector \hat{\theta}_i - \theta_i
 ##' @return numeric
@@ -170,7 +170,7 @@ log10.weighted.sum <- function(x, weights=NULL){
 
 ##' Return the Moore-Penrose pseudo-inverse of a matrix
 ##'
-##' .. content for \details{} ..
+##'
 ##' @title Pseudo-inverse
 ##' @param mat matrix
 ##' @return matrix
@@ -223,9 +223,8 @@ write.table.gct <- function(x=NULL, file=NULL, gzipped=TRUE){
 ##' correlation
 ##'
 ##' Shriner (Heredity, 2011)
-##' @title
 ##' @param X genotype matrix (0,1,2) with SNPs in rows and individuals in columns
-##' @return
+##' @return integer
 ##' @author Shriner
 getNbPCsMinimAvgSqPartCor <- function(X){
   if(nrow(X) < ncol(X))
@@ -361,8 +360,7 @@ rm.confound.genexp <- function(X=NULL, confounders=NULL){
 ##' Impute missing expression levels per subgroup and per gene using the mean
 ##' (only genes expressed in all subgroups are considered)
 ##'
-##' .. content for \details{} ..
-##' @title
+##'
 ##' @param list.mat list of matrices, one per subgroup with genes in rows
 ##' and samples in columns
 ##' @return
@@ -402,8 +400,7 @@ imp.miss.genexp <- function(list.mat=NULL){
 
 ##' Simulate a covariance matrix by drawing random numbers from a uniform distribution
 ##'
-##' .. content for \details{} ..
-##' @title
+##'
 ##' @param d dimension of the matrix (number of rows and columns)
 ##' @param u.min minimum for runif()
 ##' @param u.max maximum for runif()
@@ -411,7 +408,7 @@ imp.miss.genexp <- function(list.mat=NULL){
 ##' @return matrix
 ##' @author Timothée Flutre
 simul.covar.mat <- function(d, u.min=0, u.max=0.5, names=NULL){
-    library(Matrix)
+	suppressPackageStartupMessages(library(Matrix))
     if(! is.null(names))
         stopifnot(length(names) == d)
     mat <- round(nearPD(matrix(runif(n=d*d, min=0, max=0.5),
@@ -425,7 +422,7 @@ simul.covar.mat <- function(d, u.min=0, u.max=0.5, names=NULL){
 ##' Estimate kinship matrix K via the Astle-Balding model
 ##'
 ##' eqn 2.2 of Astle & Balding (Statistical Science, 2009)
-##' @title Astle-Balding matrix
+##' @title Astle-Balding estimation of kinship
 ##' @param genos.dose matrix with SNPs in rows and individuals in columns,
 ##' and genotypes coded as allele dose (i.e. in [0,2]),
 ##' but no missing data is allowed
@@ -453,10 +450,8 @@ estimKinshipAstleBalding <- function(genos.dose){
 ##' Therefore, the 95% confidence interval for the j-th quantile of the set
 ##' of p values can be calculated with: qbeta(0.95, j, N-j+1).
 ##' TODO: look at this https://github.com/stephenturner/qqman/blob/v0.0.0/qqman.r
-##' @title
 ##' @param pvalues vector of raw p values
 ##' @param main main title (default="Q-Q plot")
-##' @return
 ##' @author Timothée Flutre (inspired from an anonymous comment to http://gettinggeneticsdone.blogspot.fr/2009/11/qq-plots-of-p-values-in-r-using-ggplot2.html)
 qqplot.pval <- function(pvalues, main="Q-Q plot", ...){
     N <- length(pvalues)
@@ -490,7 +485,6 @@ qqplot.pval <- function(pvalues, main="Q-Q plot", ...){
 ##' @param m matrix
 ##' @param main main title
 ##' @param max.sqrt.m to play with the scaling
-##' @return
 ##' @author Timothée Flutre
 hinton <- function(m, main="", max.sqrt.m=NULL){
   rows <- dim(m)[1]
@@ -561,7 +555,6 @@ hinton <- function(m, main="", max.sqrt.m=NULL){
 ##'
 ##' Takes some time to draw (there is one polygon per break...)
 ##' http://menugget.blogspot.de/2011/08/adding-scale-to-image-plot.html
-##' @title
 ##' @param z
 ##' @param zlim
 ##' @param col
@@ -570,7 +563,6 @@ hinton <- function(m, main="", max.sqrt.m=NULL){
 ##' @param ylim
 ##' @param xlim
 ##' @param ...
-##' @return
 ##' @author Timothée Flutre
 plot.scale <- function(z, zlim, col = heat.colors(12),
                         breaks, horiz=TRUE, ylim=NULL, xlim=NULL, ...){
@@ -624,13 +616,11 @@ plot.scale <- function(z, zlim, col = heat.colors(12),
 ##' To print all row names, choose idx.rownames=1:nrow(z). To print a subset
 ##' of 10 row names, choose idx.rownames=floor(seq(1, nrow(z), length.out=10)).
 ##' Similarly for column names.
-##' @title
 ##' @param z matrix to be plotted
 ##' @param main title to appear above the heatmap
 ##' @param idx.rownames vector giving the indices of the row names of z to be added on the left side of the plot
 ##' @param idx.colnames vector giving the indices of the column names of z to be added on top of the plot
 ##' @param breaks vector (default=seq(min(z), max(z), length.out=100))
-##' @return nothing
 ##' @author Timothée Flutre
 image.scale <- function(z, main=NULL, idx.rownames=NULL, idx.colnames=NULL,
                         breaks=NULL){
@@ -676,7 +666,6 @@ image.scale <- function(z, main=NULL, idx.rownames=NULL, idx.colnames=NULL,
 ##' Returns the genetic map contained in a BioMercator TXT file.
 ##'
 ##' http://moulon.inra.fr/index.php/en/tranverse-team/atelier-de-bioinformatique/projects/projets/135
-##' @title
 ##' @param file the name of the file which the data are to be read from
 ##' @return list
 ##' @author Timothée Flutre
@@ -753,7 +742,6 @@ read.biomercator <- function(file){
 ##' Convert genotype data to the "mean genotype" file format from BimBam
 ##'
 ##' The format is specified in BimBam's manual http://www.haplotype.org/download/bimbam-manual.pdf#page=6
-##' @title
 ##' @param X matrix with individuals in rows and SNPs in columns
 ##' @param tX matrix with SNPs in rows and individuals in columns
 ##' @param alleles data.frame with SNPs in rows (names as row names) and
@@ -821,4 +809,88 @@ coancestry2addrel <- function(x, estim.coancestry, estim.inbreeding=NULL,
   }
 
   return(A)
+}
+
+##' Calculate the GC content of a set of sequences.
+##'
+##' Requires the Biostrings package.
+##' @param x vector of sequences (e.g. "AGGT"), possibly with names
+##' @return vector
+##' @author Timothée Flutre
+gc.content <- function(x){
+  stopifnot(is.character(x))
+	suppressPackageStartupMessages(library(Biostrings))
+
+  sapply(x, function(xi){
+    sum(alphabetFrequency(DNAString(xi),
+                          baseOnly=TRUE, as.prob=TRUE)[c("C","G")])
+  })
+}
+
+##' Align each sequence against each other (and itself).
+##'
+##' Requires the Biostrings package.
+##' @title All pairwise alignments
+##' @param x vector of sequences (e.g. "AGGT"), possibly with names
+##' @param type type of alignment (default="global", i.e. Needleman-Wunsch)
+##' @return list of instances of class PairwiseAlignments
+##' @author Timothée Flutre
+all.pair.aligns <- function(x, type="global", ...){
+	stopifnot(is.character(x))
+	suppressPackageStartupMessages(library(Biostrings))
+
+	aligns <- list()
+
+	for(i in 1:(length(x)-1)){
+		for(j in i:length(x)){
+			aligns[[paste0(i,"-",j)]] <-
+				pairwiseAlignment(pattern=x[j],
+													subject=x[i],
+													type=type,
+													substitutionMatrix=
+													nucleotideSubstitutionMatrix(match=1,
+																											 mismatch=0,
+																											 baseOnly=FALSE,
+																											 type="DNA"),
+													...)
+		}
+	}
+
+	return(aligns)
+}
+
+##' Extract statistics from all pairwise alignments
+##'
+##' Requires the Biostrings package.
+##' @param aligns list of instances of class PairwiseAlignments (see all.pair.aligns())
+##' @param nb.sequences number of sequences
+##' @return list of matrices
+##' @author Timothée Flutre
+stats.all.pair.aligns <- function(aligns, nb.sequences){
+	stopifnot(is.list(aligns))
+	suppressPackageStartupMessages(library(Biostrings))
+
+	scores <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+	dists <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+	pids <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+	nmatchs <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+	nmismatchs <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+	ninss <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+	ndels <- matrix(data=NA, nrow=nb.sequences, ncol=nb.sequences)
+
+	for(i in 1:(nb.sequences-1)){
+		for(j in i:nb.sequences){
+			## message(paste0(i,"-",j))
+			scores[i,j] <- score(aligns[[paste0(i,"-",j)]])
+			dists[i,j] <- nedit(aligns[[paste0(i,"-",j)]])
+			pids[i,j] <- pid(aligns[[paste0(i,"-",j)]])
+			nmatchs[i,j] <- nmatch(aligns[[paste0(i,"-",j)]])
+			nmismatchs[i,j] <- nmismatch(aligns[[paste0(i,"-",j)]])
+			ninss[i,j] <- sum(nindel(aligns[[paste0(i,"-",j)]])@insertion[,"Length"] != 0) # insertions in pattern wrt subject
+			ndels[i,j] <- sum(nindel(aligns[[paste0(i,"-",j)]])@deletion[,"Length"] != 0) # idem
+		}
+	}
+
+	return(list(scores=scores, dists=dists, pids=pids, nmatchs=nmatchs,
+							nmismatchs=nmismatchs, ninss=ninss, ndels=ndels))
 }
