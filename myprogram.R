@@ -1,16 +1,20 @@
 #!/usr/bin/env Rscript
 
-## Aim: does this and that
-## choose between:
-## Author: Timothée Flutre
-## Not copyrighted -- provided to the public domain
-## or:
-## Copyright (C) 2011-2014 Timothée Flutre
-## License: GPLv3+
+# Aim: does this and that
+# ---
+# choose between:
+# Not copyrighted -- provided to the public domain
+# Author: Timothée Flutre
+# or:
+# Copyright (C) 2011-2013 Timothée Flutre
+# License: GPL-3+
+# Author: Timothée Flutre
+# ---
+# Versioning: https://github.com/timflutre/...
 
 rm(list=ls())
 prog.name <- "myprogram.R"
-prog.version <- "1.0"
+prog.version <- "1.0.0" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -67,7 +71,7 @@ version <- function(){
 parseCmdLine <- function(params){
   args <- commandArgs(trailingOnly=TRUE)
   ## print(args)
-  
+
   i <- 0
   while(i < length(args)){ # use "while" loop for options with no argument
     i <- i + 1
@@ -93,7 +97,7 @@ parseCmdLine <- function(params){
       quit("no", status=1)
     }
   }
-  
+
   return(params)
 }
 
@@ -114,27 +118,27 @@ checkParams <- function(params){
 }
 
 run <- function(params){
-  
+
   ## specific code ...
-  
+
 }
 
 main <- function(){
   params <- list(verbose=1,
                  in.file=NULL)
-  
+
   params <- parseCmdLine(params)
-  
+
   checkParams(params)
-  
+
   if(params$verbose > 0){
     start.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     message(paste0("START ", prog.name, " ", start.time))
     message(paste0("cwd: ", getwd()))
   }
-  
+
   system.time(run(params))
-  
+
   if(params$verbose > 0){
     end.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
     difft <- as.numeric(

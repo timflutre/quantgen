@@ -2,12 +2,18 @@
 # -*- coding: utf-8 -*-
 
 # Aim: does this and that
+# ---
 # choose between:
-# Author: Timothée Flutre
 # Not copyrighted -- provided to the public domain
+# Author: Timothée Flutre
 # or:
 # Copyright (C) 2011-2013 Timothée Flutre
-# License: GPLv3+
+# License: GPL-3+
+# Author: Timothée Flutre
+# ---
+# Versioning: https://github.com/timflutre/...
+
+progVersion = "1.0.0" # http://semver.org/
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -66,7 +72,7 @@ class MyClass(object):
         """
         Display version and license information on stdout.
         """
-        msg = "%s 1.0\n" % os.path.basename(sys.argv[0])
+        msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
 # choose between:
         # msg += "Not copyrighted -- provided to the public domain\n"

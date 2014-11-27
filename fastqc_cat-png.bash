@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 
-# Aim: concatenate PNG files from FastQC into a single PDF file
+# Aim: concatenate PNG files from FastQC (http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) into a single PDF file
 # Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA)
 # License: GPL-3+
 # Author: Timothée Flutre
+# Versioning: https://github.com/timflutre/quantgen
 
 progVersion="1.0"
 

@@ -1,11 +1,12 @@
 /** \file myprogram.cpp
  *
  *  `myprogram' does this and that.
+ * ----------
  * choose between:
- * Author: Timothée Flutre
  * Not copyrighted -- provided to the public domain
+ * Author: Timothée Flutre
  * or:
- *  Copyright (C) 2011-2014 Timothée Flutre
+ * Copyright (C) 2011-2014 Timothée Flutre
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,6 +20,11 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * Author: Timothée Flutre
+ * ----------
+ *
+ * Versioning: https://github.com/timflutre/...
  *
  *  Compile with: g++ -Wall -g utils_io.cpp myprogram.cpp -lgsl -lgslcblas -lz -o myprogram
  *  "-lgsl -lgslcblas" are just provided as example
@@ -38,7 +44,7 @@ using namespace std;
 using namespace utils;
 
 #ifndef VERSION
-#define VERSION "1.0"
+#define VERSION "1.0.0" // http://semver.org/
 #endif
 
 /** \brief Display the help on stdout.

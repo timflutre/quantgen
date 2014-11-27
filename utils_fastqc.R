@@ -1,9 +1,9 @@
 ## `utils_fastqc.R' contains utility functions to analyze outputs from the
 ## FastQC program (http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 ## Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA)
-## Author: Timothée Flutre
 ## License: GPL-3+
-## Original file available at https://github.com/timflutre/quantgen
+## Author: Timothée Flutre
+## Versioning: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by

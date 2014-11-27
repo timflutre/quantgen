@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 
 # Aim: does this and that
+# ---
 # choose between:
-# Author: Timothée Flutre
 # Not copyrighted -- provided to the public domain
+# Author: Timothée Flutre
 # or:
 # Copyright (C) 2011-2013 Timothée Flutre
-# License: GPLv3+
+# License: GPL-3+
+# Author: Timothée Flutre
+# ---
+# Versioning: https://github.com/timflutre/...
 
-progVersion="1.0"
+progVersion="1.0.0" # http://semver.org/
 
 # Display the help on stdout.
 # The format complies with help2man (http://www.gnu.org/s/help2man)
