@@ -419,6 +419,18 @@ simul.covar.mat <- function(d, u.min=0, u.max=0.5, names=NULL){
     return(mat)
 }
 
+##' Scales a correlation matrix into the corresponding covariance matrix efficiently.
+##'
+##' Use sweep. https://en.wikipedia.org/wiki/Covariance_matrix#Correlation_matrix
+##' @param x correlation matrix
+##' @param sd standard deviations
+##' @return matrix
+##' @author Timothée Flutre
+cor2cov <- function(x, sd){
+  ## D <- diag(sd); return(D %*% x %*% D)
+  return(sweep(sweep(x, 1, sd, "*"), 2, sd, "*"))
+}
+
 ##' Estimate kinship matrix K via the Astle-Balding model
 ##'
 ##' eqn 2.2 of Astle & Balding (Statistical Science, 2009)
