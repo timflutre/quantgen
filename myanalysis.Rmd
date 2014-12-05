@@ -6,9 +6,11 @@ output:
   html_document:
     toc: true
     toc_depth: 3
+    number_sections: TRUE
   pdf_document:
     toc: true
     toc_depth: 3
+    number_sections: TRUE
 ---
 
 ```{r setup, include=FALSE}
