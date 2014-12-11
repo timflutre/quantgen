@@ -13,8 +13,6 @@
 # ---
 # Versioning: https://github.com/timflutre/...
 
-progVersion = "1.0.0" # http://semver.org/
-
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
 from __future__ import unicode_literals # avoid adding "u" to each string
@@ -37,7 +35,9 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-        
+progVersion = "1.0.0" # http://semver.org/
+
+
 class MyClass(object):
     
     def __init__(self):
