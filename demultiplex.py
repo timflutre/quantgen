@@ -79,7 +79,7 @@ class Demultiplex(object):
         self.inFqFile2 = ""
         self.tagFile = ""
         self.outFqPrefix = ""
-        self.method = 2
+        self.method = 3
         self.restrictEnzyme = None
         self.remainingMotifs = []
         self.dist = 25
@@ -115,18 +115,19 @@ class Demultiplex(object):
         msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 unassigned)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "      --met\tmethod to assign paired reads to individuals (1/2/default=3/4)\n"
-        msg += "\t\t1: assign if both reads start with the tag (only fwd)\n"
-        msg += "\t\t2: assign if at least one read starts with the tag (only fwd)\n"
+        msg += "\t\t1: assign pair if both reads start with the tag (only fwd)\n"
+        msg += "\t\t2: assign pair if at least one read starts with the tag (only fwd)\n"
         msg += "\t\t3: same as 2 but count if one or both reads start with the tag (only fwd)\n"
-        # msg += "\t\t4: assign if at least one read contains the tag next to the cut site (only fwd)\n"
+        msg += "\t\t4: assign pair only if first read starts with tag\n"
+        # msg += "\t\t5: assign pair if at least one read contains the tag next to the cut site (only fwd)\n"
         # msg += "      --dist\tdistance from the read start to look for cut site (in bp, default=25)\n"
-        # msg += "\t\twith --met 4\n"
+        # msg += "\t\twith --met 5\n"
         # msg += "      --re\trestriction enzyme with its cut site (e.g. ApeKI=G/CWGC)\n"
-        # msg += "\t\twith --met 4\n"
+        # msg += "\t\twith --met 5\n"
         msg += "      --ci\tclip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --ci\n" % os.path.basename(sys.argv[0])
+        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --met 3 --ci\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -247,7 +248,7 @@ class Demultiplex(object):
             self.help()
             sys.exit(1)
         if self.method not in ["1","2","3","4"]:
-            msg = "ERROR: wrong value for --met"
+            msg = "ERROR: unknown option --met %s" % self.method
             sys.stderr.write("%s\n" % msg)
             self.help()
             sys.exit(1)
@@ -277,7 +278,7 @@ class Demultiplex(object):
                 sys.stderr.write("%s\n" % msg)
                 tagFileFormat = "table"
             else:
-                msg = "ERROR: tag file doesn't seem to be in 'fasta' or 'table' format"
+                msg = "ERROR: tag file seem to be neither in 'fasta' nor 'table' format"
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
         return tagFileFormat
@@ -433,7 +434,24 @@ class Demultiplex(object):
             nbAssignedPairsOneTag
         
         
-    def identifyIndividual_4(self, read1, read2):
+    def identifyIndividual_4(self, read1_seq):
+        """
+        Assign pair only if first read starts with the tag (only fwd).
+        """
+        assigned = False
+        ind = None
+        idx1 = 0
+        for tagId in self.tags:
+            tag = self.tags[tagId]
+            if read1_seq.startswith(tag):
+                assigned = True
+                ind = tagId
+                idx1 = len(tag)
+                break
+        return assigned, tagId, idx1, 0
+        
+        
+    def identifyIndividual_5(self, read1, read2):
         """
         Count if at least one read contains the tag next to the cut site (only fwd).
         """
@@ -525,7 +543,9 @@ class Demultiplex(object):
                 assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_3(
                     read1_seq, read2_seq)
             elif self.method == "4":
-                assigned, ind = self.identifyIndividual_4(read1, read2)
+                assigned, ind, idx1, idx2 = self.identifyIndividual_4(read1_seq)
+            elif self.method == "5":
+                assigned, ind = self.identifyIndividual_5(read1, read2)
                 
             if assigned:
                 nbAssignedPairs += 1
@@ -584,8 +604,8 @@ class Demultiplex(object):
             
     def run(self):
         self.loadTags()
-        if self.method == "4":
-            self.prepareRemainingMotifs()
+        # if self.method == "5":
+        #     self.prepareRemainingMotifs()
         self.demultiplexPairedReads()
         
         

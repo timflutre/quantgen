@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 
 # Aim: test demultiplex.py
-# Author: Timothée Flutre
 # Copyright (C) 2014 Institut National de la Recherche Agronomique
 # License: GPL-3+
+# Author: Timothée Flutre
+# Versioning: https://github.com/timflutre/quantgen
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -35,11 +36,13 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-        
+progVersion = "1.0.0" # http://semver.org/
+
+
 class TestDemultiplex(object):
     
     def __init__(self):
-        self.verbose = 1
+        self.verbose = 0
         self.pathToProg = ""
         self.clean = True
         
@@ -57,12 +60,12 @@ class TestDemultiplex(object):
         msg += "Options:\n"
         msg += "  -h, --help\tdisplay the help and exit\n"
         msg += "  -V, --version\toutput version information and exit\n"
-        msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
+        msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s -p ~/src/demultiplex.py\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -p ~/src/demultiplex.py -n\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -72,7 +75,7 @@ class TestDemultiplex(object):
         """
         Display version and license information on stdout.
         """
-        msg = "%s 1.0\n" % os.path.basename(sys.argv[0])
+        msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
         msg += "Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
@@ -126,6 +129,9 @@ class TestDemultiplex(object):
             sys.exit(1)
             
             
+    #==========================================================================
+            
+            
     def beforeTest(self):
         cwd = os.getcwd()
         testDir = tempfile.mkdtemp(dir=cwd, prefix="tmp_test_")
@@ -156,36 +162,39 @@ class TestDemultiplex(object):
             shutil.rmtree(testDir)
             
             
+    #==========================================================================
+            
+            
     def test_met1_prepare(self):
         ifq1 = "reads_R1.fastq.gz"
         ifq2 = "reads_R2.fastq.gz"
         ifq1Handle = gzip.open(ifq1, "w")
         ifq2Handle = gzip.open(ifq2, "w")
         
-        # both reads have perfect tag of ind 2
+        # pair 1: both reads have perfect tag of ind 2 at bp 1
         txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
-        txt += "TTT"
-        txt += "TCAACCTGGAGTTCCAC\n"
+        txt += "TTT" # tag
+        txt += "TCAACCTGGAGTTCCAC\n" # insert
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~\n"
         ifq1Handle.write(txt)
         txt = "@INST1:1:FLOW1:2:2104:15343:197391 2:N:0\n"
-        txt += "TTT"
-        txt += "GTAGCTGAGATCGGAAG\n"
+        txt += "TTT" # tag
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~\n"
         ifq2Handle.write(txt)
         
-        # only read 1 has perfect tag of ind 1
+        # pair 2: only read 1 has perfect tag of ind 1 at bp 1
         txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
-        txt += "AAA"
-        txt += "TCAACCTGGAGTTCCAC\n"
+        txt += "AAA" # tag
+        txt += "TCAACCTGGAGTTCCAC\n" # insert
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~\n"
         ifq1Handle.write(txt)
         txt = "@INST1:1:FLOW1:2:2104:15343:197392 2:N:0\n"
-        txt += "ATA"
-        txt += "GTAGCTGAGATCGGAAG\n"
+        txt += "ATA" # tag
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~\n"
         ifq2Handle.write(txt)
@@ -237,11 +246,16 @@ class TestDemultiplex(object):
         msgs = self.launchProg(ifq1, ifq2, it, "1")
         self.test_met1_comp(msgs)
         self.afterTest(cwd, testDir)
+            
+            
+    #==========================================================================
         
         
     def test_met2_comp(self, msgs):
         if not os.path.exists("test_ind2_R1.fastq.gz") or \
-           not os.path.exists("test_ind2_R2.fastq.gz"):
+           not os.path.exists("test_ind2_R2.fastq.gz") or \
+           not os.path.exists("test_ind1_R1.fastq.gz") or \
+           not os.path.exists("test_ind1_R2.fastq.gz"):
             print("test_met2: fail (1)")
             return
         else:
@@ -283,11 +297,103 @@ class TestDemultiplex(object):
         msgs = self.launchProg(ifq1, ifq2, it, "2")
         self.test_met2_comp(msgs)
         self.afterTest(cwd, testDir)
+            
+            
+    #==========================================================================
+            
+            
+    def test_met4_prepare(self):
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
+        ifq1Handle = gzip.open(ifq1, "w")
+        ifq2Handle = gzip.open(ifq2, "w")
+        
+        # pair 1: read 1 has perfect tag of ind 2 at bp 1; read 2 has no tag
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
+        txt += "TTT" # tag
+        txt += "TCAACCTGGAGTTCCAC\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 2:N:0\n"
+        txt += ""
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        # pair 2: read 1 has perfect tag of ind 1 but at bp 2; read 2 has no tag
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
+        txt += "TAAA" # tag with a 1-bp shift
+        txt += "TCAACCTGGAGTTCCAC\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 2:N:0\n"
+        txt += ""
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        ifq1Handle.close()
+        ifq2Handle.close()
+        
+        for f in ["test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
+            if os.path.isfile(f):
+                os.remove(f)
+                
+        it = "tags.fa"
+        with open(it, "w") as itHandle:
+            txt = ">ind1\nAAA\n"
+            txt += ">ind2\nTTT\n"
+            txt += ">ind3\nGGG\n"
+            itHandle.write(txt)
+        
+        return ifq1, ifq2, it
+        
+        
+    def test_met4_comp(self, msgs):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
+            print("test_met4: fail (1)")
+            return
+        else:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                if len(l1) != 1 or len(l2) != 1:
+                    print("test_met4: fail (2)")
+                    return
+                if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" or \
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
+                    print("test_met4: fail (3)")
+                    return
+            print("test_met4: pass")
+            
+            
+    def test_met4(self):
+        if self.verbose > 0:
+            print("launch test met4 ...")
+            sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
+        ifq1, ifq2, it = self.test_met4_prepare()
+        msgs = self.launchProg(ifq1, ifq2, it, "4")
+        self.test_met4_comp(msgs)
+        self.afterTest(cwd, testDir)
+            
+            
+    #==========================================================================
         
         
     def run(self):
         self.test_met1()
         self.test_met2()
+        self.test_met4()
         
         
 if __name__ == "__main__":
