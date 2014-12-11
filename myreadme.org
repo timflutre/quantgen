@@ -3,6 +3,9 @@
 
 # see https://github.com/timflutre/perso/blob/master/emacs
 #+latex_header: \setlength{\parindent}{0pt}
+#+latex_header: \textwidth 16cm
+#+latex_header: \oddsidemargin 0.5cm
+#+latex_header: \evensidemargin 0.5cm
 
 * Overview
 This document contains the documentation for the project "Test".
