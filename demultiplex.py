@@ -3,8 +3,9 @@
 
 # Aim: demultiplex individuals in two paired fastq files
 # Copyright (C) 2014 Institut National de la Recherche Agronomique
-# Author: Timothée Flutre
 # License: GPL-3+
+# Author: Timothée Flutre
+# Versioning: https://github.com/timflutre/quantgen
 
 # Inspired from:
 # https://gist.github.com/seandavi/3015625 by Sean Devi
@@ -51,7 +52,9 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-        
+progVersion = "1.0.0" # http://semver.org/
+
+
 # class RestrictEnzyme(Restriction.RestrictionType):
 #     def __init__(self, name):
         
@@ -99,31 +102,31 @@ class Demultiplex(object):
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
         msg += "      --idir\tpath to the input directory with the fastq files (default=.)\n"
-        msg += "      --ifq1\tpath to the first input fastq file,\n"
+        msg += "      --ifq1\tpath to the first input fastq file\n"
         msg += "\t\tcan be compressed with gzip\n"
-        msg += "      --ifq2\tpath to the second input fastq file,\n"
-        msg += "\t\tcan be compressed with gzip,\n"
+        msg += "      --ifq2\tpath to the second input fastq file\n"
+        msg += "\t\tcan be compressed with gzip\n"
         msg += "\t\terror raised if reads not in same order as --ifq1\n"
         msg += "      --it\tpath to the tag file\n"
         msg += "\t\tonly A, T, G and C (no ambiguous nucleotide)\n"
         msg += "\t\tcan be in 2 formats (automatically detected)\n"
         msg += "\t\t fasta: put sample names in the fasta headers\n"
         msg += "\t\t table: 2 columns, header line should be 'id\\ttag'\n"
-        msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 unassigned),\n"
+        msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 unassigned)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "      --met\tmethod to assign paired reads to individuals (1/2/default=3/4)\n"
         msg += "\t\t1: assign if both reads start with the tag (only fwd)\n"
         msg += "\t\t2: assign if at least one read starts with the tag (only fwd)\n"
         msg += "\t\t3: same as 2 but count if one or both reads start with the tag (only fwd)\n"
         # msg += "\t\t4: assign if at least one read contains the tag next to the cut site (only fwd)\n"
-        msg += "      --dist\tdistance from the read start to look for cut site (in bp, default=25)\n"
-        msg += "\t\twith --met 4\n"
-        msg += "      --re\trestriction enzyme with its cut site (e.g. ApeKI=G/CWGC)\n"
-        msg += "\t\twith --met 4\n"
+        # msg += "      --dist\tdistance from the read start to look for cut site (in bp, default=25)\n"
+        # msg += "\t\twith --met 4\n"
+        # msg += "      --re\trestriction enzyme with its cut site (e.g. ApeKI=G/CWGC)\n"
+        # msg += "\t\twith --met 4\n"
         msg += "      --ci\tclip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test\n" % os.path.basename(sys.argv[0])
+        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --ci\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -133,7 +136,7 @@ class Demultiplex(object):
         """
         Display version and license information on stdout.
         """
-        msg = "%s 1.0\n" % os.path.basename(sys.argv[0])
+        msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
         msg += "Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
