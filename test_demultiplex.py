@@ -36,7 +36,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.0.0" # http://semver.org/
+progVersion = "1.1.0" # http://semver.org/
 
 
 class TestDemultiplex(object):
@@ -44,6 +44,7 @@ class TestDemultiplex(object):
     def __init__(self):
         self.verbose = 0
         self.pathToProg = ""
+        self.testsToRun = ["1", "2", "4"]
         self.clean = True
         
         
@@ -62,6 +63,7 @@ class TestDemultiplex(object):
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
+        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4)\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -89,9 +91,9 @@ class TestDemultiplex(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:p:n",
+            opts, args = getopt.getopt( sys.argv[1:], "hVv:p:t:n",
                                         ["help", "version", "verbose=",
-                                         "p2p=", "noclean"])
+                                         "p2p=", "test=", "noclean"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -107,6 +109,8 @@ class TestDemultiplex(object):
                 self.verbose = int(a)
             elif o == "-p" or o == "--p2p":
                  self.pathToProg = a
+            elif o == "-t" or o == "--test":
+                self.testsToRun = a.split("-")
             elif o == "-n" or o == "--noclean":
                 self.clean = False
             else:
@@ -127,8 +131,14 @@ class TestDemultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-            
-            
+        for t in self.testsToRun:
+            if t not in ["1", "2", "4"]:
+                msg = "ERROR: unknown --test %s" % t
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+                
+                
     #==========================================================================
             
             
@@ -141,7 +151,7 @@ class TestDemultiplex(object):
         return cwd, testDir
         
         
-    def launchProg(self, ifq1, ifq2, it, met):
+    def launchProg(self, ifq1, ifq2, it, met, nci):
         args = [self.pathToProg,
                 "--idir", "./",
                 "--ifq1", ifq1,
@@ -150,9 +160,19 @@ class TestDemultiplex(object):
                 "--ofqp", "test",
                 "--met", met,
                 "-v", str(self.verbose - 1)]
+        if nci:
+            args.append("--nci")
         if self.verbose > 0:
             print(" ".join(args))
-        msgs = check_output(args)
+        # msgs = check_output(args)
+        msgs = Popen(args, stdout=PIPE, stderr=PIPE).communicate()
+        if self.verbose > 1:
+            if msgs[0] != "":
+                print("stdout:")
+                print(msgs[0][:-1])
+            if msgs[1] != "":
+                print("sterr:")
+                print(msgs[1][:-1])
         return msgs
         
         
@@ -163,8 +183,8 @@ class TestDemultiplex(object):
             
             
     #==========================================================================
-            
-            
+    
+    
     def test_met1_prepare(self):
         ifq1 = "reads_R1.fastq.gz"
         ifq2 = "reads_R2.fastq.gz"
@@ -234,23 +254,31 @@ class TestDemultiplex(object):
                        read2.id != "INST1:1:FLOW1:2:2104:15343:197391":
                         print("test_met1: fail (2)")
                         return
-            print("test_met1: pass")
-            
-            
+                    if str(read1.seq) != "TCAACCTGGAGTTCCAC" or \
+                       str(read2.seq) != "GTAGCTGAGATCGGAAG":
+                        print("test_met1: fail (3)")
+                        return
+        if os.path.exists("test_ind1_R1.fastq.gz") or \
+           os.path.exists("test_ind1_R2.fastq.gz"):
+            print("test_met1: fail (3)")
+            return
+        print("test_met1: pass")
+        
+        
     def test_met1(self):
         if self.verbose > 0:
             print("launch test met1 ...")
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "1")
+        msgs = self.launchProg(ifq1, ifq2, it, "1", False)
         self.test_met1_comp(msgs)
         self.afterTest(cwd, testDir)
-            
-            
+        
+        
     #==========================================================================
-        
-        
+    
+    
     def test_met2_comp(self, msgs):
         if not os.path.exists("test_ind2_R1.fastq.gz") or \
            not os.path.exists("test_ind2_R2.fastq.gz") or \
@@ -272,6 +300,10 @@ class TestDemultiplex(object):
                    l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
                     print("test_met2: fail (3)")
                     return
+                if str(l1[0].seq) != "TCAACCTGGAGTTCCAC" or \
+                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
+                    print("test_met1: fail (4)")
+                    return
             with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
                  gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
@@ -279,29 +311,33 @@ class TestDemultiplex(object):
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 if len(l1) != 1 or len(l2) != 1:
-                    print("test_met2: fail (4)")
+                    print("test_met2: fail (5)")
                     return
                 if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197392" or \
                    l2[0].id != "INST1:1:FLOW1:2:2104:15343:197392":
-                    print("test_met2: fail (5)")
+                    print("test_met2: fail (6)")
                     return
-            print("test_met2: pass")
-            
-            
+                if str(l1[0].seq) != "TCAACCTGGAGTTCCAC" or \
+                   str(l2[0].seq) != "ATAGTAGCTGAGATCGGAAG":
+                    print("test_met1: fail (7)")
+                    return
+        print("test_met2: pass")
+        
+        
     def test_met2(self):
         if self.verbose > 0:
             print("launch test met2 ...")
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "2")
+        msgs = self.launchProg(ifq1, ifq2, it, "2", False)
         self.test_met2_comp(msgs)
         self.afterTest(cwd, testDir)
-            
-            
+        
+        
     #==========================================================================
-            
-            
+    
+    
     def test_met4_prepare(self):
         ifq1 = "reads_R1.fastq.gz"
         ifq2 = "reads_R2.fastq.gz"
@@ -373,27 +409,38 @@ class TestDemultiplex(object):
                    l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
                     print("test_met4: fail (3)")
                     return
-            print("test_met4: pass")
-            
-            
+                if str(l1[0].seq) != "TCAACCTGGAGTTCCAC" or \
+                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
+                    print("test_met4: fail (4)")
+                    return
+        if os.path.exists("test_ind1_R1.fastq.gz") or \
+           os.path.exists("test_ind1_R2.fastq.gz"):
+            print("test_met4: fail (5)")
+            return
+        print("test_met4: pass")
+        
+        
     def test_met4(self):
         if self.verbose > 0:
             print("launch test met4 ...")
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4")
+        msgs = self.launchProg(ifq1, ifq2, it, "4", False)
         self.test_met4_comp(msgs)
         self.afterTest(cwd, testDir)
-            
-            
+        
+        
     #==========================================================================
-        
-        
+    
+    
     def run(self):
-        self.test_met1()
-        self.test_met2()
-        self.test_met4()
+        if "1" in self.testsToRun:
+            self.test_met1()
+        if "2" in self.testsToRun:
+            self.test_met2()
+        if "4" in self.testsToRun:
+            self.test_met4()
         
         
 if __name__ == "__main__":

@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.0.0" # http://semver.org/
+progVersion = "1.1.0" # http://semver.org/
 
 
 # class RestrictEnzyme(Restriction.RestrictionType):
@@ -83,7 +83,7 @@ class Demultiplex(object):
         self.restrictEnzyme = None
         self.remainingMotifs = []
         self.dist = 25
-        self.clipIdx = False
+        self.clipIdx = True
         self.tags = {}
         
         
@@ -124,10 +124,10 @@ class Demultiplex(object):
         # msg += "\t\twith --met 5\n"
         # msg += "      --re\trestriction enzyme with its cut site (e.g. ApeKI=G/CWGC)\n"
         # msg += "\t\twith --met 5\n"
-        msg += "      --ci\tclip the tag when saving the assigned reads\n"
+        msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --met 3 --ci\n" % os.path.basename(sys.argv[0])
+        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --met 3\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -155,7 +155,7 @@ class Demultiplex(object):
                                         ["help", "version", "verbose=",
                                          "idir=", "ifq1=", "ifq2=", "it=",
                                          "ofqp=", "met=", "re=", "dist=",
-                                         "ci"])
+                                         "nci"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -190,8 +190,8 @@ class Demultiplex(object):
                     sys.exit(1)
             elif o == "--dist":
                 self.dist = int(a)
-            elif o == "--ci":
-                self.clipIdx = True
+            elif o == "--nci":
+                self.clipIdx = False
             else:
                 assert False, "invalid option"
                 
@@ -252,13 +252,8 @@ class Demultiplex(object):
             sys.stderr.write("%s\n" % msg)
             self.help()
             sys.exit(1)
-        if self.clipIdx:
-            msg = "ERROR: --ci not yet implemented"
-            sys.stderr.write("%s\n" % msg)
-            sys.exit(1)
-
-
-
+            
+            
     def findTagFileFormat(self):
         """
         Return 'fasta' or 'table'.
@@ -372,7 +367,8 @@ class Demultiplex(object):
                and read2_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                idx = len(tag)
+                if self.clipIdx:
+                    idx = len(tag)
                 break
         return assigned, tagId, idx, idx
         
@@ -390,14 +386,16 @@ class Demultiplex(object):
             if read1_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                idx1 = len(tag)
-                if read2_seq.startswith(tag):
-                    idx2 = len(tag)
+                if self.clipIdx:
+                    idx1 = len(tag)
+                    if read2_seq.startswith(tag):
+                        idx2 = len(tag)
                 break
             if read2_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                idx2 = len(tag)
+                if self.clipIdx:
+                    idx2 = len(tag)
                 break
         return assigned, ind, idx1, idx2
         
@@ -417,9 +415,11 @@ class Demultiplex(object):
             if read1_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                idx1 = len(tag)
+                if self.clipIdx:
+                    idx1 = len(tag)
                 if read2_seq.startswith(tag):
-                    idx2 = len(tag)
+                    if self.clipIdx:
+                        idx2 = len(tag)
                     nbAssignedPairsTwoTags += 1
                 else:
                     nbAssignedPairsOneTag += 1
@@ -427,7 +427,8 @@ class Demultiplex(object):
             if read2_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                idx2 = len(tag)
+                if self.clipIdx:
+                    idx2 = len(tag)
                 nbAssignedPairsOneTag += 1
                 break
         return assigned, ind, idx1, idx2, nbAssignedPairsTwoTags, \
@@ -446,7 +447,8 @@ class Demultiplex(object):
             if read1_seq.startswith(tag):
                 assigned = True
                 ind = tagId
-                idx1 = len(tag)
+                if self.clipIdx:
+                    idx1 = len(tag)
                 break
         return assigned, tagId, idx1, 0
         
