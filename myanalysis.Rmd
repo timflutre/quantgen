@@ -98,3 +98,8 @@ The goal of this project is to ...
 # Check assumptions and improve the model
 
 ...
+
+
+```{r info}
+print(sessionInfo(), locale=FALSE)
+```
