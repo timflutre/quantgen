@@ -13,7 +13,7 @@
 # http://news.open-bio.org/news/2009/12/interleaving-paired-fastq-files-with-biopython/ by Peter Cock
 
 # TODO:
-# add method using regexp (http://stackoverflow.com/a/12390748/597069) with n >= 1 nucleotide(s) between the start and the tag
+# try fuzzy matching with "regexp" https://pypi.python.org/pypi/regex
 # try https://github.com/faircloth-lab/splitaake/blob/master/bin/splitaake_reads_many_gz.py
 # try https://humgenprojects.lumc.nl/svn/fastools/trunk/fastools/demultiplex.py
 # try https://github.com/pelinakan/UBD
@@ -33,9 +33,8 @@ import datetime
 from subprocess import Popen, PIPE
 import math
 import gzip
-import re
 
-import itertools # for izip
+import itertools
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -52,7 +51,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.1.0" # http://semver.org/
+progVersion = "1.2.0" # http://semver.org/
 
 
 # class RestrictEnzyme(Restriction.RestrictionType):
@@ -82,7 +81,7 @@ class Demultiplex(object):
         self.method = 3
         self.restrictEnzyme = None
         self.remainingMotifs = []
-        self.dist = 25
+        self.dist = 10
         self.clipIdx = True
         self.tags = {}
         
@@ -118,12 +117,12 @@ class Demultiplex(object):
         msg += "\t\t1: assign pair if both reads start with the tag (only fwd)\n"
         msg += "\t\t2: assign pair if at least one read starts with the tag (only fwd)\n"
         msg += "\t\t3: same as 2 but count if one or both reads start with the tag (only fwd)\n"
-        msg += "\t\t4: assign pair only if first read starts with tag\n"
+        msg += "\t\t4a: assign pair only if first read starts with tag\n"
+        msg += "\t\t4b: assign pair only if tag in first N bases of first read (see --dist)\n"
         # msg += "\t\t5: assign pair if at least one read contains the tag next to the cut site (only fwd)\n"
-        # msg += "      --dist\tdistance from the read start to look for cut site (in bp, default=25)\n"
-        # msg += "\t\twith --met 5\n"
         # msg += "      --re\trestriction enzyme with its cut site (e.g. ApeKI=G/CWGC)\n"
         # msg += "\t\twith --met 5\n"
+        msg += "      --dist\tdistance from the read start(s) to look for the tag (in bp, default=10)\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -151,11 +150,11 @@ class Demultiplex(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:",
-                                        ["help", "version", "verbose=",
-                                         "idir=", "ifq1=", "ifq2=", "it=",
-                                         "ofqp=", "met=", "re=", "dist=",
-                                         "nci"])
+            opts, args = getopt.getopt(sys.argv[1:], "hVv:",
+                                       ["help", "version", "verbose=",
+                                        "idir=", "ifq1=", "ifq2=", "it=",
+                                        "ofqp=", "met=", "re=", "dist=",
+                                        "nci"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -247,11 +246,13 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.method not in ["1","2","3","4"]:
+        if self.method not in ["1","2","3","4a","4b"]:
             msg = "ERROR: unknown option --met %s" % self.method
             sys.stderr.write("%s\n" % msg)
             self.help()
             sys.exit(1)
+        if self.dist < 0:
+            self.dist = 0
             
             
     def findTagFileFormat(self):
@@ -435,7 +436,7 @@ class Demultiplex(object):
             nbAssignedPairsOneTag
         
         
-    def identifyIndividual_4(self, read1_seq):
+    def identifyIndividual_4a(self, read1_seq):
         """
         Assign pair only if first read starts with the tag (only fwd).
         """
@@ -449,6 +450,26 @@ class Demultiplex(object):
                 ind = tagId
                 if self.clipIdx:
                     idx1 = len(tag)
+                break
+        return assigned, tagId, idx1, 0
+        
+        
+    def identifyIndividual_4b(self, read1_seq):
+        """
+        Assign pair only if first read has tag in its first N bases
+        where N is specified by self.dist (only fwd).
+        """
+        assigned = False
+        ind = None
+        idx1 = 0
+        for tagId in self.tags:
+            tag = self.tags[tagId]
+            tmpIdx = read1_seq[:self.dist].find(tag)
+            if tmpIdx != -1: # if tag is found
+                assigned = True
+                ind = tagId
+                if self.clipIdx:
+                    idx1 = tmpIdx + len(tag)
                 break
         return assigned, tagId, idx1, 0
         
@@ -544,8 +565,10 @@ class Demultiplex(object):
             elif self.method == "3":
                 assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_3(
                     read1_seq, read2_seq)
-            elif self.method == "4":
-                assigned, ind, idx1, idx2 = self.identifyIndividual_4(read1_seq)
+            elif self.method == "4a":
+                assigned, ind, idx1, idx2 = self.identifyIndividual_4a(read1_seq)
+            elif self.method == "4b":
+                assigned, ind, idx1, idx2 = self.identifyIndividual_4b(read1_seq)
             elif self.method == "5":
                 assigned, ind = self.identifyIndividual_5(read1, read2)
                 
