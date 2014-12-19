@@ -23,8 +23,6 @@ import gzip
 import tempfile
 import shutil
 import itertools
-# import numpy as np
-# import scipy as sp
 
 from Bio import SeqIO
 from Bio.Alphabet import IUPAC
@@ -36,7 +34,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.2.0" # http://semver.org/
+progVersion = "1.3.0" # http://semver.org/
 
 
 class TestDemultiplex(object):
@@ -44,7 +42,7 @@ class TestDemultiplex(object):
     def __init__(self):
         self.verbose = 0
         self.pathToProg = ""
-        self.testsToRun = ["1", "2", "4a", "4b"]
+        self.testsToRun = ["1", "2", "4a", "4b", "4c"]
         self.clean = True
         
         
@@ -63,7 +61,7 @@ class TestDemultiplex(object):
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
-        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4a-4b)\n"
+        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4a-4b-4c)\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -132,7 +130,7 @@ class TestDemultiplex(object):
             self.help()
             sys.exit(1)
         for t in self.testsToRun:
-            if t not in ["1", "2", "4a", "4b"]:
+            if t not in ["1", "2", "4a", "4b", "4c"]:
                 msg = "ERROR: unknown --test %s" % t
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -151,7 +149,16 @@ class TestDemultiplex(object):
         return cwd, testDir
         
         
-    def launchProg(self, ifq1, ifq2, it, met, nci):
+    def writeTagFile(self, it):
+        with open(it, "w") as itHandle:
+            txt = ">ind1\nAAA\n"
+            txt += ">ind2\nTTT\n"
+            txt += ">ind3\nGGG\n"
+            txt += ">ind4\nCCC\n"
+            itHandle.write(txt)
+            
+            
+    def launchProg(self, ifq1, ifq2, it, met, dist, re, nci):
         args = [self.pathToProg,
                 "--idir", "./",
                 "--ifq1", ifq1,
@@ -159,7 +166,11 @@ class TestDemultiplex(object):
                 "--it", it,
                 "--ofqp", "test",
                 "--met", met,
+                "--dist", str(dist),
                 "-v", str(self.verbose - 1)]
+        if re != "":
+            args.append("--re")
+            args.append(re)
         if nci:
             args.append("--nci")
         if self.verbose > 0:
@@ -228,11 +239,7 @@ class TestDemultiplex(object):
                 os.remove(f)
                 
         it = "tags.fa"
-        with open(it, "w") as itHandle:
-            txt = ">ind1\nAAA\n"
-            txt += ">ind2\nTTT\n"
-            txt += ">ind3\nGGG\n"
-            itHandle.write(txt)
+        self.writeTagFile(it)
         
         return ifq1, ifq2, it
         
@@ -271,7 +278,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "1", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "1", 0, "", False)
         self.test_met1_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -330,7 +337,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "2", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "2", 0, "", False)
         self.test_met2_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -381,11 +388,7 @@ class TestDemultiplex(object):
                 os.remove(f)
                 
         it = "tags.fa"
-        with open(it, "w") as itHandle:
-            txt = ">ind1\nAAA\n"
-            txt += ">ind2\nTTT\n"
-            txt += ">ind3\nGGG\n"
-            itHandle.write(txt)
+        self.writeTagFile(it)
         
         return ifq1, ifq2, it
         
@@ -426,7 +429,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4a", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "4a", 0, "", False)
         self.test_met4a_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -488,8 +491,100 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4b", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "4b", 10, "", False)
         self.test_met4b_comp(msgs)
+        self.afterTest(cwd, testDir)
+        
+        
+    #==========================================================================
+    
+    
+    def test_met4c_prepare(self):
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
+        ifq1Handle = gzip.open(ifq1, "w")
+        ifq2Handle = gzip.open(ifq2, "w")
+        
+        # pair 1: read 1 has perfect tag and cut site of ind 2 at bp 2; read 2 has no tag
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
+        txt += "ATTT" # tag with a 1-bp shift
+        txt += "CAGCCCTGGAGTTCCAC\n" # insert with cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 2:N:0\n"
+        txt += ""
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        # pair 2: read 1 has perfect tag of ind 1 at bp 2 but no cut site; read 2 has no tag
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
+        txt += "TAAA" # tag with a 1-bp shift
+        txt += "TAGCTACATHACTACAT\n" # insert with no cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 2:N:0\n"
+        txt += ""
+        txt += "CTCAGCTGGACTCGACT\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        ifq1Handle.close()
+        ifq2Handle.close()
+        
+        for f in ["test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
+            if os.path.isfile(f):
+                os.remove(f)
+                
+        it = "tags.fa"
+        self.writeTagFile(it)
+        
+        return ifq1, ifq2, it
+        
+        
+    def test_met4c_comp(self, msgs):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
+            print("test_met4c: fail (1)")
+            return
+        else:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                if len(l1) != 1 or len(l2) != 1:
+                    print("test_met4c: fail (2)")
+                    return
+                if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" or \
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
+                    print("test_met4c: fail (3)")
+                    return
+                if str(l1[0].seq) != "CAGCCCTGGAGTTCCAC" or \
+                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
+                    print("test_met4c: fail (4)")
+                    return
+        if os.path.exists("test_ind1_R1.fastq.gz") or \
+           os.path.exists("test_ind1_R2.fastq.gz"):
+            print("test_met4c: fail (5)")
+            return
+        print("test_met4c: pass")
+        
+        
+    def test_met4c(self):
+        if self.verbose > 0:
+            print("launch test met4c ...")
+            sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
+        ifq1, ifq2, it = self.test_met4c_prepare()
+        msgs = self.launchProg(ifq1, ifq2, it, "4c", 10, "ApeKI", False)
+        self.test_met4c_comp(msgs)
         self.afterTest(cwd, testDir)
         
         
@@ -505,6 +600,8 @@ class TestDemultiplex(object):
             self.test_met4a()
         if "4b" in self.testsToRun:
             self.test_met4b()
+        if "4c" in self.testsToRun:
+            self.test_met4c()
             
             
 if __name__ == "__main__":
