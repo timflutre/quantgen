@@ -237,12 +237,12 @@ class Demultiplex(object):
             sys.exit(1)
         if self.method not in ["1","2","3","4a","4b","4c"]:
             msg = "ERROR: unknown option --met %s" % self.method
-            sys.stderr.write("%s\n" % msg)
+            sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
         if self.method == "4c" and self.restrictEnzyme == None:
             msg = "ERROR: missing compulsory option --re"
-            sys.stderr.write("%s\n" % msg)
+            sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
         if self.dist < 0:
