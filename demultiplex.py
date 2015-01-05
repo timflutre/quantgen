@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.3.0" # http://semver.org/
+progVersion = "1.4.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -64,10 +64,10 @@ class Demultiplex(object):
         self.inFqFile2 = ""
         self.tagFile = ""
         self.outFqPrefix = ""
-        self.method = 3
+        self.method = "4a"
         self.restrictEnzyme = None
-        self.remainingMotifs = []
-        self.dist = 10
+        self.remainingMotifs = [] # not currently used
+        self.dist = 20
         self.clipIdx = True
         self.tags = {} # key=ind val=seq (as string)
         self.lenRemainMotif = -1 # length remaining motif (right of cut)
@@ -102,7 +102,7 @@ class Demultiplex(object):
         msg += "\t\t table: 2 columns, header line should be 'id\\ttag'\n"
         msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 unassigned)\n"
         msg += "\t\twill be compressed with gzip\n"
-        msg += "      --met\tmethod to assign pairs of reads to individuals via tags (1/2/default=3/4)\n"
+        msg += "      --met\tmethod to assign pairs of reads to individuals via tags (default=4a)\n"
         msg += "\t\tonly forward strand is considered\n"
         msg += "\t\t1: assign pair if both reads start with the tag\n"
         msg += "\t\t2: assign pair if at least one read starts with the tag\n"
@@ -110,7 +110,7 @@ class Demultiplex(object):
         msg += "\t\t4a: assign pair if first read starts with tag (ignore second read)\n"
         msg += "\t\t4b: assign pair if first read has tag in its first N bases (ignore second read, see --dist)\n"
         msg += "\t\t4c: assign pair only if first read has tag and remaining cut site in its first N bases (ignore second read, see --dist and --re)\n"
-        msg += "      --dist\tdistance from the read start to search for the tag (in bp, default=10)\n"
+        msg += "      --dist\tdistance from the read start to search for the tag (in bp, default=20)\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
         msg += "\n"
@@ -127,7 +127,7 @@ class Demultiplex(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA).\n"
+        msg += "Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre."
@@ -329,6 +329,19 @@ class Demultiplex(object):
             print("regexp of remaining motif: %s" % self.regexpMotif)
             
             
+    def checkDist(self):
+        """
+        Check that length of tag (+ remaining motif) <= self.dist.
+        """
+        for tagId in self.tags:
+            tag = self.tags[tagId]
+            if self.dist > 0 and len(tag) + self.lenRemainMotif > self.dist:
+                msg = "ERROR: --dist %i is too short for tag %s" % (self.dist,
+                                                                    tagId)
+                sys.stderr.write("%s\n" % msg)
+                sys.exit(1)
+                
+                
     def compilePatterns(self):
         """
         Compile patterns (each tag + remaining right of cut site as regexp) 
@@ -639,6 +652,7 @@ class Demultiplex(object):
         if self.method == "4c":
             self.prepareRemainingMotif()
             self.compilePatterns()
+        self.checkDist()
         self.demultiplexPairedReads()
         
         
