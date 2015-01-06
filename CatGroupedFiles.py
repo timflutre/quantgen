@@ -90,9 +90,9 @@ class CatGroupedFiles(object):
         msg += "\t\tall files (col 2) with same group (col 1) will be\n"
         msg += "\t\t concatenated to a file named <col1>.<suffix>\n"
         msg += "\t\texample from sequencing applications:\n"
-        msg += "\t\t run1<tab>/data/indA.fastq.gz\n"
-        msg += "\t\t run1<tab>/data/indB.fastq.gz\n"
-        msg += "\t\t run2<tab>/data/indA.fastq.gz\n"
+        msg += "\t\t indA<tab>run1/A.fastq.gz\n"
+        msg += "\t\t indB<tab>run1/B.fastq.gz\n"
+        msg += "\t\t indA<tab>run2/A.fastq.gz\n"
         msg += "  -s, --suffix\tsuffix for the output files (e.g. txt, fastq.gz, etc)\n"
         msg += "  -o, --outdir\toutput directory (default=\"\")\n"
         msg += "  -c, --copy\tcopy if group with single file (symlink otherwise)\n"
@@ -216,6 +216,16 @@ class CatGroupedFiles(object):
             
             
     def handleOneGroup(self, group, lFiles):
+        """
+        >>> i = CatGroupedFiles()
+        >>> i.useSymLink = True; i.outDir = ""; i.suffix = "txt"
+        >>> group = "indA"; lFiles=["run1/A.txt"]
+        >>> i.handleOneGroup(group, lFiles)
+        u'ln -s run1/A.txt indA.txt'
+        >>> lFiles=["run1/A.txt", "run2/A.txt"]
+        >>> i.handleOneGroup(group, lFiles)
+        u'cat run1/A.txt run2/A.txt > indA.txt'
+        """
         cmd = ""
         
         if len(lFiles) == 1:
@@ -234,8 +244,9 @@ class CatGroupedFiles(object):
             cmd += "%s/" % self.outDir
         cmd += "%s.%s" % (group, self.suffix)
         
-        # print(cmd) # debug
-        os.system(cmd)
+        if self.verbose > 1:
+            print(cmd)
+        return cmd
         
         
     def handleAllGroups(self):
@@ -247,13 +258,14 @@ class CatGroupedFiles(object):
         groups.sort()
         
         for i in range(0, len(groups)):
-            if self.verbose > 0:
+            if self.verbose == 1:
                 progressBar((i+1) / float(len(groups)))
                 
             group = groups[i]
             lFiles = self.group2files[group]
             
-            self.handleOneGroup(group, lFiles)
+            cmd = self.handleOneGroup(group, lFiles)
+            os.system(cmd)
             
             
     def run(self):
