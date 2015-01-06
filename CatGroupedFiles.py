@@ -67,6 +67,7 @@ class CatGroupedFiles(object):
     def __init__(self):
         self.verbose = 1
         self.inFile = ""
+        self.suffix = ""
         self.outDir = ""
         self.group2files = {}
         self.useSymLink = True
