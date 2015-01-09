@@ -906,3 +906,61 @@ stats.all.pair.aligns <- function(aligns, nb.sequences){
 	return(list(scores=scores, dists=dists, pids=pids, nmatchs=nmatchs,
 							nmismatchs=nmismatchs, ninss=ninss, ndels=ndels))
 }
+
+##' Initialize plates as data.frames with missing data.
+##'
+##' Useful for molecular biologists.
+##' @param n number of plates
+##' @param nrow vector of number of rows for each plate
+##' @param ncol vector of number of columns for each plate
+##' @param names vector of names for each plate
+##' @return list of data.frame, one per plate, in the "wide" format
+##' @author Timothée Flutre
+init.plates <- function(n, nrow, ncol, names){
+  plates <- list()
+  for(i in 1:n){
+    plates[[names[i]]] <-
+      as.data.frame(matrix(data=NA, nrow=nrow[i],
+                           ncol=ncol[i],
+                           dimnames=list(LETTERS[1:nrow[i]], 1:ncol[i])))
+  }
+  return(plates)
+}
+
+##' Lengthen a "wide" plate into 3 columns for easier processing.
+##'
+##' Useful for molecular biologists.
+##' @param plate data.frame of a plate in the "wide" format
+##' @return data.frame of a plate in the "long" format (1 well per row)
+##' @author Timothée Flutre
+lengthen.plate <- function(plate.w){
+  stopifnot(is.data.frame(plate.w),
+            ! is.null(rownames(plate.w)),
+            ! is.null(colnames(plate.w)))
+  nb.samples <- nrow(plate.w) * ncol(plate.w)
+  plate.l <- data.frame(sample=rep(NA, nb.samples),
+                      row=rep(NA, nb.samples),
+                      col=rep(NA, nb.samples))
+  sample.id <- 1
+  for(i in 1:nrow(plate.w)){
+    for(j in 1:ncol(plate.w)){
+      plate.l$sample[sample.id] <- plate.w[i,j]
+      plate.l$row[sample.id] <- rownames(plate.w)[i]
+      plate.l$col[sample.id] <- colnames(plate.w)[j]
+      sample.id <- sample.id + 1
+    }
+  }
+  return(plate.l)
+}
+
+##' Identify empty wells, if any, in a plate.
+##'
+##' Useful for molecular biologists.
+##' @param plates data.frame of a plate in the "wide" format
+##' @return 2 column data.frame (row;col) corresponding to empty wells
+##' @author Timothée Flutre
+empty.wells <- function(plate.w){
+  plate.l <- lengthen.plate(plate.w)
+  empty.idx <- is.na(plate.l$sample)
+  return(plate.l[empty.idx, c("row", "col")])
+}
