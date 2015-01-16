@@ -500,6 +500,30 @@ simul.animal.model <- function(n=300, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
               h2=h2, dat=dat))
 }
 
+##' Make a scatter plot of y as a function of x, along with the regression
+##' line from lm() as well as both confidence and both prediction lines from
+##' predict().
+##'
+##'
+##' @param x vector of points
+##' @param y vector of points
+##' @return nothing
+##' @author Timothée Flutre
+regplot <- function(x, y, ...){
+  x <- as.numeric(x)
+  y <- as.numeric(y)
+  plot(x, y, ...)
+  fit <- lm(y ~ x)
+  abline(fit, col="red")
+  newx <- seq(min(x), max(x), length.out=length(x))
+  pred.ci <- predict(fit, newdata=data.frame(x=newx), interval="confidence")
+  lines(newx, pred.ci[,"lwr"], lty=2)
+  lines(newx, pred.ci[,"upr"], lty=2)
+  pred.pi <- predict(fit, newdata=data.frame(x=newx), interval="prediction")
+  lines(newx, pred.pi[,"lwr"], lty=3)
+  lines(newx, pred.pi[,"upr"], lty=3)
+}
+
 ##' Produce a quantile-quantile plot for p values and display its confidence
 ##' interval
 ##'

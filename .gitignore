@@ -1,6 +1,7 @@
 *~
 *.man
 *.ps
+.Rhistory
 get_summary_stats
 get_abf_meta
 impute2bimbam
