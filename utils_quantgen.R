@@ -449,6 +449,49 @@ estimKinshipAstleBalding <- function(genos.dose){
     return(K)
 }
 
+##' Simulate a data set from a basic animal model.
+##'
+##' y = mu 1 + X b + Z u + e with u ~ N(0, sigma_u^2 A) and e ~ N(0, sigma^2 I)
+##' @param N number of individuals
+##' @param mu global mean
+##' @param P number of fixed effects
+##' @param b fixed effects
+##' @param nb.snps number of SNPs
+##' @param maf minor allele frequency
+##' @param h2 heritability h2 = sigma_u^2 / (sigma_u^2 + sigma^2)
+##' @param sigma2 variance of the errors
+##' @return list with the data set ready to be analyzed
+##' @author Timothée Flutre
+simul.animal.model <- function(n=100, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
+                               A=NULL, h2=0.5, sigma2=1){
+  library(MASS)
+  library(Matrix)
+  animal.ids <- sprintf(fmt=paste0("ind%0", floor(log10(n))+1, "i"), 1:n)
+  X <- matrix(data=rnorm(n=n), nrow=n, ncol=P)
+  b <- matrix(data=c(2), nrow=P, ncol=1)
+  W <- cbind(rep(1, n), X)
+  a <- matrix(c(mu, b))
+  Q <- n
+  if(is.null(A)){
+    snp.ids <- sprintf(fmt=paste0("snp%0", floor(log10(nb.snps))+1, "i"),
+                       1:nb.snps)
+    M <- matrix(data=rbinom(n=Q*nb.snps, size=2, prob=maf),
+                nrow=Q, ncol=nb.snps, dimnames=list(animal.ids, snp.ids))
+    A <- (1/nb.snps) * M %*% t(M)
+  }
+  Z <- diag(Q)
+  sigmau2 <- (h2 * sigma2) / (1 - h2)
+  G <- as.matrix(nearPD(sigmau2 * A)$mat)
+  u <- matrix(mvrnorm(n=1, mu=rep(0, Q), Sigma=G))
+  R <- sigma2 * diag(n)
+  e <- matrix(mvrnorm(n=1, mu=rep(0, n), Sigma=R))
+  y <- W %*% a + Z %*% u + e
+  dat <- data.frame(fix=W[,2],
+                    animal=factor(animal.ids),
+                    response=y[,1])
+  return(dat)
+}
+
 ##' Produce a quantile-quantile plot for p values and display its confidence
 ##' interval
 ##'
