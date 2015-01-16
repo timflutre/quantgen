@@ -409,14 +409,14 @@ imp.miss.genexp <- function(list.mat=NULL){
 ##' @author Timothée Flutre
 simul.covar.mat <- function(d, u.min=0, u.max=0.5, names=NULL){
 	suppressPackageStartupMessages(library(Matrix))
-    if(! is.null(names))
-        stopifnot(length(names) == d)
-    mat <- round(nearPD(matrix(runif(n=d*d, min=0, max=0.5),
-                               nrow=d))$mat, 2)
-    diag(mat) <- diag(mat) / d + 1
-    if(! is.null(names))
-        rownames(mat) <- colnames(mat) <- names
-    return(mat)
+  if(! is.null(names))
+    stopifnot(length(names) == d)
+  mat <- round(nearPD(matrix(runif(n=d*d, min=0, max=0.5),
+                             nrow=d))$mat, 2)
+  diag(mat) <- diag(mat) / d + 1
+  if(! is.null(names))
+    rownames(mat) <- colnames(mat) <- names
+  return(mat)
 }
 
 ##' Scales a correlation matrix into the corresponding covariance matrix efficiently.
@@ -439,40 +439,46 @@ cor2cov <- function(x, sd){
 ##' and genotypes coded as allele dose (i.e. in [0,2]),
 ##' but no missing data is allowed
 ##' @return Kinship matrix
-estimKinshipAstleBalding <- function(genos.dose){
+estim.kinship.AstleBalding <- function(genos.dose, allele.freqs=NULL){
+  if(is.null(allele.freqs)){
     allele.freqs <- apply(genos.dose, 1, function(x){
-        sum(x) / (2 * length(x))
+      sum(x) / (2 * length(x))
     })
-    tmp <- sweep(genos.dose, 1, 2 * allele.freqs, FUN="-")
-    tmp <- sweep(tmp, 1, 2 * sqrt(allele.freqs * (1 - allele.freqs)), FUN="/")
-    K <- (1/nrow(genos.dose)) * crossprod(tmp, tmp)
-    return(K)
+  }
+  tmp <- sweep(genos.dose, 1, 2 * allele.freqs, FUN="-")
+  tmp <- sweep(tmp, 1, 2 * sqrt(allele.freqs * (1 - allele.freqs)), FUN="/")
+  K <- (1/nrow(genos.dose)) * crossprod(tmp, tmp)
+  return(K)
 }
 
 ##' Simulate a data set from a basic animal model.
 ##'
-##' y = mu 1 + X b + Z u + e with u ~ N(0, sigma_u^2 A) and e ~ N(0, sigma^2 I)
-##' @param N number of individuals
-##' @param mu global mean
-##' @param P number of fixed effects
-##' @param b fixed effects
-##' @param nb.snps number of SNPs
-##' @param maf minor allele frequency
-##' @param h2 heritability h2 = sigma_u^2 / (sigma_u^2 + sigma^2)
-##' @param sigma2 variance of the errors
-##' @return list with the data set ready to be analyzed
+##' y = mu 1_n + X b + Z u + e = W a + Z u + e
+##' y is n x 1; X is n x P; Z is n x Q; W is n x (P+1)
+##' u ~ Norm_Q(0, sigma_u^2 A); e ~ Norm_n(0, sigma^2 I_n)
+##' @param n number of individuals (default is 300)
+##' @param mu global mean (default is 4)
+##' @param P number of fixed effects (default is 1)
+##' @param b fixed effects (default is 2)
+##' @param nb.snps number of SNPs (default is 1000; ignored if A is given)
+##' @param maf minor allele frequency (default is 0.3; ignored if A is given)
+##' @param A matrix of additive relationships
+##' @param sigma2 variance component of the errors (default is 5)
+##' @param lambda ratio of variance components as sigma_u^2 /sigma^2 (default is 3)
+##' @return list with all input variables and the data set ready to be analyzed
 ##' @author Timothée Flutre
-simul.animal.model <- function(n=100, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
-                               A=NULL, h2=0.5, sigma2=1){
+simul.animal.model <- function(n=300, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
+                               A=NULL, sigma2=5, lambda=3){
   library(MASS)
   library(Matrix)
   animal.ids <- sprintf(fmt=paste0("ind%0", floor(log10(n))+1, "i"), 1:n)
   X <- matrix(data=rnorm(n=n), nrow=n, ncol=P)
-  b <- matrix(data=c(2), nrow=P, ncol=1)
+  b <- matrix(data=rep(b, P), nrow=P, ncol=1)
   W <- cbind(rep(1, n), X)
   a <- matrix(c(mu, b))
   Q <- n
   if(is.null(A)){
+    stopifnot(nrow(A) == n, ncol(A) == n)
     snp.ids <- sprintf(fmt=paste0("snp%0", floor(log10(nb.snps))+1, "i"),
                        1:nb.snps)
     M <- matrix(data=rbinom(n=Q*nb.snps, size=2, prob=maf),
@@ -480,7 +486,8 @@ simul.animal.model <- function(n=100, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
     A <- (1/nb.snps) * M %*% t(M)
   }
   Z <- diag(Q)
-  sigmau2 <- (h2 * sigma2) / (1 - h2)
+  sigmau2 <- lambda * sigma2
+  h2 <- sigmau2 / (sigmau2 + sigma2)
   G <- as.matrix(nearPD(sigmau2 * A)$mat)
   u <- matrix(mvrnorm(n=1, mu=rep(0, Q), Sigma=G))
   R <- sigma2 * diag(n)
@@ -489,7 +496,8 @@ simul.animal.model <- function(n=100, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
   dat <- data.frame(fix=W[,2],
                     animal=factor(animal.ids),
                     response=y[,1])
-  return(dat)
+  return(list(X=X, W=W, Z=Z, G=G, a=a, u=u, sigmau2=sigmau2, sigma2=sigma2,
+              h2=h2, dat=dat))
 }
 
 ##' Produce a quantile-quantile plot for p values and display its confidence
