@@ -37,16 +37,16 @@ if sys.version_info[0] == 2:
 progVersion = "1.3.0" # http://semver.org/
 
 
-class TestDemultiplex(object):
+class TestDemultiplex(object): #Define a class
     
-    def __init__(self):
+    def __init__(self): #Define attributes
         self.verbose = 0
         self.pathToProg = ""
-        self.testsToRun = ["1", "2", "4a", "4b", "4c"]
+        self.testsToRun = ["1", "2", "4a", "4b", "4c","4d"]
         self.clean = True
         
         
-    def help(self):
+    def help(self): #Define a method for the help
         """
         Display the help on stdout.
         
@@ -61,7 +61,7 @@ class TestDemultiplex(object):
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
-        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4a-4b-4c)\n"
+        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4a-4b-4c-4d)\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -71,7 +71,7 @@ class TestDemultiplex(object):
         print(msg); sys.stdout.flush()
         
         
-    def version(self):
+    def version(self): #Define a method for the version
         """
         Display version and license information on stdout.
         """
@@ -84,7 +84,7 @@ class TestDemultiplex(object):
         print(msg.encode("utf8")); sys.stdout.flush()
         
         
-    def setAttributesFromCmdLine(self):
+    def setAttributesFromCmdLine(self): #Define a method to read 
         """
         Parse the command-line arguments.
         """
@@ -115,7 +115,7 @@ class TestDemultiplex(object):
                 assert False, "invalid option"
                 
                 
-    def checkAttributes(self):
+    def checkAttributes(self): #Check the values given as arguments
         """
         Check the values of the command-line parameters.
         """
@@ -130,7 +130,7 @@ class TestDemultiplex(object):
             self.help()
             sys.exit(1)
         for t in self.testsToRun:
-            if t not in ["1", "2", "4a", "4b", "4c"]:
+            if t not in ["1", "2", "4a", "4b", "4c", "4d"]:
                 msg = "ERROR: unknown --test %s" % t
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -141,6 +141,9 @@ class TestDemultiplex(object):
             
             
     def beforeTest(self):
+        """
+        Create a temporary folder with a unique ID
+        """
         cwd = os.getcwd()
         testDir = tempfile.mkdtemp(dir=cwd, prefix="tmp_test_")
         os.chdir(testDir)
@@ -159,7 +162,10 @@ class TestDemultiplex(object):
             
             
     def launchProg(self, ifq1, ifq2, it, met, dist, re, nci):
-        args = [self.pathToProg,
+        """
+        Launch demultiplex.py with tha 'args' arguments
+        """
+        args = [self.pathToProg, #Path to demultiplex.py program
                 "--idir", "./",
                 "--ifq1", ifq1,
                 "--ifq2", ifq2,
@@ -169,9 +175,9 @@ class TestDemultiplex(object):
                 "--dist", str(dist),
                 "-v", str(self.verbose - 1)]
         if re != "":
-            args.append("--re")
+            args.append("--re") #Add the restriction enzyme name to the 'args' list only if provided
             args.append(re)
-        if nci:
+        if nci: #Check if nci is true (=do not cut the tag) and add "--nci" to the 'args' list
             args.append("--nci")
         if self.verbose > 0:
             print(" ".join(args))
@@ -187,7 +193,7 @@ class TestDemultiplex(object):
         return msgs
         
         
-    def afterTest(self, cwd, testDir):
+    def afterTest(self, cwd, testDir): #Remove testDir and everything in it
         os.chdir(cwd)
         if self.clean:
             shutil.rmtree(testDir)
@@ -245,8 +251,7 @@ class TestDemultiplex(object):
         
         
     def test_met1_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fastq.gz") or \
-           not os.path.exists("test_ind2_R2.fastq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met1: fail (1)")
             return
         else:
@@ -284,9 +289,10 @@ class TestDemultiplex(object):
         
         
     #==========================================================================
+
     
-    
-    def test_met2_comp(self, msgs):
+
+    def test_met2_comp(self, msgs):            # checks that the 2 files for each of the 2 indiv exist
         if not os.path.exists("test_ind2_R1.fastq.gz") or \
            not os.path.exists("test_ind2_R2.fastq.gz") or \
            not os.path.exists("test_ind1_R1.fastq.gz") or \
@@ -294,25 +300,24 @@ class TestDemultiplex(object):
             print("test_met2: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
-                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
-                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:     # Open a file from gzip for indiv 2 (tag TTT)
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",             # For Forward, creates a list with Ind ID and sequence in Fasta or Fastaq
                                       alphabet=IUPAC.ambiguous_dna))
-                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",             # For Reverse, creates a list with Ind ID and sequence in Fasta or Fastaq
                                       alphabet=IUPAC.ambiguous_dna))
-                if len(l1) != 1 or len(l2) != 1:
+                if len(l1) != 1 or len(l2) != 1:                        #Only one element in each list
                     print("test_met2: fail (2)")
                     return
                 if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" or \
-                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":     # check that sequence names are the same
                     print("test_met2: fail (3)")
                     return
                 if str(l1[0].seq) != "TCAACCTGGAGTTCCAC" or \
-                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
+                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":           # check that sequences cut as expected
                     print("test_met1: fail (4)")
                     return
             with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
-                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
+                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:      # for indiv 1 (tag AAA)
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -508,7 +513,7 @@ class TestDemultiplex(object):
         # pair 1: read 1 has perfect tag and cut site of ind 2 at bp 2; read 2 has no tag
         txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
         txt += "ATTT" # tag with a 1-bp shift
-        txt += "CAGCCCTGGAGTTCCAC\n" # insert with cut site
+        txt += "CAGCCCTGGAGTTCCAC\n" # insert with ApekI cut site
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~~\n"
         ifq1Handle.write(txt)
@@ -522,7 +527,7 @@ class TestDemultiplex(object):
         # pair 2: read 1 has perfect tag of ind 1 at bp 2 but no cut site; read 2 has no tag
         txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
         txt += "TAAA" # tag with a 1-bp shift
-        txt += "TAGCTACATHACTACAT\n" # insert with no cut site
+        txt += "TAGCTACATHACTACAT\n" # insert with no ApekI cut site
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~~\n"
         ifq1Handle.write(txt)
@@ -588,7 +593,137 @@ class TestDemultiplex(object):
         self.afterTest(cwd, testDir)
         
         
+  
+     #==========================================================================
+     #New method to assign a pair as true only if the pattern (tag+cut site) is found in the forward and/or the reverse read
+     #Allows a shift (='dist') in the start of the pattern       
+    
+    def test_met4d_prepare(self):
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
+        ifq1Handle = gzip.open(ifq1, "w")
+        ifq2Handle = gzip.open(ifq2, "w")
+        
+        # pair 1: read 1 has perfect tag and cut site of ind 2 at bp 2; read 2 has the tag but not the cut site
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
+        txt += "ATTT" # tag with a 1-bp shift
+        txt += "CAGCCCTGGAGTTCCAC\n" # insert with ApekI cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 2:N:0\n"
+        txt += "ATTT" # tag with a 1-bp shift
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        # pair 2: read 1 has perfect tag of ind 1 at bp 2 but wrong cut site; read 2 has tag of ind 1 and the right cut site
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
+        txt += "TAAA" # tag with a 1-bp shift
+        txt += "TAGCTACATAACTACAT\n" # insert with no ApekI cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 2:N:0\n"
+        txt += "TAAA" # tag with a 1-bp shift
+        txt += "CAGCCCTGGAGTTCCAA\n" # insert with ApekI cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+
+        # pair 3: read 1 has perfect tag of ind 3 at bp 2 but wrong cut site; read 2 has wrong tag but right cut site
+        txt = "@INST1:1:FLOW1:2:2104:15343:197393 1:N:0\n"
+        txt += "TGGG" # tag with a 1-bp shift
+        txt += "TAGCTACATTTACTACT\n" # insert with no ApekI cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197393 2:N:0\n"
+        txt += "TGTG" # tag with a 1-bp shift
+        txt += "CAGCCCTGGAGTTCCAG\n" # insert with ApekI cut site
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+                
+        ifq1Handle.close()
+        ifq2Handle.close()
+        
+        for f in ["test_ind1_R1.fastq.gz", "test_ind1_R2.fastq.gz","test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
+            if os.path.isfile(f):
+                os.remove(f)
+                
+        it = "tags.fa"  #Input file with individual ID and tags
+        self.writeTagFile(it)
+        
+        return ifq1, ifq2, it
+        
+        
+    def test_met4d_comp(self, msgs):
+        if not os.path.exists("test_ind1_R1.fastq.gz") or \
+           not os.path.exists("test_ind1_R2.fastq.gz") or \
+           not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
+            print("test_met4d: fail (1)")
+            return
+        else:
+            with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                if len(l1) != 1 or len(l2) != 1:
+                    print("test_met4d: fail (2)")
+                    return
+                if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197392" or \
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197392":
+                    print("test_met4d: fail (3)")
+                    return
+                if str(l1[0].seq) != "TAGCTACATAACTACAT" or \
+                   str(l2[0].seq) != "CAGCCCTGGAGTTCCAA":
+                    print("test_met4d: fail (4)")
+                    return
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+                if len(l1) != 1 or len(l2) != 1:
+                    print("test_met4d: fail (2)")
+                    return
+                if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" or \
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
+                    print("test_met4d: fail (3)")
+                    return
+                if str(l1[0].seq) != "CAGCCCTGGAGTTCCAC" or \
+                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
+                    print("test_met4d: fail (4)")
+                    return
+        if os.path.exists("test_ind3_R1.fastq.gz") or \
+           os.path.exists("test_ind3_R2.fastq.gz"):
+            print("test_met4d: fail (5)")
+            return
+        print("test_met4d: pass")
+        
+        
+    def test_met4d(self):
+        if self.verbose > 0:
+            print("launch test met4d ...")
+            sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
+        ifq1, ifq2, it = self.test_met4d_prepare()
+        msgs = self.launchProg(ifq1, ifq2, it, "4d", 10, "ApeKI", False)
+        self.test_met4d_comp(msgs)
+        self.afterTest(cwd, testDir)
+        
+        
     #==========================================================================
+    
+
+
     
     
     def run(self):
@@ -602,7 +737,8 @@ class TestDemultiplex(object):
             self.test_met4b()
         if "4c" in self.testsToRun:
             self.test_met4c()
-            
+        if "4d" in self.testsToRun:
+            self.test_met4d()            
             
 if __name__ == "__main__":
     i = TestDemultiplex()

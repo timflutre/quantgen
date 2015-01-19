@@ -69,10 +69,10 @@ class Demultiplex(object):
         self.remainingMotifs = [] # not currently used
         self.dist = 20
         self.clipIdx = True
-        self.tags = {} # key=ind val=seq (as string)
+        self.tags = {} # =Dictionary with key=ind val=seq (as string)
         self.lenRemainMotif = -1 # length remaining motif (right of cut)
         self.regexpMotif = "" # remaining motif (as uncompiled regexp)
-        self.patterns = {} # key=ind val=tag+motif (as compiled regexp)
+        self.patterns = {} # =Dictionary with key=ind val=tag+motif (as compiled regexp)
         
         
     def help(self):
@@ -110,6 +110,7 @@ class Demultiplex(object):
         msg += "\t\t4a: assign pair if first read starts with tag (ignore second read)\n"
         msg += "\t\t4b: assign pair if first read has tag in its first N bases (ignore second read, see --dist)\n"
         msg += "\t\t4c: assign pair only if first read has tag and remaining cut site in its first N bases (ignore second read, see --dist and --re)\n"
+        msg += "\t\t4d: assign pair only if first and/or second read has tag and remaining cut site in its first N bases (see --dist and --re)\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp, default=20)\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
@@ -235,12 +236,12 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.method not in ["1","2","3","4a","4b","4c"]:
+        if self.method not in ["1","2","3","4a","4b","4c","4d"]:
             msg = "ERROR: unknown option --met %s" % self.method
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.method == "4c" and self.restrictEnzyme == None:
+        if self.method in ["4c","4d"] and self.restrictEnzyme == None:
             msg = "ERROR: missing compulsory option --re"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -251,14 +252,14 @@ class Demultiplex(object):
             
     def findTagFileFormat(self):
         """
-        Return 'fasta' or 'table'.
+        Look for a '>' in the tag file and decide to return a 'fasta' or 'table' file format.
         """
         tagFileFormat = "table"
         tagHandle = open(self.tagFile)
-        line = tagHandle.readline()
+        line = tagHandle.readline() #Read the first line of the file
         tagHandle.close()
         tokens = line.split()
-        if line[0] == ">":
+        if line[0] == ">": #Check the first character of the first line
             tagFileFormat = "fasta"
         elif tokens == ["id", "tag"]:
             tagFileFormat = "table"
@@ -281,9 +282,9 @@ class Demultiplex(object):
             print(msg); sys.stdout.flush()
             
         if tagFileFormat == "fasta":
-            tmp = SeqIO.to_dict(SeqIO.parse(self.tagFile, "fasta",
+            tmp = SeqIO.to_dict(SeqIO.parse(self.tagFile, "fasta", # Creates a 'tmp' dictonnary using 'individual' as a key
                                             alphabet=IUPAC.unambiguous_dna))
-            for tag in tmp:
+            for tag in tmp: # Fill the 'tags' dictonnary
                 self.tags[tmp[tag].id] = str(tmp[tag].seq)
         elif tagFileFormat == "table":
             tagHandle = open(self.tagFile)
@@ -313,17 +314,17 @@ class Demultiplex(object):
         if self.verbose > 0:
             print("prepare remaining motif..."); sys.stdout.flush()
             
-        cutMotif = self.restrictEnzyme.elucidate() # "G^CWG_C" for ApeKI
+        cutMotif = self.restrictEnzyme.elucidate() # Interpret the restriction site based on the name of the restriction enzyme eg. "G^CWG_C" for ApeKI
         if self.verbose > 0:
             print("enzyme %s: motif=%s" % (self.restrictEnzyme, cutMotif))
         coordCutSense = cutMotif.find("^") # position of cut in sense strand, 1 for ApeKI
-        remainMotifAmbig = self.restrictEnzyme.site[coordCutSense:len(self.restrictEnzyme.site)] # "CWGC" for ApeKI
-        self.lenRemainMotif = len(remainMotifAmbig)
+        remainMotifAmbig = self.restrictEnzyme.site[coordCutSense:len(self.restrictEnzyme.site)]# Remaining 5'-3' motif after enzyme digestion eg. "CWGC" for ApeKI
+        self.lenRemainMotif = len(remainMotifAmbig) #Count the number of characters in remaining motif
         for i,l in enumerate(remainMotifAmbig):
             if l in ["A", "T", "G", "C"]:
                 self.regexpMotif += l
             else: # ambiguous letter, e.g. W
-                self.regexpMotif += "[" + ambiguous_dna_values[l] + "]"
+                self.regexpMotif += "[" + ambiguous_dna_values[l] + "]" # eg. returns [AT] for W
                 
         if self.verbose > 0:
             print("regexp of remaining motif: %s" % self.regexpMotif)
@@ -350,8 +351,8 @@ class Demultiplex(object):
         if self.verbose > 0:
             print("compile patterns..."); sys.stdout.flush()
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            self.patterns[tagId] = re.compile(tag + self.regexpMotif)
+            tag = self.tags[tagId] #Extract the sequence for a given tag=individual
+            self.patterns[tagId] = re.compile(tag + self.regexpMotif) # Creates a dictionnary indexed with the tagID with pattern =tag+remaning motif
             
             
     def identifyIndividual_1(self, read1_seq, read2_seq):
@@ -375,18 +376,18 @@ class Demultiplex(object):
         
     def identifyIndividual_2(self, read1_seq, read2_seq):
         """
-        Assign pair if at least one read starts with the tag.
+        Assign pair if at least one read starts with the tag. !!!!! IdX1=0 or IdX2=0 if the tag is only found in the alternative read
         """
         assigned = False
         ind = None
         idx1 = 0
         idx2 = 0
-        for tagId in self.tags:
-            tag = self.tags[tagId]
-            if read1_seq.startswith(tag):
+        for tagId in self.tags: # Iteration on each key of the dictinonary
+            tag = self.tags[tagId] #Sequence of the tags for a given tagID
+            if read1_seq.startswith(tag): # Check if the sequence starts with the tag
                 assigned = True
                 ind = tagId
-                if self.clipIdx:
+                if self.clipIdx: # 
                     idx1 = len(tag)
                     if read2_seq.startswith(tag):
                         idx2 = len(tag)
@@ -481,16 +482,56 @@ class Demultiplex(object):
         assigned = False
         ind = None
         idx1 = 0
-        for tagId in self.patterns:
-            tmpRe = self.patterns[tagId].search(read1_seq[:self.dist])
+        for tagId in self.patterns: # Iteration on the tagID = individual
+            tmpRe = self.patterns[tagId].search(read1_seq[:self.dist]) # Look for the pattern corresponding to tagID in the 'dist' first base pairs
             if tmpRe != None:
                 assigned = True
                 ind = tagId
-                if self.clipIdx:
-                    idx1 = tmpRe.end() - self.lenRemainMotif
+                if self.clipIdx: #If clipIdx is true, clip the tag
+                    idx1 = tmpRe.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
                 break
         return assigned, tagId, idx1, 0
+    
+    def identifyIndividual_4d(self, read1_seq, read2_seq):
+        """
+        Assign pair if first and/or second read has tag and remaining cut site in its first
+        N bases (use self.dist and self.patterns).
+        """
+        assigned = False
+        ind = None
+        idx1 = 0
+        idx2 = 0
+        AssignedPairsTwoTags = 0
+        AssignedPairsOneTag = 0
         
+        for tagId in self.patterns: # Iteration on the tagID = individual
+            tmpRe1 = self.patterns[tagId].search(read1_seq[:self.dist]) # Look for the pattern corresponding to tagID in the 'dist' first base pairs
+            tmpRe2 = self.patterns[tagId].search(read2_seq[:self.dist]) # Look for the pattern corresponding to tagID in the 'dist' first base pairs
+
+            if tmpRe1 != None:
+                assigned = True
+                ind = tagId
+                idx1 = tmpRe1.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
+                if tmpRe2 != None: #If the first and the second reads have the pattern
+                    idx2 = tmpRe2.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
+                    AssignedPairsTwoTags += 1
+                else: #If only the first read has the pattern
+                    idx2 = idx1
+                    AssignedPairsOneTag += 1
+
+                if self.clipIdx == False: #If clipIdx is false, do not clip the tag
+                    idx1 = idx2 = 0
+                break
+            
+            if tmpRe2 != None: #If only the second read has the pattern
+                assigned = True
+                ind = tagId
+                AssignedPairsOneTag += 1
+                if self.clipIdx: #If clipIdx is true, clip the tag
+                    idx2 = tmpRe2.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
+                    idx1 = idx2
+                break
+        return assigned, tagId, idx1, idx2, AssignedPairsTwoTags, AssignedPairsOneTag      
         
     def identifyIndividual_5(self, read1, read2):
         """
@@ -540,20 +581,23 @@ class Demultiplex(object):
     
     
     def demultiplexPairedReads(self):
+        """
+        Read the data files, launch the identifying method, writes the output.
+        """
         if self.verbose > 0:
             msg = "demultiplex paired-end reads (method=%s)..." % self.method
             print(msg); sys.stdout.flush()
             
-        if self.inFqFile1.endswith(".gz"):
+        if self.inFqFile1.endswith(".gz"): #use gzip only if ".gz" extension
             inFqHandle1 = gzip.open(self.inFqFile1, "r")
         else:
             inFqHandle1 = open(self.inFqFile1, "r")
-        if self.inFqFile2.endswith(".gz"):
+        if self.inFqFile2.endswith(".gz"): #use gzip only if ".gz" extension
             inFqHandle2 = gzip.open(self.inFqFile2, "r")
         else:
             inFqHandle2 = open(self.inFqFile2, "r")
             
-        reads1 = FastqGeneralIterator(inFqHandle1)
+        reads1 = FastqGeneralIterator(inFqHandle1) # Creates a tuple of title, sequence and quality (get rid of spaces, '+' signs, spaces, line breaks)
         reads2 = FastqGeneralIterator(inFqHandle2)
         
         dOutFqHandles = {}
@@ -564,8 +608,8 @@ class Demultiplex(object):
         meanQuals = []
         
         for (read1_id, read1_seq, read1_q), (read2_id, read2_seq, read2_q) \
-            in itertools.izip(reads1, reads2):
-            if read1_id.split(" ")[0] != read2_id.split(" ")[0]:
+            in itertools.izip(reads1, reads2):                             # loop over each pair of reads
+            if read1_id.split(" ")[0] != read2_id.split(" ")[0]: #Check if the beginning of the names of read 1 and 2 until the first space is the same
                 msg = "ERROR: for pair %i, reads %s and %s are not paired" \
                       % (nbPairs, read1_id, read2_id)
                 sys.stderr.write("%s\n" % msg)
@@ -589,25 +633,27 @@ class Demultiplex(object):
                 assigned, ind, idx1, idx2 = self.identifyIndividual_4b(read1_seq)
             elif self.method == "4c":
                 assigned, ind, idx1, idx2 = self.identifyIndividual_4c(read1_seq)
+            elif self.method == "4d":
+                assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_4d(read1_seq, read2_seq)
             elif self.method == "5":
                 assigned, ind = self.identifyIndividual_5(read1, read2)
                 
             if assigned:
                 nbAssignedPairs += 1
-                if self.method == "3":
+                if self.method in ["3","4d"]:
                     nbAssignedPairsTwoTags += t2
                     nbAssignedPairsOneTag += t1
                 if ind not in dOutFqHandles:
                     dOutFqHandles[ind] = [
-                        gzip.open("%s_%s_R1.fastq.gz" %
-                                  (self.outFqPrefix, ind), "w"),
+                        gzip.open("%s_%s_R1.fastq.gz" %                 #names the output file 'prefix'_'indiv'_R1.fastq.gz
+                                  (self.outFqPrefix, ind), "w"),        # prefix : attribute parsed as argument --ofqp
                         gzip.open("%s_%s_R2.fastq.gz" %
                                   (self.outFqPrefix, ind), "w")]
-                dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
+                dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %        #First element (=Forward Read) of the list= Ind ID, seq, quality
                                             (read1_id,
                                              read1_seq[idx1:],
                                              read1_q[idx1:]))
-                dOutFqHandles[ind][1].write("@%s\n%s\n+\n%s\n" %
+                dOutFqHandles[ind][1].write("@%s\n%s\n+\n%s\n" %        #Second element (=Reverse Read) of the list= Ind ID, seq, quality
                                             (read2_id,
                                              read2_seq[idx2:],
                                              read2_q[idx2:]))
@@ -627,7 +673,7 @@ class Demultiplex(object):
                                                       read2_seq,
                                                       read2_q))
                 
-        inFqHandle1.close()
+        inFqHandle1.close() # Close the gzip file with the read data
         inFqHandle2.close()
         [handle.close() for (ind,handles) in dOutFqHandles.items() \
          for handle in handles]
@@ -635,7 +681,7 @@ class Demultiplex(object):
         if self.verbose > 0:
             msg = "total nb of read pairs: %i" % nbPairs
             msg += "\nnb of assigned read pairs: %i" % nbAssignedPairs
-            if "3" in self.method:
+            if self.method in ["3","4d"]:
                 msg += "; 2t=%i 1t=%i" % (nbAssignedPairsTwoTags, \
                                           nbAssignedPairsOneTag)
             msg += "\nnb of unassigned read pairs: %i (%.2f%%" % (
@@ -647,9 +693,9 @@ class Demultiplex(object):
             print(msg); sys.stdout.flush()
             
             
-    def run(self):
+    def run(self): # Method calling the demultiplex methods
         self.loadTags()
-        if self.method == "4c":
+        if self.method in ["4c","4d"]:
             self.prepareRemainingMotif()
             self.compilePatterns()
         self.checkDist()
