@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.4.0" # http://semver.org/
+progVersion = "1.5.0" # http://semver.org/
 
 
 class Demultiplex(object):
