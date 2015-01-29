@@ -203,7 +203,7 @@ adp.contents.fastqc <- function(all.qc, adp="Illumina Universal Adapter"){
   adp.content <- matrix(NA, nrow=N, ncol=length(positions),
                         dimnames=list(names(all.qc), positions))
   for(i in 1:N)
-    adp.content[i,] <- all.qc[[1]]$Adapter_Content[[adp]]
+    adp.content[i,] <- all.qc[[i]]$Adapter_Content[[adp]]
   return(adp.content)
 }
 
