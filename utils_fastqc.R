@@ -3,7 +3,8 @@
 ## Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
 ## Author: Timothée Flutre
-## Versioning: https://github.com/timflutre/quantgen
+## Version: 1.2.0 # http://semver.org/
+## Download: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
