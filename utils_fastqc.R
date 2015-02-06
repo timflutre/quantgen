@@ -414,8 +414,11 @@ plot.seq.length <- function(seq.length,
   lengths <- sapply(strsplit(colnames(seq.length), "-"),
                     function(x){as.numeric(x[1])})
 
-  if(is.null(lowest.len))
+  if(is.null(lowest.len)){
     lowest.len <- min(c(seq.length))
+    if(is.infinite(lowest.len))
+      stop("did you give log10(seq.length)? maybe use also lowest.len=0")
+  }
   if(is.null(highest.len))
     highest.len <- max(c(seq.length))
 
