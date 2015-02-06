@@ -1,2 +1,10 @@
 This directory contains documents, scripts and programs that I often use
 for my research, particularly in quantitative genetics.
+
+Feel free to make pull requests. However, make sure first that you work with
+the UTF-8 encoding, otherwise:
+$ iconv --from-code=ISO-8859-1 --to-code=UTF-8 myscript_ISO.R > myscript.R
+If you work on Windows, do this:
+$ git config --global core.autocrlf true
+If you work on Linux or Mac, do that:
+$ git config --global core.autocrlf input
