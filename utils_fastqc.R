@@ -2,7 +2,7 @@
 ## FastQC program (http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 ## Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
-## Author: Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+## Author: Timothee Flutre [cre,aut], Nicolas Rode [ctb]
 ## Version: 1.3.0 # http://semver.org/
 ## Download: https://github.com/timflutre/quantgen
 ##
@@ -24,7 +24,7 @@
 ##' Heavily inspired from readFastQC() in the Repitools package.
 ##' @param file the name of the file which the data are to be read from
 ##' @return list
-##' @author Timothée Flutre [cre,aut]
+##' @author TimothÃ©e Flutre [cre,aut]
 read.fastqc.txt <- function(file){
   stopifnot(file.exists(file),
             grepl(pattern="##FastQC", x=readLines(file, n=1)))
@@ -55,7 +55,7 @@ read.fastqc.txt <- function(file){
 ##' @param path character vector of the path to the directory containing the zip archives (will be followed by "*_fastqc.zip")
 ##' @param glob character vector with wildcard(s) to find zip archives
 ##' @return list of lists (one per zip archive)
-##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+##' @author TimothÃ©e Flutre [cre,aut], Nicolas Rode [ctb]
 read.fastq.zips <- function(path=".", glob="*_fastqc.zip"){
   zip.archives <- Sys.glob(paste(path, glob, sep="/"))
   if(length(zip.archives) == 0)
@@ -118,7 +118,7 @@ read.fastq.zips <- function(path=".", glob="*_fastqc.zip"){
 ##' To be used after read.fastq.zips().
 ##' @param all.qc returned value from read.fastq.zips()
 ##' @return numeric vector
-##' @author Timothée Flutre [cre,aut]
+##' @author TimothÃ©e Flutre [cre,aut]
 nreads.fastqc <- function(all.qc){
   stopifnot(is.list(all.qc), ! is.null(names(all.qc)))
   sapply(all.qc, function(qc){
@@ -133,7 +133,7 @@ nreads.fastqc <- function(all.qc){
 ##' @param x numeric vector with the number of reads per entry
 ##' @param main an overall title for the plot
 ##' @return None
-##' @author Timothée Flutre [cre,aut]
+##' @author TimothÃ©e Flutre [cre,aut]
 barplot.nreads.fastqc <- function(x, main=""){
   stopifnot(is.vector(x), is.numeric(x), ! is.null(names(x)))
   par(mar=c(10, 7, 4, 1))
@@ -150,7 +150,7 @@ barplot.nreads.fastqc <- function(x, main=""){
 ##' @param perc boolean, return percentage of reads if TRUE, number of reads if FALSE, requires nreads
 ##' @param nreads return value from nreads.fastqc()
 ##' @return numeric matrix with entries in rows and number of reads per quality in columns
-##' @author Timothée Flutre [cre,aut]
+##' @author TimothÃ©e Flutre [cre,aut]
 quals.fastqc <- function(all.qc, perc=FALSE, nreads=NULL){
   stopifnot(is.list(all.qc), ! is.null(names(all.qc)),
             ifelse(perc, ! is.null(nreads), TRUE))
@@ -177,7 +177,7 @@ quals.fastqc <- function(all.qc, perc=FALSE, nreads=NULL){
 ##' @param legend.x the x y co-ordinates to be used to position the legend
 ##' @param legend.y the y co-ordinates to be used to position the legend
 ##' @return None
-##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+##' @author TimothÃ©e Flutre [cre,aut], Nicolas Rode [ctb]
 plot.nbseq.qual <- function(all.qc,qual,
                             numgroup=25,
                             freq=TRUE,
@@ -263,7 +263,7 @@ plot.nbseq.qual <- function(all.qc,qual,
 ##' @param all.qc returned value from read.fastq.zips()
 ##' @param adp name of the adapter to plot (default="Illumina Universal Adapter")
 ##' @return numeric matrix with entries in rows and number of reads per quality in columns
-##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+##' @author TimothÃ©e Flutre [cre,aut], Nicolas Rode [ctb]
 adp.contents.fastqc <- function(all.qc, adp="Illumina Universal Adapter"){
   stopifnot(is.list(all.qc), ! is.null(names(all.qc)),
             adp %in% c("Illumina Universal Adapter",
@@ -298,7 +298,7 @@ adp.contents.fastqc <- function(all.qc, adp="Illumina Universal Adapter"){
 ##' @param legend.x the x y co-ordinates to be used to position the legend
 ##' @param legend.y the y co-ordinates to be used to position the legend
 ##' @return None
-##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+##' @author TimothÃ©e Flutre [cre,aut], Nicolas Rode [ctb]
 plot.adp.content <- function(adp.content,
                              numgroup=25,
                              lowest.adp=NULL,
@@ -360,7 +360,7 @@ plot.adp.content <- function(adp.content,
 ##' To be used after read.fastq.zips().
 ##' @param all.qc returned value from read.fastq.zips()
 ##' @return numeric matrix with entries in rows and number of reads per length in columns
-##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+##' @author TimothÃ©e Flutre [cre,aut], Nicolas Rode [ctb]
 seq.lengths.fastqc <- function(all.qc){
   stopifnot(is.list(all.qc), ! is.null(names(all.qc)))
   N <- length(all.qc)
@@ -395,7 +395,7 @@ seq.lengths.fastqc <- function(all.qc){
 ##' @param legend.y the y co-ordinates to be used to position the legend
 ##' @param use.log use the log for the y-axis
 ##' @return None
-##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
+##' @author TimothÃ©e Flutre [cre,aut], Nicolas Rode [ctb]
 plot.seq.length <- function(seq.length,
                             numgroup=25,
                             lowest.len=NULL,
