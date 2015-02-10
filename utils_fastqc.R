@@ -3,7 +3,7 @@
 ## Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
 ## Author: Timothee Flutre [cre,aut], Nicolas Rode [ctb]
-## Version: 2.0.0 # http://semver.org/
+## Version: 2.0.1 # http://semver.org/
 ## Download: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
@@ -264,7 +264,7 @@ plot.nbseq.qual <- function(qual,
 ##' To be used after read.fastq.zips().
 ##' @param all.qc return value from read.fastq.zips()
 ##' @param adp name of the adapter to plot (default="Illumina Universal Adapter")
-##' @return numeric matrix with entries in rows and number of sequences per quality in columns
+##' @return numeric matrix with entries in rows and positions along sequences in columns
 ##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
 adp.contents.fastqc <- function(all.qc, adp="Illumina Universal Adapter"){
   stopifnot(is.list(all.qc), ! is.null(names(all.qc)),
@@ -365,7 +365,7 @@ plot.adp.content <- function(adp.content,
 ##'
 ##' To be used after read.fastq.zips().
 ##' @param all.qc return value from read.fastq.zips()
-##' @return numeric matrix with entries in rows and number of sequences per length in columns
+##' @return numeric matrix with entries in rows and positions along sequences in columns
 ##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
 seq.lengths.fastqc <- function(all.qc){
   stopifnot(is.list(all.qc), ! is.null(names(all.qc)))
