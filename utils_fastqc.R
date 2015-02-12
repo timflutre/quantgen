@@ -3,7 +3,7 @@
 ## Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
 ## Author: Timothee Flutre [cre,aut], Nicolas Rode [ctb]
-## Version: 2.0.1 # http://semver.org/
+## Version: 2.0.2 # http://semver.org/
 ## Download: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
@@ -74,12 +74,12 @@ read.fastq.zips <- function(path=".", glob="*_fastqc.zip"){
         warning = function(w){
           message(paste(basename(zip.archive), "could no be unzipped."))
           message("Original warning message:")
-          message(w)
+          message(paste0(w, ""))
         },
         error = function(e){
           message(paste(basename(zip.archive), "could no be unzipped."))
           message("Original error message:")
-          message(e)
+          message(paste0(e, ""))
         })
 
     tryCatch(
@@ -87,19 +87,19 @@ read.fastq.zips <- function(path=".", glob="*_fastqc.zip"){
           f.base <- sub(".zip", "", basename(zip.archive))
           qc <- read.fastqc.txt(paste0(zipdir, "/", f.base, "/fastqc_data.txt"))
         },
-        warning = function(w) {
+        warning = function(w){
+          qc <- list(warn="warning")
           message(paste0(sub(".zip", "", basename(zip.archive)),
                          ".txt could no be found."))
           message("Original warning message:")
-          message(w)
-          qc <- list(warn="warning")
+          message(paste0(w, ""))
         },
         error = function(e){
           qc <- list(err="error")
           message(paste0(sub(".zip", "", basename(zip.archive)),
                          ".txt could no be found."))
           message("Original error message:")
-          message(e)
+          message(paste0(e, 33))
         })
 
     unlink(zipdir)
