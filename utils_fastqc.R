@@ -3,7 +3,7 @@
 ## Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
 ## Author: Timothee Flutre [cre,aut], Nicolas Rode [ctb]
-## Version: 2.0.2 # http://semver.org/
+## Version: 2.0.3 # http://semver.org/
 ## Download: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
@@ -267,10 +267,7 @@ plot.nbseq.qual <- function(qual,
 ##' @return numeric matrix with entries in rows and positions along sequences in columns
 ##' @author Timothée Flutre [cre,aut], Nicolas Rode [ctb]
 adp.contents.fastqc <- function(all.qc, adp="Illumina Universal Adapter"){
-  stopifnot(is.list(all.qc), ! is.null(names(all.qc)),
-            adp %in% c("Illumina Universal Adapter",
-                       "Illumina Small RNA Adapter",
-                       "Nextera Transposase Sequence"))
+  stopifnot(is.list(all.qc), ! is.null(names(all.qc)))
   N <- length(all.qc)
   L <- NULL
   for(i in 1:N)
@@ -280,6 +277,7 @@ adp.contents.fastqc <- function(all.qc, adp="Illumina Universal Adapter"){
   adp.content <- matrix(NA, nrow=N, ncol=length(positions),
                         dimnames=list(names(all.qc), positions))
   for(i in 1:N){
+    stopifnot(adp %in% names(all.qc[[i]]$Adapter_Content))
     dif <- L[max] - L[i]
     if(dif == 0){
       adp.content[i,] <- all.qc[[i]]$Adapter_Content[[adp]]
