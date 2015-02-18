@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Aim: trim and filter reads in two paired fastq files
+# Aim: trim and filter reads in fastq files
 # Copyright (C) 2015 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Author: Timothée Flutre
@@ -47,7 +47,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.0" # http://semver.org/
+progVersion = "0.2.0" # http://semver.org/
 
 
 class Trimfilter(object):
@@ -71,7 +71,7 @@ class Trimfilter(object):
         
         The format complies with help2man (http://www.gnu.org/s/help2man)
         """
-        msg = "`%s' trims and filters reads in two paired fastq files.\n" % os.path.basename(sys.argv[0])
+        msg = "`%s' trims and filters reads in fastq files.\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Usage: %s [OPTIONS] ...\n" % os.path.basename(sys.argv[0])
         msg += "\n"
@@ -82,7 +82,7 @@ class Trimfilter(object):
         msg += "      --idir\tpath to the input directory with the fastq files (default=.)\n"
         msg += "      --ifq1\tpath to the first input fastq file\n"
         msg += "\t\tcan be compressed with gzip\n"
-        msg += "      --ifq2\tpath to the second input fastq file\n"
+        msg += "      --ifq2\tpath to the second input fastq file, optional\n"
         msg += "\t\tcan be compressed with gzip\n"
         msg += "\t\terror raised if reads not in same order as --ifq1\n"
         msg += "      --adp\tpath to file with adapters in fasta format\n"
@@ -174,17 +174,13 @@ class Trimfilter(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.inFqFile2 == "":
-            msg = "ERROR: missing compulsory option --ifq2"
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        self.inFqFile2 = "%s/%s" % (self.inDir, self.inFqFile2)
-        if not os.path.exists(self.inFqFile2):
-            msg = "ERROR: can't find file %s" % self.inFqFile2
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
+        if self.inFqFile2 != "":
+            self.inFqFile2 = "%s/%s" % (self.inDir, self.inFqFile2)
+            if not os.path.exists(self.inFqFile2):
+                msg = "ERROR: can't find file %s" % self.inFqFile2
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
         if self.adpFile == "":
             msg = "ERROR: missing compulsory option --adp"
             sys.stderr.write("%s\n\n" % msg)
@@ -218,24 +214,36 @@ class Trimfilter(object):
                 self.dAdps2[tmp[adp].id] = str(tmp[adp].seq)
             else:
                 self.dAdps[tmp[adp].id] = str(tmp[adp].seq)
+                
+        if self.inFqFile2 == "" and len(self.dAdps) == 0:
+            msg = "ERROR: no adapter was loaded"
+            sys.stderr.write("%s\n\n" % msg)
+            sys.exit(1)
             
         if self.verbose > 0:
-            msg = "nb of adapters: %i" % (len(self.dAdps1) + len(self.dAdps2) \
-                                          + len(self.dAdps))
+            if self.inFqFile2 == "":
+                msg = "nb of adapters: %i" % (len(self.dAdps))
+            else:
+                msg = "nb of adapters: R1=%i R2=%i both=%i" % (len(self.dAdps1),
+                                                               len(self.dAdps2),
+                                                               len(self.dAdps))
             print(msg); sys.stdout.flush()
             
             
     def openOutputFiles(self):
         dOutHandles = {}
-        dOutHandles["P1"] = gzip.open("%s_%s_R1.fq.gz" %
-                                        (self.outPrefix, "paired"), "w")
-        dOutHandles["U1"] = gzip.open("%s_%s_R1.fq.gz" %
-                                        (self.outPrefix, "unpaired"), "w")
-        dOutHandles["P2"] = gzip.open("%s_%s_R2.fq.gz" %
-                                        (self.outPrefix, "paired"), "w")
-        dOutHandles["U1"] = gzip.open("%s_%s_R2.fq.gz" %
-                                        (self.outPrefix, "unpaired"), "w")
         dOutHandles["log"] = gzip.open("%s.log.gz" % self.outPrefix, "w")
+        if self.inFqFile2 == "":
+            dOutHandles["out"] = gzip.open("%s.fq.gz" % self.outPrefix, "w")
+        else:
+            dOutHandles["P1"] = gzip.open("%s_%s_R1.fq.gz" %
+                                          (self.outPrefix, "paired"), "w")
+            dOutHandles["U1"] = gzip.open("%s_%s_R1.fq.gz" %
+                                          (self.outPrefix, "unpaired"), "w")
+            dOutHandles["P2"] = gzip.open("%s_%s_R2.fq.gz" %
+                                          (self.outPrefix, "paired"), "w")
+            dOutHandles["U1"] = gzip.open("%s_%s_R2.fq.gz" %
+                                          (self.outPrefix, "unpaired"), "w")
         return dOutHandles
         
         
@@ -301,11 +309,10 @@ class Trimfilter(object):
         
         
     def logAdpMatches(self, handle, read_id, dAdp2Start):
-        if len(dAdp2Start) != 0:
-            for (adpName,adpStart) in dAdp2Start.items():
-                handle.write("%s\t%s\t%i\n" % (read_id, adpName, adpStart))
-                
-                
+        for (adpName,adpStart) in dAdp2Start.items():
+            handle.write("%s\t%s\t%i\n" % (read_id, adpName, adpStart))
+            
+            
     def getTrimmingCoord(self, seqLen, dAdp2Start):
         """
         >>> i = Trimfilter()
@@ -323,9 +330,55 @@ class Trimfilter(object):
         return idx
         
         
+    def trimfilterSingleReads(self):
+        """
+        Read the fastq file, trim and filter, write the output.
+        """
+        if self.verbose > 0:
+            msg = "trim and filter single-end reads (err=%i) ..." % self.maxNbErrors
+            print(msg); sys.stdout.flush()
+            
+        if self.inFqFile1.endswith(".gz"):
+            inFqHandle = gzip.open(self.inFqFile1, "r")
+        else:
+            inFqHandle = open(self.inFqFile1, "r")
+            
+        reads = FastqGeneralIterator(inFqHandle)
+        
+        dOutHandles = self.openOutputFiles()
+        dOutHandles["log"].write("read.id\tadp.name\tadp.start\n")
+        nbReads = 0
+        nbTrimmedReads = 0
+        nbFilteredReads = 0
+        
+        for (read_id, read_seq, read_q) in reads:
+            nbReads += 1
+            
+            dAdp2Start = {}
+            dAdp2Start = self.getAdpStarts(read_seq, self.dAdps, dAdp2Start)
+            
+            self.logAdpMatches(dOutHandles["log"], read_id, dAdp2Start)
+            idx = self.getTrimmingCoord(len(read_seq), dAdp2Start)
+            dOutHandles["out"].write("@%s\n%s\n+\n%s\n" %
+                                     (read_id,
+                                      read_seq[:idx],
+                                      read_q[:idx]))
+            
+            if idx != len(read_seq):
+                nbTrimmedReads += 1
+                
+        inFqHandle.close()
+        [handle.close() for (out,handle) in dOutHandles.items()]
+        
+        if self.verbose > 0:
+            msg = "total nb of reads: %i" % nbReads
+            msg += "\nnb of trimmed reads: %i" % nbTrimmedReads
+            print(msg); sys.stdout.flush()
+            
+            
     def trimfilterPairedReads(self):
         """
-        Read the data files, trims and filters, writes the output.
+        Read the fastq files, trim and filter, write the output.
         """
         if self.verbose > 0:
             msg = "trim and filter paired-end reads (err=%i) ..." % self.maxNbErrors
@@ -347,6 +400,8 @@ class Trimfilter(object):
         dOutHandles["log"].write("read.id\tadp.name\tadp.start\n")
         nbPairs = 0
         nbTrimmedPairs = 0
+        nbTrimmedRead1 = 0
+        nbTrimmedRead2 = 0
         nbFilteredPairs = 0
         
         for (read1_id, read1_seq, read1_q), (read2_id, read2_seq, read2_q) \
@@ -366,18 +421,24 @@ class Trimfilter(object):
             dAdp2Start2 = self.getAdpStarts(read2_seq, self.dAdps, dAdp2Start2)
             
             self.logAdpMatches(dOutHandles["log"], read1_id, dAdp2Start1)
-            idx = self.getTrimmingCoord(len(read1_seq), dAdp2Start1)
+            idx1 = self.getTrimmingCoord(len(read1_seq), dAdp2Start1)
             dOutHandles["P1"].write("@%s\n%s\n+\n%s\n" %
                                     (read1_id,
-                                     read1_seq[:idx],
-                                     read1_q[:idx]))
+                                     read1_seq[:idx1],
+                                     read1_q[:idx1]))
             self.logAdpMatches(dOutHandles["log"], read2_id, dAdp2Start2)
-            idx = self.getTrimmingCoord(len(read2_seq), dAdp2Start2)
+            idx2 = self.getTrimmingCoord(len(read2_seq), dAdp2Start2)
             dOutHandles["P2"].write("@%s\n%s\n+\n%s\n" %
                                     (read2_id,
-                                     read2_seq[:idx],
-                                     read2_q[:idx]))
-            
+                                     read2_seq[:idx2],
+                                     read2_q[:idx2]))
+            if idx1 != len(read1_seq) and idx2 != len(read2_seq):
+                nbTrimmedPairs += 1
+            elif idx1 != len(read1_seq) and idx2 == len(read2_seq):
+                nbTrimmedRead1 += 1
+            elif idx1 == len(read1_seq) and idx2 != len(read2_seq):
+                nbTrimmedRead2 += 1
+                
         inFqHandle1.close()
         inFqHandle2.close()
         [handle.close() for (out,handle) in dOutHandles.items()]
@@ -390,9 +451,12 @@ class Trimfilter(object):
             
     def run(self):
         self.loadAdapters()
-        self.trimfilterPairedReads()
-        
-        
+        if self.inFqFile2 == "":
+            self.trimfilterSingleReads()
+        else:
+            self.trimfilterPairedReads()
+            
+            
 if __name__ == "__main__":
     i = Trimfilter()
     
@@ -402,8 +466,9 @@ if __name__ == "__main__":
     
     if i.verbose > 0:
         startTime = time.time()
-        msg = "START %s %s" % (os.path.basename(sys.argv[0]),
-                               time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "START %s %s %s" % (os.path.basename(sys.argv[0]),
+                                  progVersion,
+                                  time.strftime("%Y-%m-%d %H:%M:%S"))
         msg += "\ncmd-line: %s" % ' '.join(sys.argv)
         msg += "\ncwd: %s" % os.getcwd()
         print(msg); sys.stdout.flush()
@@ -411,8 +476,9 @@ if __name__ == "__main__":
     i.run()
     
     if i.verbose > 0:
-        msg = "END %s %s" % (os.path.basename(sys.argv[0]),
-                             time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "END %s %s %s" % (os.path.basename(sys.argv[0]),
+                                progVersion,
+                                time.strftime("%Y-%m-%d %H:%M:%S"))
         endTime = time.time()
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))

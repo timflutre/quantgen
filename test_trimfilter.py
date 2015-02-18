@@ -42,7 +42,7 @@ class TestTrimfilter(object):
     def __init__(self):
         self.verbose = 0
         self.pathToProg = ""
-        self.testsToRun = ["exact", "fuzzy"]
+        self.testsToRun = ["pairedexact", "pairedfuzzy", "singleexact"]
         self.clean = True
         
         
@@ -61,7 +61,7 @@ class TestTrimfilter(object):
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
-        msg += "  -t, --test\tidentifiers of test(s) to run (default=exact-fuzzy)\n"
+        msg += "  -t, --test\tidentifiers of test(s) to run (default=pairedexact-pairedfuzzy-singleexact)\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -130,7 +130,7 @@ class TestTrimfilter(object):
             self.help()
             sys.exit(1)
         for t in self.testsToRun:
-            if t not in ["exact", "fuzzy"]:
+            if t not in ["pairedexact", "pairedfuzzy", "singleexact"]:
                 msg = "ERROR: unknown --test %s" % t
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -152,7 +152,7 @@ class TestTrimfilter(object):
         return cwd, testDir
         
         
-    def writeAdpFile(self, adpFile):
+    def writeAdpFile(self, adpFile, paired):
         """
         The adapter is 5'-AAA-3', for both R1 and R2 reads. Thus, in 
         case of read-through, we should look for TTT in the 3' end of both R1
@@ -160,8 +160,11 @@ class TestTrimfilter(object):
         5'-TAG-3' in R1, thus 5'-CTA-3' for R2.
         """
         with open(adpFile, "w") as handle:
-            txt = ">adp2_rc/1\nTTT\n" # reverse-complement of the R2 adapter
-            txt += ">adp1_rc/2\nCTATTT\n" # revcomp of R1 adp preceded by the tag
+            if paired:
+                txt = ">adp2_rc/1\nTTT\n" # reverse-complement of the R2 adapter
+                txt += ">adp1_rc/2\nCTATTT\n" # revcomp of R1 adp preceded by the tag
+            else:
+                txt = ">adp2_rc\nTTT\n" # reverse-complement of the R2 adapter
             handle.write(txt)
             
             
@@ -172,11 +175,13 @@ class TestTrimfilter(object):
         args = [self.pathToProg,
                 "--idir", "./",
                 "--ifq1", ifq1,
-                "--ifq2", ifq2,
                 "--adp", adpFile,
                 "--err", str(maxNbErrors),
                 "--op", "test",
                 "-v", str(self.verbose - 1)]
+        if ifq2 != None:
+            args.append("--ifq2")
+            args.append(ifq2)
         if self.verbose > 0:
             print(" ".join(args))
         # msgs = check_output(args)
@@ -200,7 +205,7 @@ class TestTrimfilter(object):
     #==========================================================================
     
     
-    def test_exact_prepare(self):
+    def test_prepare(self, paired):
         ifq1 = "reads_R1.fq.gz"
         ifq2 = "reads_R2.fq.gz"
         ifq1Handle = gzip.open(ifq1, "w")
@@ -243,41 +248,44 @@ class TestTrimfilter(object):
                 os.remove(f)
                 
         adpFile = "adapters.fa"
-        self.writeAdpFile(adpFile)
+        self.writeAdpFile(adpFile, paired)
         
         return ifq1, ifq2, adpFile
         
         
-    def test_exact_comp(self, msgs):
+    #==========================================================================
+    
+    
+    def test_pairedexact_comp(self, msgs):
         testId = 1
         if not os.path.exists("test_paired_R1.fq.gz") \
            or not os.path.exists("test_unpaired_R1.fq.gz") \
            or not os.path.exists("test_paired_R2.fq.gz") \
            or not os.path.exists("test_unpaired_R2.fq.gz") \
            or not os.path.exists("test.log.gz"):
-            print("test_exact: fail (%i)" % testId)
+            print("test_pairedexact: fail (%i)" % testId)
             return
         testId += 1
         with gzip.open("test.log.gz") as logHandle:
             lines = logHandle.readlines()
             if lines[1] != "INST1:1:FLOW1:2:2104:15343:197391 1:N:0:\tadp2_rc/1\t10\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[1])
+                print("test_pairedexact: fail (%i)" % testId)
+                print(lines[1])
                 return
             testId += 1
             if lines[2] != "INST1:1:FLOW1:2:2104:15343:197391 2:N:0:\tadp1_rc/2\t10\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[2])
+                print("test_pairedexact: fail (%i)" % testId)
+                print(lines[2])
                 return
             testId += 1
             if lines[3] != "INST1:1:FLOW1:2:2104:15343:197392 1:N:0:\tadp2_rc/1\t-1\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[3])
+                print("test_pairedexact: fail (%i)" % testId)
+                print(lines[3])
                 return
             testId += 1
             if lines[4] != "INST1:1:FLOW1:2:2104:15343:197392 2:N:0:\tadp1_rc/2\t-1\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[4])
+                print("test_pairedexact: fail (%i)" % testId)
+                print(lines[4])
                 return
             testId += 1
         with gzip.open("test_paired_R1.fq.gz") as inFqHandle1, \
@@ -288,79 +296,79 @@ class TestTrimfilter(object):
                                       alphabet=IUPAC.ambiguous_dna))
             if reads1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" and \
                reads2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedexact: fail (%i)" % testId)
                 print(str(reads1[0].id))
                 print(str(reads2[0].id))
                 return
             testId += 1
             if str(reads1[0].seq) != "GGGGGGGGGG" or \
                str(reads2[0].seq) != "CCCCCCCCCC":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedexact: fail (%i)" % testId)
                 print(str(reads1[0].seq))
                 print(str(reads2[0].seq))
                 return
             testId += 1
             if reads1[1].id != "INST1:1:FLOW1:2:2104:15343:197392" and \
                reads2[1].id != "INST1:1:FLOW1:2:2104:15343:197392":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedexact: fail (%i)" % testId)
                 print(str(reads1[1].id))
                 print(str(reads2[1].id))
                 return
             testId += 1
             if str(reads1[1].seq) != "GGGGGGGGGGTT" or \
                str(reads2[1].seq) != "CCCCCCCCCCCTATT":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedexact: fail (%i)" % testId)
                 print(str(reads1[1].seq))
                 print(str(reads2[1].seq))
                 return
             testId += 1
-        print("test_exact: pass")
+        print("test_pairedexact: pass")
         
         
-    def test_exact(self):
+    def test_pairedexact(self):
         if self.verbose > 0:
-            print("launch test_exact ...")
+            print("launch test_pairedexact ...")
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
-        ifq1, ifq2, adpFile = self.test_exact_prepare()
+        ifq1, ifq2, adpFile = self.test_prepare(True)
         msgs = self.launchProg(ifq1, ifq2, adpFile, 0)
-        self.test_exact_comp(msgs)
+        self.test_pairedexact_comp(msgs)
         self.afterTest(cwd, testDir)
         
         
     #==========================================================================
     
     
-    def test_fuzzy_comp(self, msgs):
+    def test_pairedfuzzy_comp(self, msgs):
         testId = 1
         if not os.path.exists("test_paired_R1.fq.gz") \
            or not os.path.exists("test_unpaired_R1.fq.gz") \
            or not os.path.exists("test_paired_R2.fq.gz") \
            or not os.path.exists("test_unpaired_R2.fq.gz") \
            or not os.path.exists("test.log.gz"):
-            print("test_exact: fail (%i)" % testId)
+            print("test_pairedfuzzy: fail (%i)" % testId)
             return
         testId += 1
         with gzip.open("test.log.gz") as logHandle:
             lines = logHandle.readlines()
             if lines[1] != "INST1:1:FLOW1:2:2104:15343:197391 1:N:0:\tadp2_rc/1\t10\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[1])
+                print("test_pairedfuzzy: fail (%i)" % testId)
+                print(lines[1])
                 return
             testId += 1
             if lines[2] != "INST1:1:FLOW1:2:2104:15343:197391 2:N:0:\tadp1_rc/2\t10\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[2])
+                print("test_pairedfuzzy: fail (%i)" % testId)
+                print(lines[2])
                 return
             testId += 1
             if lines[3] != "INST1:1:FLOW1:2:2104:15343:197392 1:N:0:\tadp2_rc/1\t10\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[3])
+                print("test_pairedfuzzy: fail (%i)" % testId)
+                print(lines[3])
                 return
             testId += 1
             if lines[4] != "INST1:1:FLOW1:2:2104:15343:197392 2:N:0:\tadp1_rc/2\t10\n":
-                print("test_exact: fail (%i)" % testId)
-                print(line[4])
+                print("test_pairedfuzzy: fail (%i)" % testId)
+                print(lines[4])
                 return
             testId += 1
         with gzip.open("test_paired_R1.fq.gz") as inFqHandle1, \
@@ -371,43 +379,102 @@ class TestTrimfilter(object):
                                       alphabet=IUPAC.ambiguous_dna))
             if reads1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" and \
                reads2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedfuzzy: fail (%i)" % testId)
                 print(str(reads1[0].id))
                 print(str(reads2[0].id))
                 return
             testId += 1
             if str(reads1[0].seq) != "GGGGGGGGGG" or \
                str(reads2[0].seq) != "CCCCCCCCCC":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedfuzzy: fail (%i)" % testId)
                 print(str(reads1[0].seq))
                 print(str(reads2[0].seq))
                 return
             testId += 1
             if reads1[1].id != "INST1:1:FLOW1:2:2104:15343:197392" and \
                reads2[1].id != "INST1:1:FLOW1:2:2104:15343:197392":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedfuzzy: fail (%i)" % testId)
                 print(str(reads1[1].id))
                 print(str(reads2[1].id))
                 return
             testId += 1
             if str(reads1[1].seq) != "GGGGGGGGGG" or \
                str(reads2[1].seq) != "CCCCCCCCCC":
-                print("test_exact: fail (%i)" % testId)
+                print("test_pairedfuzzy: fail (%i)" % testId)
                 print(str(reads1[1].seq))
                 print(str(reads2[1].seq))
                 return
             testId += 1
-        print("test_fuzzy: pass")
+        print("test_pairedfuzzy: pass")
         
         
-    def test_fuzzy(self):
+    def test_pairedfuzzy(self):
         if self.verbose > 0:
-            print("launch test_fuzzy ...")
+            print("launch test_pairedfuzzy ...")
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
-        ifq1, ifq2, adpFile = self.test_exact_prepare()
+        ifq1, ifq2, adpFile = self.test_prepare(True)
         msgs = self.launchProg(ifq1, ifq2, adpFile, 1)
-        self.test_fuzzy_comp(msgs)
+        self.test_pairedfuzzy_comp(msgs)
+        self.afterTest(cwd, testDir)
+        
+        
+    #==========================================================================
+    
+    
+    def test_singleexact_comp(self, msgs):
+        testId = 1
+        if not os.path.exists("test.fq.gz") \
+           or not os.path.exists("test.log.gz"):
+            print("test_singleexact: fail (%i)" % testId)
+            return
+        testId += 1
+        with gzip.open("test.log.gz") as logHandle:
+            lines = logHandle.readlines()
+            if lines[1] != "INST1:1:FLOW1:2:2104:15343:197391 1:N:0:\tadp2_rc\t10\n":
+                print("test_singleexact: fail (%i)" % testId)
+                print(lines[1])
+                return
+            testId += 1
+            if lines[2] != "INST1:1:FLOW1:2:2104:15343:197392 1:N:0:\tadp2_rc\t-1\n":
+                print("test_singleexact: fail (%i)" % testId)
+                print(lines[2])
+                return
+            testId += 1
+        with gzip.open("test.fq.gz") as inFqHandle:
+            reads = list(SeqIO.parse(inFqHandle, "fastq",
+                                      alphabet=IUPAC.ambiguous_dna))
+            if reads[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
+                print("test_singleexact: fail (%i)" % testId)
+                print(str(reads[0].id))
+                return
+            testId += 1
+            if str(reads[0].seq) != "GGGGGGGGGG":
+                print("test_singleexact: fail (%i)" % testId)
+                print(str(reads[0].seq))
+                return
+            testId += 1
+            if reads[1].id != "INST1:1:FLOW1:2:2104:15343:197392":
+                print("test_singleexact: fail (%i)" % testId)
+                print(str(reads[1].id))
+                return
+            testId += 1
+            if str(reads[1].seq) != "GGGGGGGGGGTT":
+                print("test_singleexact: fail (%i)" % testId)
+                print(str(reads[1].seq))
+                return
+            testId += 1
+        print("test_singleexact: pass")
+        
+        
+    def test_singleexact(self):
+        if self.verbose > 0:
+            print("launch test_singleexact ...")
+            sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
+        ifq1, ifq2, adpFile = self.test_prepare(False)
+        msgs = self.launchProg(ifq1, None, adpFile, 0)
+        self.test_singleexact_comp(msgs)
         self.afterTest(cwd, testDir)
         
         
@@ -415,10 +482,12 @@ class TestTrimfilter(object):
     
     
     def run(self):
-        if "exact" in self.testsToRun:
-            self.test_exact()
-        if "fuzzy" in self.testsToRun:
-            self.test_fuzzy()
+        if "pairedexact" in self.testsToRun:
+            self.test_pairedexact()
+        if "pairedfuzzy" in self.testsToRun:
+            self.test_pairedfuzzy()
+        if "singleexact" in self.testsToRun:
+            self.test_singleexact()
             
             
 if __name__ == "__main__":
@@ -430,8 +499,9 @@ if __name__ == "__main__":
     
     if i.verbose > 0:
         startTime = time.time()
-        msg = "START %s %s" % (os.path.basename(sys.argv[0]),
-                               time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "START %s %s %s" % (os.path.basename(sys.argv[0]),
+                                  progVersion,
+                                  time.strftime("%Y-%m-%d %H:%M:%S"))
         msg += "\ncmd-line: %s" % ' '.join(sys.argv)
         msg += "\ncwd: %s" % os.getcwd()
         print(msg); sys.stdout.flush()
@@ -439,8 +509,9 @@ if __name__ == "__main__":
     i.run()
     
     if i.verbose > 0:
-        msg = "END %s %s" % (os.path.basename(sys.argv[0]),
-                             time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "END %s %s %s" % (os.path.basename(sys.argv[0]),
+                                progVersion,
+                                time.strftime("%Y-%m-%d %H:%M:%S"))
         endTime = time.time()
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))
