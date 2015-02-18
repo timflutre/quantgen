@@ -87,7 +87,7 @@ class Trimfilter(object):
         msg += "\t\terror raised if reads not in same order as --ifq1\n"
         msg += "      --adp\tpath to file with adapters in fasta format\n"
         msg += "\t\tsame format as Trimmomatic, but only 'simple' mode is implemented\n"
-        msg += "      --err\tmax number of errors (default=0, i.e. exact matches)"
+        msg += "      --err\tmax number of errors (default=0, i.e. exact matches)\n"
         msg += "      --op\tprefix for the output files (2 paired, 2 unpaired, 1 log)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "\n"
