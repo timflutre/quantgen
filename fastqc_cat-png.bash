@@ -3,7 +3,7 @@
 # Aim: concatenate PNG files from FastQC (http://www.bioinformatics.babraham.ac.uk/projects/fastqc/) into a single PDF file
 # Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA)
 # License: GPL-3+
-# Author: Timothée Flutre
+# Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
 
 progVersion="1.1.0" # http://semver.org/
@@ -36,6 +36,7 @@ function help () {
 }
 
 # Display version and license information on stdout.
+# The person roles complies with R's guidelines (The R Journal Vol. 4/1, June 2012).
 function version () {
   msg="${0##*/} ${progVersion}\n"
   msg+="\n"
@@ -44,7 +45,7 @@ function version () {
   msg+="This is free software; see the source for copying conditions.  There is NO\n"
   msg+="warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
   msg+="\n"
-  msg+="Written by Timothée Flutre."
+  msg+="Written by Timothée Flutre [cre,aut]."
   echo -e "$msg"
 }
 
@@ -179,7 +180,7 @@ parseCmdLine "$@"
 
 if [ $verbose -gt "0" ]; then
   startTime=$(timer)
-  msg="START ${0##*/} $(date +"%Y-%m-%d") $(date +"%H:%M:%S")"
+  msg="START ${0##*/} ${progVersion} $(date +"%Y-%m-%d") $(date +"%H:%M:%S")"
   # msg+="\ncmd-line: $0 "$@ # comment if an option takes a glob as argument
   msg+="\ncwd: $(pwd)"
   echo -e $msg
@@ -188,7 +189,7 @@ fi
 run globZip globPng fastqcPrefix outPdf addFileName clean verbose
 
 if [ $verbose -gt "0" ]; then
-  msg="END ${0##*/} $(date +"%Y-%m-%d") $(date +"%H:%M:%S")"
+  msg="END ${0##*/} ${progVersion} $(date +"%Y-%m-%d") $(date +"%H:%M:%S")"
   msg+=" ($(timer startTime))"
   echo $msg
 fi

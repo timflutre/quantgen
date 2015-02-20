@@ -2,7 +2,7 @@
 ## FastQC program (http://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 ## Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
-## Author: Timothee Flutre [cre,aut], Nicolas Rode [ctb]
+## Persons: Timothée Flutre [cre,aut], Nicolas Rode [ctb]
 ## Version: 2.0.4 # http://semver.org/
 ## Download: https://github.com/timflutre/quantgen
 ##

@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 # Aim: download data from CiteULike for usage with Jabref
-# Copyright (C) 2014 Timothée Flutre
-# Author: Timothée Flutre
+# Copyright (C) 2014-2015 Timothée Flutre
+# Persons: Timothée Flutre [cre,aut]
 # License: GPL-3+
 
 # to allow code to work with Python 2 and 3
@@ -31,6 +31,9 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
+progVersion = "1.0.0" # http://semver.org/
+
+
 def user_input(msg):
     if sys.version_info[0] == 2:
         return raw_input(msg)
@@ -94,15 +97,15 @@ class Citeulike2Jabref(object):
     def version(self):
         """
         Display version and license information on stdout.
+        
+        The person roles complies with R's guidelines (The R Journal Vol. 4/1, June 2012).
         """
-        msg = "%s 1.0\n" % os.path.basename(sys.argv[0])
+        msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2014 Timothée Flutre.\n"
+        msg += "Copyright (C) 2014-2015 Timothée Flutre.\n"
         msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
-        msg += "This is free software; see the source for copying conditions.  There is NO\n"
-        msg += "warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
         msg += "\n"
-        msg += "Written by Timothée Flutre."
+        msg += "Written by Timothée Flutre [cre,aut]."
         print(msg.encode("utf8")); sys.stdout.flush()
         
         
@@ -394,8 +397,9 @@ if __name__ == "__main__":
     
     if i.verbose > 0:
         startTime = time.time()
-        msg = "START %s %s" % (os.path.basename(sys.argv[0]),
-                               time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "START %s %s %s" % (os.path.basename(sys.argv[0]),
+                                  progVersion,
+                                  time.strftime("%Y-%m-%d %H:%M:%S"))
         msg += "\ncmd-line: %s" % ' '.join(sys.argv)
         msg += "\ncwd: %s" % os.getcwd()
         print(msg); sys.stdout.flush()
@@ -403,8 +407,9 @@ if __name__ == "__main__":
     i.run()
     
     if i.verbose > 0:
-        msg = "END %s %s" % (os.path.basename(sys.argv[0]),
-                             time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "END %s %s %s" % (os.path.basename(sys.argv[0]),
+                                progVersion,
+                                time.strftime("%Y-%m-%d %H:%M:%S"))
         endTime = time.time()
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))

@@ -4,7 +4,7 @@
 # Aim: trim and filter reads in fastq files
 # Copyright (C) 2015 Institut National de la Recherche Agronomique
 # License: GPL-3+
-# Author: Timothée Flutre
+# Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
 
 # Inspired from:
@@ -101,13 +101,15 @@ class Trimfilter(object):
     def version(self):
         """
         Display version and license information on stdout.
+        
+        The person roles complies with R's guidelines (The R Journal Vol. 4/1, June 2012).
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
         msg += "Copyright (C) 2015 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
-        msg += "Written by Timothée Flutre."
+        msg += "Written by Timothée Flutre [cre,aut]."
         print(msg.encode("utf8")); sys.stdout.flush()
         
         

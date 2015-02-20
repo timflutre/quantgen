@@ -612,10 +612,10 @@ if [ "$1" == "trimmomatic" ]; then
     cd $1
     # wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-Src-0.32.zip
     # unzip Trimmomatic-Src-0.32.zip
-    wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.32.zip
-    unzip Trimmomatic-0.32.zip
-    cd Trimmomatic-0.32/
-    cp trimmomatic-0.32.jar $HOME/bin
+    wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.33.zip
+    unzip Trimmomatic-0.33.zip
+    cd Trimmomatic-0.33/
+    cp trimmomatic-0.33.jar $HOME/bin
 fi
 
 if [ "$1" == "ubd" ]; then
