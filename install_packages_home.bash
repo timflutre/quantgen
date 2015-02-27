@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -226,6 +226,16 @@ if [ "$1" == "eqtlbma" ]; then
     make
     # make check
     make install
+fi
+
+if [ "$1" == "ess" ]; then
+    mkdir -p $1
+    cd $1
+    wget -O ess-14.09.tgz http://ess.r-project.org/downloads/ess/ess-14.09.tgz
+    tar -xzvf ess-14.09.tgz
+    cd ess-14.09
+    make
+    # make install
 fi
 
 if [ "$1" == "fastqc" ]; then
@@ -642,7 +652,7 @@ fi
 if [ "$1" == "xclip" ]; then
     mkdir -p $1
     cd $1
-    wget http://sourceforge.net/projects/xclip/files/latest/download
+    wget -O xclip-0.12.tar.gz http://sourceforge.net/projects/xclip/files/latest/download
     tar -xzvf xclip-0.12.tar.gz
     cd xclip-0.12
     ./configure --prefix=$HOME
