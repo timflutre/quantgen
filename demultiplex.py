@@ -699,19 +699,23 @@ class Demultiplex(object):
          for handle in handles]
         
         if self.verbose > 0:
-            msg = "total nb of read pairs: %i" % nbPairs
-            msg += "\nnb of assigned read pairs: %i" % nbAssignedPairs
-            if self.method in ["3","4d"]:
-                msg += "; 2t=%i 1t=%i" % (nbAssignedPairsTwoTags, \
+		msg = "total nb of read pairs: %i" % nbPairs
+		msg += "\nnb of assigned read pairs: %i" % nbAssignedPairs
+        	if self.method in ["3","4d"]:
+                	msg += "; 2t=%i 1t=%i" % (nbAssignedPairsTwoTags, \
                                           nbAssignedPairsOneTag)
-            	msg = "nb of chimeric read pairs: %i" % nbchimera
-            msg += "\nnb of unassigned read pairs: %i (%.2f%%" % (
+        	if self.method in ["4d"]:
+            		msg += "\nnb of chimeric read pairs: %i (%.2f%%" % (
+			nbchimera, 
+			100 * nbchimera / float(nbPairs))
+			msg += ")"
+        	msg += "\nnb of unassigned read pairs (including chimeras): %i (%.2f%%" % (
                 (nbPairs - nbAssignedPairs),
                 100 * (nbPairs - nbAssignedPairs) / float(nbPairs))
-            msg += ")"
-            nbInds = len(dOutFqHandles) - 1
-            msg += "\nnb of individuals with assigned reads: %i" % nbInds
-            print(msg); sys.stdout.flush()
+		msg += ")"
+        	nbInds = len(dOutFqHandles) - 1
+        	msg += "\nnb of individuals with assigned reads: %i" % nbInds
+        	print(msg); sys.stdout.flush()
             
             
     def run(self): # Method calling the demultiplex methods
