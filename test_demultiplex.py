@@ -604,7 +604,7 @@ class TestDemultiplex(object): #Define a class
         ifq1Handle = gzip.open(ifq1, "w")
         ifq2Handle = gzip.open(ifq2, "w")
         
-        # pair 1: read 1 has perfect tag and cut site of ind 2 at bp 2; read 2 has the tag but not the cut site
+        # pair 1: read 1 has perfect tag and cut site of ind 4 at bp 2; read 2 has the tag but not the cut site
         txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
         txt += "ATTT" # tag with a 1-bp shift
         txt += "CAGCCCTGGAGTTCCAC\n" # insert with ApekI cut site
@@ -645,7 +645,22 @@ class TestDemultiplex(object): #Define a class
         txt += "+\n"
         txt += "~~~~~~~~~~~~~~~~~~~~~\n"
         ifq2Handle.write(txt)
-                
+        
+ 
+        # pair 4: chimera: read 1 has the perfect tag and cut site of ind 3 at bp 2; read 2 has the perfect tag and cut site of ind 1
+        txt = "@INST1:1:FLOW1:2:2104:15343:197394 1:N:0\n"
+        txt += "TGGG" # tag without shift
+        txt += "CAGCCCTGGAGTTCCAG\n" # ApekI cut site 
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197394 2:N:0\n"
+        txt += "TAAA" # tag with a 1-bp shift
+        txt += "CTGCTACATTTACTACT\n" # insert with ApekI cut site
+        txt += "+\n"
+        txt +=  "~~~~~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
         ifq1Handle.close()
         ifq2Handle.close()
         
@@ -675,7 +690,7 @@ class TestDemultiplex(object): #Define a class
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 if len(l1) != 1 or len(l2) != 1:
-                    print("test_met4d: fail (2)")
+		    print("test_met4d: fail (2)")
                     return
                 if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197392" or \
                    l2[0].id != "INST1:1:FLOW1:2:2104:15343:197392":

@@ -503,35 +503,52 @@ class Demultiplex(object):
         idx2 = 0
         AssignedPairsTwoTags = 0
         AssignedPairsOneTag = 0
-        
+	Chimera = False
+
+ 
         for tagId in self.patterns: # Iteration on the tagID = individual
             tmpRe1 = self.patterns[tagId].search(read1_seq[:self.dist]) # Look for the pattern corresponding to tagID in the 'dist' first base pairs
             tmpRe2 = self.patterns[tagId].search(read2_seq[:self.dist]) # Look for the pattern corresponding to tagID in the 'dist' first base pairs
-
-            if tmpRe1 != None:
-                assigned = True
+	    if tmpRe1 != None:
                 ind = tagId
                 idx1 = tmpRe1.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
                 if tmpRe2 != None: #If the first and the second reads have the pattern
-                    idx2 = tmpRe2.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
-                    AssignedPairsTwoTags += 1
+			assigned = True
+			idx2 = tmpRe2.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
+			AssignedPairsTwoTags += 1
                 else: #If only the first read has the pattern
-                    idx2 = idx1
-                    AssignedPairsOneTag += 1
+        		for tagId2 in self.patterns: # Iteration on the tagID = individual
+            			tmpRe2chim = self.patterns[tagId2].search(read2_seq[:self.dist]) # Look for the pattern corresponding to tagID2 in the 'dist' first base pairs
+                    
+                		if tmpRe2chim != None: #If the first read and second read have different tags 
+					Chimera = True
+					assigned = False
+					break
+				else:
+					assigned = True     # assign = True only if all tmpRe2chim = none
+					idx2 = idx1
+                			AssignedPairsOneTag += 1
 
                 if self.clipIdx == False: #If clipIdx is false, do not clip the tag
                     idx1 = idx2 = 0
                 break
             
             if tmpRe2 != None: #If only the second read has the pattern
-                assigned = True
                 ind = tagId
-                AssignedPairsOneTag += 1
+		for tagId1 in self.patterns:
+			tmpRe1chim =  self.patterns[tagId1].search(read1_seq[:self.dist])
+			if tmpRe1chim != None: #If the first read and second read have different tags 
+				Chimera = True
+				assigned = False
+				break
+			else:
+				assigned = True
+              			AssignedPairsOneTag += 1
                 if self.clipIdx: #If clipIdx is true, clip the tag
                     idx2 = tmpRe2.end() - self.lenRemainMotif # length of the first bases to be removed = position of the last base of the pattern - length of the remaining motif
                     idx1 = idx2
                 break
-        return assigned, tagId, idx1, idx2, AssignedPairsTwoTags, AssignedPairsOneTag      
+	return assigned, tagId, idx1, idx2, AssignedPairsTwoTags, AssignedPairsOneTag, Chimera
         
     def identifyIndividual_5(self, read1, read2):
         """
@@ -605,6 +622,7 @@ class Demultiplex(object):
         nbAssignedPairs = 0
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
+	nbchimera = 0
         meanQuals = []
         
         for (read1_id, read1_seq, read1_q), (read2_id, read2_seq, read2_q) \
@@ -634,7 +652,7 @@ class Demultiplex(object):
             elif self.method == "4c":
                 assigned, ind, idx1, idx2 = self.identifyIndividual_4c(read1_seq)
             elif self.method == "4d":
-                assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_4d(read1_seq, read2_seq)
+                assigned, ind, idx1, idx2, t2, t1, ch = self.identifyIndividual_4d(read1_seq, read2_seq)
             elif self.method == "5":
                 assigned, ind = self.identifyIndividual_5(read1, read2)
                 
@@ -658,7 +676,9 @@ class Demultiplex(object):
                                              read2_seq[idx2:],
                                              read2_q[idx2:]))
             else: # not assigned
-                if "unassigned" not in dOutFqHandles:
+                if ch:
+			nbchimera += 1
+		if "unassigned" not in dOutFqHandles:
                     dOutFqHandles["unassigned"] = [
                         gzip.open("%s_unassigned_R1.fastq.gz" %
                                   self.outFqPrefix, "w"),
@@ -684,6 +704,7 @@ class Demultiplex(object):
             if self.method in ["3","4d"]:
                 msg += "; 2t=%i 1t=%i" % (nbAssignedPairsTwoTags, \
                                           nbAssignedPairsOneTag)
+            	msg = "nb of chimeric read pairs: %i" % nbchimera
             msg += "\nnb of unassigned read pairs: %i (%.2f%%" % (
                 (nbPairs - nbAssignedPairs),
                 100 * (nbPairs - nbAssignedPairs) / float(nbPairs))
