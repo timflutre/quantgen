@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -80,6 +80,15 @@ if [ "$1" == "bedtools" ]; then
     cp bin/* $HOME/bin/
 fi
 
+if [ "$1" == "blup_gen_snp" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://snp.toulouse.inra.fr/~alegarra/progs_genom_sel.tar.gz
+    tar -xzvf progs_genom_sel.tar.gz
+    cd progs_genom_sel
+    cp blup_gen blup_snp $HOME/bin
+fi
+
 if [ "$1" == "bsfg" ]; then
     mkdir -p $1
     cd $1
@@ -110,13 +119,14 @@ N
 EOF
 fi
 
-if [ "$1" == "blup_gen_snp" ]; then
+if [ "$1" == "cutadapt" ]; then
     mkdir -p $1
     cd $1
-    wget http://snp.toulouse.inra.fr/~alegarra/progs_genom_sel.tar.gz
-    tar -xzvf progs_genom_sel.tar.gz
-    cd progs_genom_sel
-    cp blup_gen blup_snp $HOME/bin
+    wget --no-check-certificate -O master.zip https://github.com/marcelm/cutadapt/archive/master.zip
+    unzip master.zip
+    cd cutadapt-master/
+    python setup.py install --prefix=$HOME
+    echo "be sure to include ${HOME}/lib/... in your PYTHONPATH"
 fi
 
 if [ "$1" == "deindexer" ]; then
