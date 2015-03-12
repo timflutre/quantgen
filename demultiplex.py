@@ -510,7 +510,8 @@ class Demultiplex(object):
         chimera = False
         
         lTagIds = self.patterns.keys()
-        for i in range(1, len(lTagIds)): # for each tag
+        lTagIds.sort()
+        for i in range(0, len(lTagIds)): # for each tag
             tagId = lTagIds[i]
             tmpRe1 = self.patterns[tagId].search(read1_seq[:self.dist])
             tmpRe2 = self.patterns[tagId].search(read2_seq[:self.dist])
