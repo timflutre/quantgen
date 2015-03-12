@@ -1,8 +1,8 @@
 ## `utils_quantgen.R' contains functions for quantitative genetics/genomics
 ## Copyright (C) 2012-2014 Institut National de la Recherche Agronomique (INRA)
-## Author: Timothée Flutre
 ## License: GPL-3+
-## Original file available at https://github.com/timflutre/quantgen
+## Persons: Timothée Flutre [cre,aut]
+## Versioning: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by

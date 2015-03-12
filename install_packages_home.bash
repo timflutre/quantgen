@@ -9,11 +9,11 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
-	echo "ERROR: need to provide a program name as parameter"
-	exit 1
+    echo "ERROR: need to provide a program name as parameter"
+    exit 1
 fi
 
 # http://stackoverflow.com/a/8574392/597069
@@ -181,27 +181,28 @@ if [ "$1" == "eagle" ]; then
 fi
 
 if [ "$1" == "ea-utils" ]; then
-		wget 
-		tar -xzvf ea-utils.1.1.2-806.tar.gz
-		cd ea-utils.1.1.2-806
-		PREFIX=$HOME make install
+    wget 
+    tar -xzvf ea-utils.1.1.2-806.tar.gz
+    cd ea-utils.1.1.2-806
+    PREFIX=$HOME make install
 fi
 
 if [ "$1" == "eigensoft" ]; then
-		wget ftp://pricelab:pricelab@ftp.broadinstitute.org/EIGENSOFT/EIG6.0beta.tar.gz
-		tar -xzvf EIG6.0beta.tar.gz
-		cd EIG6.0beta
+    wget ftp://pricelab:pricelab@ftp.broadinstitute.org/EIGENSOFT/EIG6.0beta.tar.gz
+    tar -xzvf EIG6.0beta.tar.gz
+    cd EIG6.0beta
     cp bin/* $HOME/bin
 fi
 
 if [ "$1" == "emacs" ]; then
-#!/usr/bin/env bash
-		wget http://gnu.mirrors.hoobly.com/gnu/emacs/emacs-24.3.tar.gz
-		tar -xzvf emacs-24.3.tar.gz
-		cd emacs-24.3
-		./configure --prefix=$HOME #--with-x-toolkit=no --with-xpm=no --with-jpeg=no --with-gif=no --with-tiff=no
-		make
-		make install
+    mkdir -p $1
+    cd $1
+    wget --timestamping http://gnu.mirrors.hoobly.com/gnu/emacs/emacs-24.4.tar.gz
+    tar -xzvf emacs-24.4.tar.gz
+    cd emacs-24.4
+    ./configure --prefix=$HOME --with-x-toolkit=no --with-xpm=no --with-jpeg=no --with-gif=no --with-tiff=no
+    make
+    make install
 fi
 
 if [ "$1" == "epcr" ]; then
@@ -225,6 +226,16 @@ if [ "$1" == "eqtlbma" ]; then
     make
     # make check
     make install
+fi
+
+if [ "$1" == "ess" ]; then
+    mkdir -p $1
+    cd $1
+    wget -O ess-14.09.tgz http://ess.r-project.org/downloads/ess/ess-14.09.tgz
+    tar -xzvf ess-14.09.tgz
+    cd ess-14.09
+    make
+    # make install
 fi
 
 if [ "$1" == "fastqc" ]; then
@@ -496,9 +507,9 @@ fi
 if [ "$1" == "stacks" ]; then
     mkdir -p $1
     cd $1
-    wget http://creskolab.uoregon.edu/stacks/source/stacks-1.19.tar.gz
-    tar -xzvf stacks-1.19.tar.gz
-    cd stacks-1.19
+    wget http://creskolab.uoregon.edu/stacks/source/stacks-1.27.tar.gz
+    tar -xzvf stacks-1.27.tar.gz
+    cd stacks-1.27
     ./configure --prefix=$HOME --enable-sparsehash --enable-bam
     make
     make install
@@ -612,10 +623,10 @@ if [ "$1" == "trimmomatic" ]; then
     cd $1
     # wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-Src-0.32.zip
     # unzip Trimmomatic-Src-0.32.zip
-    wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.32.zip
-    unzip Trimmomatic-0.32.zip
-    cd Trimmomatic-0.32/
-    cp trimmomatic-0.32.jar $HOME/bin
+    wget http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/Trimmomatic-0.33.zip
+    unzip Trimmomatic-0.33.zip
+    cd Trimmomatic-0.33/
+    cp trimmomatic-0.33.jar $HOME/bin
 fi
 
 if [ "$1" == "ubd" ]; then
@@ -641,7 +652,7 @@ fi
 if [ "$1" == "xclip" ]; then
     mkdir -p $1
     cd $1
-    wget http://sourceforge.net/projects/xclip/files/latest/download
+    wget -O xclip-0.12.tar.gz http://sourceforge.net/projects/xclip/files/latest/download
     tar -xzvf xclip-0.12.tar.gz
     cd xclip-0.12
     ./configure --prefix=$HOME

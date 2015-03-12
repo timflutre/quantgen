@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 # Aim: test demultiplex.py
-# Copyright (C) 2014 Institut National de la Recherche Agronomique
+# Copyright (C) 2014-2015 Institut National de la Recherche Agronomique
 # License: GPL-3+
-# Author: Timothée Flutre
+# Persons: Timothée Flutre [cre,aut], Laurène Gay [ctb], Nicolas Rode [ctb]
 # Versioning: https://github.com/timflutre/quantgen
 
 # to allow code to work with Python 2 and 3
@@ -37,16 +37,16 @@ if sys.version_info[0] == 2:
 progVersion = "1.5.0" # http://semver.org/
 
 
-class TestDemultiplex(object): #Define a class
+class TestDemultiplex(object):
     
-    def __init__(self): #Define attributes
+    def __init__(self):
         self.verbose = 0
         self.pathToProg = ""
         self.testsToRun = ["1", "2", "4a", "4b", "4c","4d"]
         self.clean = True
         
         
-    def help(self): #Define a method for the help
+    def help(self):
         """
         Display the help on stdout.
         
@@ -71,16 +71,18 @@ class TestDemultiplex(object): #Define a class
         print(msg); sys.stdout.flush()
         
         
-    def version(self): #Define a method for the version
+    def version(self):
         """
         Display version and license information on stdout.
+        
+        The person roles complies with R's guidelines (The R Journal Vol. 4/1, June 2012).
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2014 Institut National de la Recherche Agronomique (INRA).\n"
+        msg += "Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
-        msg += "Written by Timothée Flutre."
+        msg += "Written by Timothée Flutre [cre,aut], Laurène Gay [ctb], Nicolas Rode [ctb]."
         print(msg.encode("utf8")); sys.stdout.flush()
         
         
@@ -115,7 +117,7 @@ class TestDemultiplex(object): #Define a class
                 assert False, "invalid option"
                 
                 
-    def checkAttributes(self): #Check the values given as arguments
+    def checkAttributes(self):
         """
         Check the values of the command-line parameters.
         """
@@ -165,7 +167,7 @@ class TestDemultiplex(object): #Define a class
         """
         Launch demultiplex.py with tha 'args' arguments
         """
-        args = [self.pathToProg, #Path to demultiplex.py program
+        args = [self.pathToProg,
                 "--idir", "./",
                 "--ifq1", ifq1,
                 "--ifq2", ifq2,
@@ -175,9 +177,9 @@ class TestDemultiplex(object): #Define a class
                 "--dist", str(dist),
                 "-v", str(self.verbose - 1)]
         if re != "":
-            args.append("--re") #Add the restriction enzyme name to the 'args' list only if provided
+            args.append("--re")
             args.append(re)
-        if nci: #Check if nci is true (=do not cut the tag) and add "--nci" to the 'args' list
+        if nci:
             args.append("--nci")
         if self.verbose > 0:
             print(" ".join(args))
@@ -193,7 +195,7 @@ class TestDemultiplex(object): #Define a class
         return msgs
         
         
-    def afterTest(self, cwd, testDir): #Remove testDir and everything in it
+    def afterTest(self, cwd, testDir):
         os.chdir(cwd)
         if self.clean:
             shutil.rmtree(testDir)
@@ -251,7 +253,8 @@ class TestDemultiplex(object): #Define a class
         
         
     def test_met1_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fastq.gz") or not os.path.exists("test_ind2_R2.fastq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") \
+           or not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met1: fail (1)")
             return
         else:
@@ -292,7 +295,7 @@ class TestDemultiplex(object): #Define a class
 
     
 
-    def test_met2_comp(self, msgs):            # checks that the 2 files for each of the 2 indiv exist
+    def test_met2_comp(self, msgs):
         if not os.path.exists("test_ind2_R1.fastq.gz") or \
            not os.path.exists("test_ind2_R2.fastq.gz") or \
            not os.path.exists("test_ind1_R1.fastq.gz") or \
@@ -300,24 +303,25 @@ class TestDemultiplex(object): #Define a class
             print("test_met2: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:     # Open a file from gzip for indiv 2 (tag TTT)
-                l1 = list(SeqIO.parse(inFqHandle1, "fastq",             # For Forward, creates a list with Ind ID and sequence in Fasta or Fastaq
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
+                l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
-                l2 = list(SeqIO.parse(inFqHandle2, "fastq",             # For Reverse, creates a list with Ind ID and sequence in Fasta or Fastaq
+                l2 = list(SeqIO.parse(inFqHandle2, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
-                if len(l1) != 1 or len(l2) != 1:                        #Only one element in each list
+                if len(l1) != 1 or len(l2) != 1:
                     print("test_met2: fail (2)")
                     return
                 if l1[0].id != "INST1:1:FLOW1:2:2104:15343:197391" or \
-                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":     # check that sequence names are the same
+                   l2[0].id != "INST1:1:FLOW1:2:2104:15343:197391":
                     print("test_met2: fail (3)")
                     return
                 if str(l1[0].seq) != "TCAACCTGGAGTTCCAC" or \
-                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":           # check that sequences cut as expected
+                   str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
                     print("test_met1: fail (4)")
                     return
             with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
-                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:      # for indiv 1 (tag AAA)
+                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -593,10 +597,8 @@ class TestDemultiplex(object): #Define a class
         self.afterTest(cwd, testDir)
         
         
-  
-     #==========================================================================
-     #New method to assign a pair as true only if the pattern (tag+cut site) is found in the forward and/or the reverse read
-     #Allows a shift (='dist') in the start of the pattern       
+    #==========================================================================
+    
     
     def test_met4d_prepare(self):
         ifq1 = "reads_R1.fastq.gz"
@@ -664,12 +666,13 @@ class TestDemultiplex(object): #Define a class
         ifq1Handle.close()
         ifq2Handle.close()
         
-        for f in ["test_ind1_R1.fastq.gz", "test_ind1_R2.fastq.gz","test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+        for f in ["test_ind1_R1.fastq.gz", "test_ind1_R2.fastq.gz",
+                  "test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
                   "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
             if os.path.isfile(f):
                 os.remove(f)
                 
-        it = "tags.fa"  #Input file with individual ID and tags
+        it = "tags.fa"
         self.writeTagFile(it)
         
         return ifq1, ifq2, it
@@ -737,9 +740,6 @@ class TestDemultiplex(object): #Define a class
         
     #==========================================================================
     
-
-
-    
     
     def run(self):
         if "1" in self.testsToRun:
@@ -753,7 +753,8 @@ class TestDemultiplex(object): #Define a class
         if "4c" in self.testsToRun:
             self.test_met4c()
         if "4d" in self.testsToRun:
-            self.test_met4d()            
+            self.test_met4d()
+            
             
 if __name__ == "__main__":
     i = TestDemultiplex()
@@ -764,8 +765,9 @@ if __name__ == "__main__":
     
     if i.verbose > 0:
         startTime = time.time()
-        msg = "START %s %s" % (os.path.basename(sys.argv[0]),
-                               time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "START %s %s %s" % (os.path.basename(sys.argv[0]),
+                                  progVersion,
+                                  time.strftime("%Y-%m-%d %H:%M:%S"))
         msg += "\ncmd-line: %s" % ' '.join(sys.argv)
         msg += "\ncwd: %s" % os.getcwd()
         print(msg); sys.stdout.flush()
@@ -773,8 +775,9 @@ if __name__ == "__main__":
     i.run()
     
     if i.verbose > 0:
-        msg = "END %s %s" % (os.path.basename(sys.argv[0]),
-                             time.strftime("%Y-%m-%d %H:%M:%S"))
+        msg = "END %s %s %s" % (os.path.basename(sys.argv[0]),
+                                progVersion,
+                                time.strftime("%Y-%m-%d %H:%M:%S"))
         endTime = time.time()
         runLength = datetime.timedelta(seconds=
                                        math.floor(endTime - startTime))
