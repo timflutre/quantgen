@@ -101,6 +101,7 @@ class Demultiplex(object):
         msg += "\t\t fasta: put sample names in the fasta headers\n"
         msg += "\t\t table: 2 columns, header line should be 'id\\ttag'\n"
         msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 for unassigned, 1 for chimeras)\n"
+        msg += "\t\tthe suffix will be based on \".fastq.gz\" (not \".fq\" because of FastQC)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "      --met\tmethod to assign pairs of reads to individuals via tags (default=4a)\n"
         msg += "\t\tonly forward strand is considered\n"
@@ -117,7 +118,7 @@ class Demultiplex(object):
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s --ifq1 reads1.fq.gz --ifq2 reads2.fq.gz --ifat tags.fa --ofqp test --met 3\n" % os.path.basename(sys.argv[0])
+        msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --met 3\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -659,9 +660,9 @@ class Demultiplex(object):
                     nbAssignedPairsOneTag += t1
                 if ind not in dOutFqHandles:
                     dOutFqHandles[ind] = [
-                        gzip.open("%s_%s_R1.fq.gz" %
+                        gzip.open("%s_%s_R1.fastq.gz" %
                                   (self.outFqPrefix, ind), "w"),
-                        gzip.open("%s_%s_R2.fq.gz" %
+                        gzip.open("%s_%s_R2.fastq.gz" %
                                   (self.outFqPrefix, ind), "w")]
                 dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
                                             (read1_id,
@@ -676,9 +677,9 @@ class Demultiplex(object):
                     nbChimera += 1 
                     if "chimeras" not in dOutFqHandles:
                         dOutFqHandles["chimeras"] = [
-                            gzip.open("%s_chimeras_R1.fq.gz" %
+                            gzip.open("%s_chimeras_R1.fastq.gz" %
                                       self.outFqPrefix, "w"),
-                            gzip.open("%s_chimeras_R2.fq.gz" %
+                            gzip.open("%s_chimeras_R2.fastq.gz" %
                                       self.outFqPrefix, "w")]
                     dOutFqHandles["chimeras"][0].write("@%s\n%s\n+\n%s\n" %
                                                       (read1_id,
@@ -692,9 +693,9 @@ class Demultiplex(object):
                     nbUnassignedPairs += 1
                     if "unassigned" not in dOutFqHandles:
                         dOutFqHandles["unassigned"] = [
-                            gzip.open("%s_unassigned_R1.fq.gz" %
+                            gzip.open("%s_unassigned_R1.fastq.gz" %
                                       self.outFqPrefix, "w"),
-                            gzip.open("%s_unassigned_R2.fq.gz" %
+                            gzip.open("%s_unassigned_R2.fastq.gz" %
                                       self.outFqPrefix, "w")]
                         
                     dOutFqHandles["unassigned"][0].write("@%s\n%s\n+\n%s\n" %

@@ -205,8 +205,8 @@ class TestDemultiplex(object):
     
     
     def test_met1_prepare(self):
-        ifq1 = "reads_R1.fq.gz"
-        ifq2 = "reads_R2.fq.gz"
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
         ifq1Handle = gzip.open(ifq1, "w")
         ifq2Handle = gzip.open(ifq2, "w")
         
@@ -241,8 +241,8 @@ class TestDemultiplex(object):
         ifq1Handle.close()
         ifq2Handle.close()
         
-        for f in ["test_ind2_R1.fq.gz", "test_ind2_R2.fq.gz",
-                  "test_unassigned_R1.fq.gz", "test_unassigned_R2.fq.gz"]:
+        for f in ["test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
             if os.path.isfile(f):
                 os.remove(f)
                 
@@ -253,13 +253,13 @@ class TestDemultiplex(object):
         
         
     def test_met1_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fq.gz") \
-           or not os.path.exists("test_ind2_R2.fq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") \
+           or not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met1: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind2_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
                 reads1 = SeqIO.parse(inFqHandle1, "fastq",
                                      alphabet=IUPAC.ambiguous_dna)
                 reads2 = SeqIO.parse(inFqHandle2, "fastq",
@@ -273,8 +273,8 @@ class TestDemultiplex(object):
                        str(read2.seq) != "GTAGCTGAGATCGGAAG":
                         print("test_met1: fail (3)")
                         return
-        if os.path.exists("test_ind1_R1.fq.gz") or \
-           os.path.exists("test_ind1_R2.fq.gz"):
+        if os.path.exists("test_ind1_R1.fastq.gz") or \
+           os.path.exists("test_ind1_R2.fastq.gz"):
             print("test_met1: fail (3)")
             return
         print("test_met1: pass")
@@ -296,15 +296,15 @@ class TestDemultiplex(object):
     
 
     def test_met2_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fq.gz") or \
-           not os.path.exists("test_ind2_R2.fq.gz") or \
-           not os.path.exists("test_ind1_R1.fq.gz") or \
-           not os.path.exists("test_ind1_R2.fq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz") or \
+           not os.path.exists("test_ind1_R1.fastq.gz") or \
+           not os.path.exists("test_ind1_R2.fastq.gz"):
             print("test_met2: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind2_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -320,8 +320,8 @@ class TestDemultiplex(object):
                    str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
                     print("test_met1: fail (4)")
                     return
-            with gzip.open("test_ind1_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind1_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -355,8 +355,8 @@ class TestDemultiplex(object):
     
     
     def test_met4_prepare(self):
-        ifq1 = "reads_R1.fq.gz"
-        ifq2 = "reads_R2.fq.gz"
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
         ifq1Handle = gzip.open(ifq1, "w")
         ifq2Handle = gzip.open(ifq2, "w")
         
@@ -391,8 +391,8 @@ class TestDemultiplex(object):
         ifq1Handle.close()
         ifq2Handle.close()
         
-        for f in ["test_ind2_R1.fq.gz", "test_ind2_R2.fq.gz",
-                  "test_unassigned_R1.fq.gz", "test_unassigned_R2.fq.gz"]:
+        for f in ["test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
             if os.path.isfile(f):
                 os.remove(f)
                 
@@ -403,13 +403,13 @@ class TestDemultiplex(object):
         
         
     def test_met4a_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fq.gz") or \
-           not os.path.exists("test_ind2_R2.fq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met4a: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind2_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -425,8 +425,8 @@ class TestDemultiplex(object):
                    str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
                     print("test_met4a: fail (4)")
                     return
-        if os.path.exists("test_ind1_R1.fq.gz") or \
-           os.path.exists("test_ind1_R2.fq.gz"):
+        if os.path.exists("test_ind1_R1.fastq.gz") or \
+           os.path.exists("test_ind1_R2.fastq.gz"):
             print("test_met4a: fail (5)")
             return
         print("test_met4a: pass")
@@ -447,13 +447,13 @@ class TestDemultiplex(object):
     
     
     def test_met4b_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fq.gz") or \
-           not os.path.exists("test_ind2_R2.fq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met4b: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind2_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -469,13 +469,13 @@ class TestDemultiplex(object):
                    str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
                     print("test_met4b: fail (4)")
                     return
-        if not os.path.exists("test_ind1_R1.fq.gz") or \
-           not os.path.exists("test_ind1_R2.fq.gz"):
+        if not os.path.exists("test_ind1_R1.fastq.gz") or \
+           not os.path.exists("test_ind1_R2.fastq.gz"):
             print("test_met4b: fail (5)")
             return
         else:
-            with gzip.open("test_ind1_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind1_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -509,8 +509,8 @@ class TestDemultiplex(object):
     
     
     def test_met4c_prepare(self):
-        ifq1 = "reads_R1.fq.gz"
-        ifq2 = "reads_R2.fq.gz"
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
         ifq1Handle = gzip.open(ifq1, "w")
         ifq2Handle = gzip.open(ifq2, "w")
         
@@ -545,8 +545,8 @@ class TestDemultiplex(object):
         ifq1Handle.close()
         ifq2Handle.close()
         
-        for f in ["test_ind2_R1.fq.gz", "test_ind2_R2.fq.gz",
-                  "test_unassigned_R1.fq.gz", "test_unassigned_R2.fq.gz"]:
+        for f in ["test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
             if os.path.isfile(f):
                 os.remove(f)
                 
@@ -557,13 +557,13 @@ class TestDemultiplex(object):
         
         
     def test_met4c_comp(self, msgs):
-        if not os.path.exists("test_ind2_R1.fq.gz") or \
-           not os.path.exists("test_ind2_R2.fq.gz"):
+        if not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz"):
             print("test_met4c: fail (1)")
             return
         else:
-            with gzip.open("test_ind2_R1.fq.gz") as inFqHandle1, \
-                 gzip.open("test_ind2_R2.fq.gz") as inFqHandle2:
+            with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+                 gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
                 l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                       alphabet=IUPAC.ambiguous_dna))
                 l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -579,8 +579,8 @@ class TestDemultiplex(object):
                    str(l2[0].seq) != "GTAGCTGAGATCGGAAG":
                     print("test_met4c: fail (4)")
                     return
-        if os.path.exists("test_ind1_R1.fq.gz") or \
-           os.path.exists("test_ind1_R2.fq.gz"):
+        if os.path.exists("test_ind1_R1.fastq.gz") or \
+           os.path.exists("test_ind1_R2.fastq.gz"):
             print("test_met4c: fail (5)")
             return
         print("test_met4c: pass")
@@ -601,8 +601,8 @@ class TestDemultiplex(object):
     
     
     def test_met4d_prepare(self):
-        ifq1 = "reads_R1.fq.gz"
-        ifq2 = "reads_R2.fq.gz"
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
         ifq1Handle = gzip.open(ifq1, "w")
         ifq2Handle = gzip.open(ifq2, "w")
         
@@ -666,9 +666,9 @@ class TestDemultiplex(object):
         ifq1Handle.close()
         ifq2Handle.close()
         
-        for f in ["test_ind1_R1.fq.gz", "test_ind1_R2.fq.gz",
-                  "test_ind2_R1.fq.gz", "test_ind2_R2.fq.gz",
-                  "test_unassigned_R1.fq.gz", "test_unassigned_R2.fq.gz"]:
+        for f in ["test_ind1_R1.fastq.gz", "test_ind1_R2.fastq.gz",
+                  "test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz"]:
             if os.path.isfile(f):
                 os.remove(f)
                 
@@ -680,19 +680,19 @@ class TestDemultiplex(object):
         
     def test_met4d_comp(self, msgs):
         testId = 1
-        if not os.path.exists("test_ind1_R1.fq.gz") or \
-           not os.path.exists("test_ind1_R2.fq.gz") or \
-           not os.path.exists("test_ind2_R1.fq.gz") or \
-           not os.path.exists("test_ind2_R2.fq.gz") or \
-           os.path.exists("test_ind3_R1.fq.gz") or \
-           os.path.exists("test_ind3_R2.fq.gz") or \
-           not os.path.exists("test_chimeras_R1.fq.gz") or \
-           not os.path.exists("test_chimeras_R2.fq.gz"):
+        if not os.path.exists("test_ind1_R1.fastq.gz") or \
+           not os.path.exists("test_ind1_R2.fastq.gz") or \
+           not os.path.exists("test_ind2_R1.fastq.gz") or \
+           not os.path.exists("test_ind2_R2.fastq.gz") or \
+           os.path.exists("test_ind3_R1.fastq.gz") or \
+           os.path.exists("test_ind3_R2.fastq.gz") or \
+           not os.path.exists("test_chimeras_R1.fastq.gz") or \
+           not os.path.exists("test_chimeras_R2.fastq.gz"):
             print("test_met4d: fail (%i)" % testId)
             return
         testId += 1
-        with gzip.open("test_ind1_R1.fq.gz") as inFqHandle1, \
-             gzip.open("test_ind1_R2.fq.gz") as inFqHandle2:
+        with gzip.open("test_ind1_R1.fastq.gz") as inFqHandle1, \
+             gzip.open("test_ind1_R2.fastq.gz") as inFqHandle2:
             l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                   alphabet=IUPAC.ambiguous_dna))
             l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -711,8 +711,8 @@ class TestDemultiplex(object):
                 print("test_met4d: fail (%i)" % testId)
                 return
             testId += 1
-        with gzip.open("test_ind2_R1.fq.gz") as inFqHandle1, \
-             gzip.open("test_ind2_R2.fq.gz") as inFqHandle2:
+        with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+             gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
             l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                   alphabet=IUPAC.ambiguous_dna))
             l2 = list(SeqIO.parse(inFqHandle2, "fastq",
@@ -731,8 +731,8 @@ class TestDemultiplex(object):
                 print("test_met4d: fail (%i)" % testId)
                 return
             testId += 1
-        with gzip.open("test_chimeras_R1.fq.gz") as inFqHandle1, \
-             gzip.open("test_chimeras_R2.fq.gz") as inFqHandle2:
+        with gzip.open("test_chimeras_R1.fastq.gz") as inFqHandle1, \
+             gzip.open("test_chimeras_R2.fastq.gz") as inFqHandle2:
             l1 = list(SeqIO.parse(inFqHandle1, "fastq",
                                   alphabet=IUPAC.ambiguous_dna))
             l2 = list(SeqIO.parse(inFqHandle2, "fastq",
