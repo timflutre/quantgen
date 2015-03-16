@@ -132,7 +132,7 @@ function run () {
       echo " from $(ls ${globZip} | wc -l) ZIP archives ..."
     fi
     ls ${globZip} | while read f; do \
-      i=$(echo $f | awk '{split($0,a,"."); print a[1]}'); \
+      i=$(basename $f .zip); \
       unzip -p ${f} ${i}/Images/${fastqcPrefix}.png > ${i}_${fastqcPrefix}.png; \
       done
     globPng="*_${fastqcPrefix}.png"
