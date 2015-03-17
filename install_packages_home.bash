@@ -122,9 +122,12 @@ fi
 if [ "$1" == "cutadapt" ]; then
     mkdir -p $1
     cd $1
-    wget --no-check-certificate -O master.zip https://github.com/marcelm/cutadapt/archive/master.zip
-    unzip master.zip
-    cd cutadapt-master/
+    # wget --no-check-certificate -O master.zip https://github.com/marcelm/cutadapt/archive/master.zip
+    # unzip master.zip
+    # cd cutadapt-master/
+    wget --no-check-certificate -O cutadapt-1.8.tar.gz https://github.com/marcelm/cutadapt/archive/v1.8.tar.gz
+    tar -xvf cutadapt-1.8.tar.gz
+    cd cutadapt-1.8/
     python setup.py install --prefix=$HOME
     echo "be sure to include ${HOME}/lib/... in your PYTHONPATH"
 fi
