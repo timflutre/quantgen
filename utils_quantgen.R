@@ -1,8 +1,9 @@
 ## `utils_quantgen.R' contains functions for quantitative genetics/genomics
-## Copyright (C) 2012-2014 Institut National de la Recherche Agronomique (INRA)
+## Copyright (C) 2013-2015 Institut National de la Recherche Agronomique (INRA)
 ## License: GPL-3+
 ## Persons: Timothée Flutre [cre,aut]
-## Versioning: https://github.com/timflutre/quantgen
+## Version: see below
+## Download: https://github.com/timflutre/quantgen
 ##
 ## This program is free software: you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -16,6 +17,8 @@
 ##
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+utils_quantgen.version <- "1.0.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -438,7 +441,9 @@ cor2cov <- function(x, sd){
 ##' @param genos.dose matrix with SNPs in rows and individuals in columns,
 ##' and genotypes coded as allele dose (i.e. in [0,2]),
 ##' but no missing data is allowed
-##' @return Kinship matrix
+##' @param allele.freqs allele frequencies
+##' @return kinship matrix
+##' @author Timothée Flutre
 estim.kinship.AstleBalding <- function(genos.dose, allele.freqs=NULL){
   if(is.null(allele.freqs)){
     allele.freqs <- apply(genos.dose, 1, function(x){
