@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.0.0" # http://semver.org/
+utils_quantgen.version <- "1.0.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -872,14 +872,15 @@ coancestry2addrel <- function(x, estim.coancestry, estim.inbreeding=NULL,
     stopifnot(estim.inbreeding %in% colnames(x$inbreeding))
   }
 
-  ind.ids <- sort(unique(c(x$relatedness$ind1.id,
-                           x$relatedness$ind2.id)))
+  ind.ids <- unique(c(x$relatedness$ind1.id,
+                      x$relatedness$ind2.id))
   nb.inds <- length(ind.ids)
   A <- matrix(NA, nrow=nb.inds, ncol=nb.inds,
-                dimnames=list(ind.ids, ind.ids))
+              dimnames=list(ind.ids, ind.ids))
 
   diag(A) <- 1
   if(! is.null(estim.inbreeding)){
+    stopifnot(nrow(x$inbreeding) == nb.inds)
     for(i in 1:nrow(x$inbreeding))
       A[x$inbreeding$ind.id[i], x$inbreeding$ind.id[i]] <-
         1 + x$inbreeding[[estim.inbreeding]][i]
