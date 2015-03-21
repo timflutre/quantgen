@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.1.1" # http://semver.org/
+utils_quantgen.version <- "1.2.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -879,6 +879,22 @@ genotypes.alleles2dose <- function(x, na.string="--"){
 
   return(list(geno.doses=geno.doses,
               minor.alleles=minor.alleles))
+}
+
+##' Plot missing SNP genotypes as a grid.
+##'
+##' Data will be represented in black if missing, white otherwise.
+##' @param x matrix with SNP genotypes as allele doses (NA if missing) with
+##' SNPs in columns and individuals in rows
+##' @param main an overall title for the plot (default="Missing genotypes")
+##' @param xlab a title for the x axis (default="Individuals")
+##' @param ylab a title for the y axis (default="SNPs")
+##' @return nothing
+##' @author Timothée Flutre
+plotGridMissGenos <- function(x, main="Missing genotypes", xlab="Individuals",
+                              ylab="SNPs"){
+  image(1:nrow(x), 1:ncol(x), is.na(x), col=c("white","black"),
+        main=main, xlab=xlab, ylab=ylab)
 }
 
 ##' Convert genotype data to the "mean genotype" file format from BimBam
