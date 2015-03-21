@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.0.1" # http://semver.org/
+utils_quantgen.version <- "1.1.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -829,6 +829,56 @@ read.biomercator <- function(file){
     print(summary(mean.dist))
 
     return(gmap)
+}
+
+##' Convert SNP genotype data from alleles (say, "AA" and "AT") to minor allele
+##' doses (here, 0 and 1 if "T" is the minor allele).
+##'
+##' Not particularly efficient, but at least it exists.
+##' @param x data.frame with SNPs in rows and individuals in columns, the SNP
+##' identifiers being in the first column
+##' @param na.string a character to be interpreted as NA values
+##' @return list of a matrix (allele doses, SNPs in columns and individuals in
+##' rows) and a vector (minor alleles)
+##' @author Timothée Flutre
+genotypes.alleles2dose <- function(x, na.string="--"){
+  stopifnot(is.data.frame(x),
+            ! is.null(colnames(x)))
+
+  snp.names <- x[,1]
+  P <- length(snp.names)
+  ind.names <- colnames(x)[-1]
+  N <- length(ind.names)
+  message(paste0(P, " SNPs and ", N, " individuals"))
+
+  geno.doses <- matrix(data=NA, nrow=N, ncol=P,
+                       dimnames=list(ind=ind.names, snp=snp.names))
+  minor.alleles <- setNames(rep(NA, P), snp.names)
+
+  for(p in 1:P){
+    raw.genos <- unlist(x[p, -1])
+    tmp <- do.call(c, strsplit(raw.genos[raw.genos != na.string], ""))
+    alleles <- sort(unique(tmp))
+    if(length(alleles) > 2)
+      stop(paste0(x[p,1], " has more than 2 alleles"))
+    allele.counts <- sort(table(tmp))
+    minor.alleles[p] <- names(allele.counts)[1]
+    major.allele <- names(allele.counts)[2]
+    raw.genos <- gsub(pattern=paste0(minor.alleles[p], minor.alleles[p]),
+                      replacement=2, x=raw.genos)
+    raw.genos <- gsub(pattern=paste(paste0(minor.alleles[p], major.allele),
+                          paste0(major.allele, minor.alleles[p]), sep="|"),
+                      replacement=1, x=raw.genos)
+    raw.genos <- gsub(pattern=paste0(major.allele, major.allele),
+                      replacement=0, x=raw.genos)
+    raw.genos <- as.numeric(gsub(pattern=na.string, replacement=NA, x=raw.genos))
+    if(! all(names(table(raw.genos, useNA="no")) == c("0", "1", "2")))
+      stop("check ", paste0(x[p,1]))
+    geno.doses[,p] <- raw.genos
+  }
+
+  return(list(geno.doses=geno.doses,
+              minor.alleles=minor.alleles))
 }
 
 ##' Convert genotype data to the "mean genotype" file format from BimBam
