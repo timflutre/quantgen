@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.2.0" # http://semver.org/
+utils_quantgen.version <- "1.2.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -853,32 +853,39 @@ genotypes.alleles2dose <- function(x, na.string="--"){
 
   geno.doses <- matrix(data=NA, nrow=N, ncol=P,
                        dimnames=list(ind=ind.names, snp=snp.names))
-  minor.alleles <- setNames(rep(NA, P), snp.names)
+  alleles <- matrix(data=NA, nrow=P, ncol=2,
+                    dimnames=list(snp.names, c("minor", "major")))
 
   for(p in 1:P){
     raw.genos <- unlist(x[p, -1])
     tmp <- do.call(c, strsplit(raw.genos[raw.genos != na.string], ""))
-    alleles <- sort(unique(tmp))
-    if(length(alleles) > 2)
-      stop(paste0(x[p,1], " has more than 2 alleles"))
+    distinct.alleles <- sort(unique(tmp))
     allele.counts <- sort(table(tmp))
-    minor.alleles[p] <- names(allele.counts)[1]
-    major.allele <- names(allele.counts)[2]
-    raw.genos <- gsub(pattern=paste0(minor.alleles[p], minor.alleles[p]),
-                      replacement=2, x=raw.genos)
-    raw.genos <- gsub(pattern=paste(paste0(minor.alleles[p], major.allele),
-                          paste0(major.allele, minor.alleles[p]), sep="|"),
-                      replacement=1, x=raw.genos)
-    raw.genos <- gsub(pattern=paste0(major.allele, major.allele),
-                      replacement=0, x=raw.genos)
+    if(length(distinct.alleles) > 2){ # SNP with more than 2 alleles
+      stop(paste0(x[p,1], " has more than 2 alleles"))
+    } else if(length(distinct.alleles) == 2){ # SNP with exactly 2 alleles
+      alleles[p, "minor"] <- names(allele.counts)[1]
+      alleles[p, "major"] <- names(allele.counts)[2]
+      raw.genos <- gsub(pattern=paste0(alleles[p, "minor"], alleles[p, "minor"]),
+                        replacement=2, x=raw.genos)
+      raw.genos <- gsub(pattern=paste(paste0(alleles[p, "minor"], alleles[p, "major"]),
+                            paste0(alleles[p, "major"], alleles[p, "minor"]), sep="|"),
+                        replacement=1, x=raw.genos)
+      raw.genos <- gsub(pattern=paste0(alleles[p, "major"], alleles[p, "major"]),
+                        replacement=0, x=raw.genos)
+    } else if(length(distinct.alleles) == 1){ # SNP with only 1 allele
+      alleles[p, "major"] <- names(allele.counts)[2]
+      raw.genos <- gsub(pattern=paste0(alleles[p, "major"], alleles[p, "major"]),
+                        replacement=0, x=raw.genos)
+    }
     raw.genos <- as.numeric(gsub(pattern=na.string, replacement=NA, x=raw.genos))
-    if(! all(names(table(raw.genos, useNA="no")) == c("0", "1", "2")))
-      stop("check ", paste0(x[p,1]))
+    if(! all(names(table(raw.genos, useNA="no")) %in% c("0", "1", "2")))
+      stop("check ", paste0(x[p,1], " (row ", p, ")"))
     geno.doses[,p] <- raw.genos
   }
 
   return(list(geno.doses=geno.doses,
-              minor.alleles=minor.alleles))
+              alleles=alleles))
 }
 
 ##' Plot missing SNP genotypes as a grid.
@@ -893,6 +900,8 @@ genotypes.alleles2dose <- function(x, na.string="--"){
 ##' @author Timothée Flutre
 plotGridMissGenos <- function(x, main="Missing genotypes", xlab="Individuals",
                               ylab="SNPs"){
+  if(ncol(x) < nrow(x))
+    message("did you put SNPs in columns and individuals in rows?")
   image(1:nrow(x), 1:ncol(x), is.na(x), col=c("white","black"),
         main=main, xlab=xlab, ylab=ylab)
 }
