@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.6.0" # http://semver.org/
+progVersion = "1.7.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -65,13 +65,16 @@ class Demultiplex(object):
         self.tagFile = ""
         self.outFqPrefix = ""
         self.method = "4a"
-        self.restrictEnzyme = None
-        self.remainingMotifs = [] # not currently used
         self.dist = 20
+        self.restrictEnzyme = None
+        self.findChimeras = "1"
         self.clipIdx = True
-        self.tags = {} # key are individuals and values are sequences (as string)
+        self.tags = {} # keys are individuals and values are sequences (as string)
+        self.cutMotif = ""
+        self.regexpCutMotif = "" # used if findChimeras != 0
+        self.regexpCompilCutMotif = "" # used if findChimeras != 0
         self.lenRemainMotif = -1
-        self.regexpMotif = "" # remaining motif (as uncompiled regexp)
+        self.regexpRemainMotif = "" # remaining motif (as uncompiled regexp)
         self.patterns = {} # keys are individuals and values are tag+motif (as compiled regexp)
         
         
@@ -115,6 +118,10 @@ class Demultiplex(object):
         msg += "\t\t    PCR chimeras (R1 tag is different than R2 tag) are detected and saved in distinct files than the unassigned\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp, default=20)\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
+        msg += "      --chim\tsearch if full restriction site found in R1 and/or R2 (default=\"1\", see --re)\n"
+        msg += "\t\t0: don't search (but some chimeras may still be detected if --met 4d)\n"
+        msg += "\t\t1: if chimera, don't even try to assign but save pairs in distinct files\n"
+        # msg += "\t\t2: if chimera, crop the site and try to assign the remaining 5'\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -147,8 +154,8 @@ class Demultiplex(object):
             opts, args = getopt.getopt(sys.argv[1:], "hVv:",
                                        ["help", "version", "verbose=",
                                         "idir=", "ifq1=", "ifq2=", "it=",
-                                        "ofqp=", "met=", "re=", "dist=",
-                                        "nci"])
+                                        "ofqp=", "met=", "re=", "chim=",
+                                        "dist=", "nci"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -183,6 +190,8 @@ class Demultiplex(object):
                     msg = "ERROR: restriction enzyme %s not recognized" % a
                     sys.stderr.write("%s\n\n" % msg)
                     sys.exit(1)
+            elif o == "--chim":
+                self.findChimeras = a
             elif o == "--nci":
                 self.clipIdx = False
             else:
@@ -240,13 +249,19 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.method not in ["1","2","3","4a","4b","4c","4d"]:
+        if self.method not in ["1","2","3","4a","4b","4c","4d","chim"]:
             msg = "ERROR: unknown option --met %s" % self.method
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.method in ["4c","4d"] and self.restrictEnzyme == None:
+        if (self.method in ["4c","4d"] or self.findChimeras != "0") \
+           and self.restrictEnzyme == None:
             msg = "ERROR: missing compulsory option --re"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.findChimeras not in ["0","1"]:
+            msg = "ERROR: --chim %s is unknown" % self.findChimeras
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -314,24 +329,55 @@ class Demultiplex(object):
             print(msg); sys.stdout.flush()
             
             
+    def retrieveRestrictionEnzyme(self):
+        if self.verbose > 0:
+            print("retrieve restriction enzyme from Biopython...")
+            
+        self.cutMotif = self.restrictEnzyme.elucidate()
+        if self.verbose > 0:
+            print("enzyme %s: motif=%s" % (self.restrictEnzyme, self.cutMotif))
+            
+        if self.findChimeras != "0":
+            for nt in list(self.cutMotif):
+                if nt in ["A", "T", "G", "C"]:
+                    self.regexpCutMotif += nt
+                elif nt in ["^", "_"]:
+                    continue
+                else: # ambiguous letter from IUPAC code, e.g. W
+                    self.regexpCutMotif += "[" + ambiguous_dna_values[nt] + "]" # eg. [AT] for W
+            if self.verbose > 0:
+                print("regexp of full motif: %s" % self.regexpCutMotif)
+
+            self.regexpCompilCutMotif = re.compile(self.regexpCutMotif)
+            
+            
     def prepareRemainingMotif(self):
         if self.verbose > 0:
             print("prepare remaining motif..."); sys.stdout.flush()
             
-        cutMotif = self.restrictEnzyme.elucidate()
-        if self.verbose > 0:
-            print("enzyme %s: motif=%s" % (self.restrictEnzyme, cutMotif))
-        coordCutSense = cutMotif.find("^")
+        coordCutSense = self.cutMotif.find("^")
         remainMotifAmbig = self.restrictEnzyme.site[coordCutSense:len(self.restrictEnzyme.site)]
         self.lenRemainMotif = len(remainMotifAmbig)
-        for i,l in enumerate(remainMotifAmbig):
-            if l in ["A", "T", "G", "C"]:
-                self.regexpMotif += l
+        for nt in list(remainMotifAmbig):
+            if nt in ["A", "T", "G", "C"]:
+                self.regexpRemainMotif += nt
             else: # ambiguous letter from IUPAC code, e.g. W
-                self.regexpMotif += "[" + ambiguous_dna_values[l] + "]" # eg. [AT] for W
+                self.regexpRemainMotif += "[" + ambiguous_dna_values[nt] + "]" # eg. [AT] for W
                 
         if self.verbose > 0:
-            print("regexp of remaining motif: %s" % self.regexpMotif)
+            print("regexp of remaining motif: %s" % self.regexpRemainMotif)
+            
+            
+    def compilePatterns(self):
+        """
+        Compile patterns (each tag + remaining right of cut site as regexp) 
+        for quicker searches.
+        """
+        if self.verbose > 0:
+            print("compile patterns..."); sys.stdout.flush()
+        for tagId in self.tags:
+            tag = self.tags[tagId]
+            self.patterns[tagId] = re.compile(tag + self.regexpRemainMotif)
             
             
     def checkDist(self):
@@ -345,20 +391,16 @@ class Demultiplex(object):
                                                                     tagId)
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
-                
-                
-    def compilePatterns(self):
-        """
-        Compile patterns (each tag + remaining right of cut site as regexp) 
-        for quicker searches.
-        """
-        if self.verbose > 0:
-            print("compile patterns..."); sys.stdout.flush()
-        for tagId in self.tags:
-            tag = self.tags[tagId]
-            self.patterns[tagId] = re.compile(tag + self.regexpMotif)
-            
-            
+
+
+    def identifyChimeras(self, read1_seq, read2_seq):
+        chimera = False
+        if self.regexpCompilCutMotif.search(read1_seq) != None \
+           or self.regexpCompilCutMotif.search(read2_seq) != None:
+            chimera = True
+        return chimera
+        
+        
     def identifyIndividual_1(self, read1_seq, read2_seq):
         """
         Assign pair if both reads start with the tag.
@@ -559,38 +601,6 @@ class Demultiplex(object):
         return assigned, tagId, idx1, idx2, AssignedPairsTwoTags, AssignedPairsOneTag, chimera
         
         
-    def identifyIndividual_5(self, read1, read2):
-        """
-        Count if at least one read contains the tag next to the cut site (only fwd).
-        """
-        assigned = False
-        ind = None
-        for tagId in self.tags:
-            if read1.seq.startswith(self.tags[tagId]) \
-               or read2.seq.startswith(self.tags[tagId]):
-                assigned = True
-                ind = tagId
-                break
-            elif self.tags[tagId] in read1.seq[0:self.dist]:
-                coord = read1.seq[0:self.dist].find(self.tags[tagId]) # will be > 0
-                for remainingMotif in self.remainingMotifs:
-                    if read1.seq[(coord+len(self.tags[tagId])):(coord+len(self.tags[tagId])+len(remainingMotif))] == remainingMotif:
-                        assigned = True
-                        ind = tagId
-                        print("ind %s, tag %s, read1 %s (%i)" \
-                              % (ind, self.tags[tagId], read1.description, coord))
-                        print(read1.seq[0:(self.dist+5)])
-                        break
-            elif self.tags[tagId] in read2.seq[0:self.dist]:
-                coord = read2.seq[0:self.dist].find(self.tags[tagId]) # will be > 0
-                for remainingMotif in self.remainingMotifs:
-                    if read2.seq[(coord+len(self.tags[tagId])):(coord+len(self.tags[tagId])+len(remainingMotif))] == remainingMotif:
-                        assigned = True
-                        ind = tagId
-                        break
-        return assigned, ind
-        
-        
     def demultiplexPairedReads(self):
         """
         Read the data files, launch the identifying method, writes the output.
@@ -616,7 +626,7 @@ class Demultiplex(object):
         nbAssignedPairs = 0
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
-        nbChimera = 0
+        nbChimeras = 0
         nbUnassignedPairs = 0
         meanQuals = []
         
@@ -632,27 +642,28 @@ class Demultiplex(object):
             assigned = False
             ind = None
             chimera = False
-            if self.method == "1":
-                assigned, ind, idx1, idx2 = self.identifyIndividual_1(
-                    read1_seq, read2_seq)
-            elif self.method == "2":
-                assigned, ind, idx1, idx2 = self.identifyIndividual_2(
-                    read1_seq, read2_seq)
-            elif self.method == "3":
-                assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_3(
-                    read1_seq, read2_seq)
-            elif self.method == "4a":
-                assigned, ind, idx1, idx2 = self.identifyIndividual_4a(read1_seq)
-            elif self.method == "4b":
-                assigned, ind, idx1, idx2 = self.identifyIndividual_4b(read1_seq)
-            elif self.method == "4c":
-                assigned, ind, idx1, idx2 = self.identifyIndividual_4c(read1_seq)
-            elif self.method == "4d":
-                assigned, ind, idx1, idx2, t2, t1, chimera = self.identifyIndividual_4d(
-                    read1_seq, read2_seq)
-            elif self.method == "5":
-                assigned, ind = self.identifyIndividual_5(read1, read2)
-                
+            if self.findChimeras != "0":
+                chimera = self.identifyChimeras(read1_seq, read2_seq)
+            if not chimera:
+                if self.method == "1":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_1(
+                        read1_seq, read2_seq)
+                elif self.method == "2":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_2(
+                        read1_seq, read2_seq)
+                elif self.method == "3":
+                    assigned, ind, idx1, idx2, t2, t1 = self.identifyIndividual_3(
+                        read1_seq, read2_seq)
+                elif self.method == "4a":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_4a(read1_seq)
+                elif self.method == "4b":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_4b(read1_seq)
+                elif self.method == "4c":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_4c(read1_seq)
+                elif self.method == "4d":
+                    assigned, ind, idx1, idx2, t2, t1, chimera = self.identifyIndividual_4d(
+                        read1_seq, read2_seq)
+                    
             if assigned:
                 nbAssignedPairs += 1
                 if self.method in ["3","4d"]:
@@ -674,7 +685,7 @@ class Demultiplex(object):
                                              read2_q[idx2:]))
             else: # chimera or unassigned
                 if chimera:
-                    nbChimera += 1 
+                    nbChimeras += 1 
                     if "chimeras" not in dOutFqHandles:
                         dOutFqHandles["chimeras"] = [
                             gzip.open("%s_chimeras_R1.fastq.gz" %
@@ -718,10 +729,10 @@ class Demultiplex(object):
             if self.method in ["3","4d"]:
                 msg += "; 2tags=%i 1tags=%i" % (nbAssignedPairsTwoTags, \
                                                 nbAssignedPairsOneTag)
-            if self.method in ["4d"]:
+            if self.findChimeras != "0" or self.method in ["4d"]:
                 msg += "\nnb of chimeric read pairs: %i (%.2f%%" % (
-                    nbChimera,
-                    100 * nbChimera / float(nbPairs))
+                    nbChimeras,
+                    100 * nbChimeras / float(nbPairs))
                 msg += ")"
                 msg += "\nnb of unassigned read pairs (excluding chimeras): %i (%.2f%%" % (
                     nbUnassignedPairs,
@@ -734,7 +745,7 @@ class Demultiplex(object):
             nbInds = len(dOutFqHandles)
             if nbUnassignedPairs > 0:
                 nbInds -= 1
-            if nbChimera > 0:
+            if nbChimeras > 0:
                 nbInds -= 1
             msg += "\nnb of individuals with assigned reads: %i" % nbInds
             print(msg); sys.stdout.flush()
@@ -742,7 +753,8 @@ class Demultiplex(object):
             
     def run(self):
         self.loadTags()
-        if self.method in ["4c","4d"]:
+        if self.method in ["4c","4d"] or self.findChimeras != "0":
+            self.retrieveRestrictionEnzyme()
             self.prepareRemainingMotif()
             self.compilePatterns()
         self.checkDist()

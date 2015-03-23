@@ -34,7 +34,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.6.0" # http://semver.org/
+progVersion = "1.7.0" # http://semver.org/
 
 
 class TestDemultiplex(object):
@@ -42,7 +42,7 @@ class TestDemultiplex(object):
     def __init__(self):
         self.verbose = 0
         self.pathToProg = ""
-        self.testsToRun = ["1", "2", "4a", "4b", "4c","4d"]
+        self.testsToRun = ["1", "2", "4a", "4b", "4c", "4d", "chim"]
         self.clean = True
         
         
@@ -61,7 +61,7 @@ class TestDemultiplex(object):
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
-        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4a-4b-4c-4d)\n"
+        msg += "  -t, --test\tidentifiers of test(s) to run (default=1-2-4a-4b-4c-4d-chim)\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -132,7 +132,7 @@ class TestDemultiplex(object):
             self.help()
             sys.exit(1)
         for t in self.testsToRun:
-            if t not in ["1", "2", "4a", "4b", "4c", "4d"]:
+            if t not in ["1", "2", "4a", "4b", "4c", "4d", "chim"]:
                 msg = "ERROR: unknown --test %s" % t
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -163,7 +163,7 @@ class TestDemultiplex(object):
             itHandle.write(txt)
             
             
-    def launchProg(self, ifq1, ifq2, it, met, dist, re, nci):
+    def launchProg(self, ifq1, ifq2, it, met, dist, re, chim, nci):
         """
         Launch demultiplex.py with tha 'args' arguments
         """
@@ -175,6 +175,7 @@ class TestDemultiplex(object):
                 "--ofqp", "test",
                 "--met", met,
                 "--dist", str(dist),
+                "--chim", str(chim),
                 "-v", str(self.verbose - 1)]
         if re != "":
             args.append("--re")
@@ -286,7 +287,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "1", 0, "", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "1", 0, "", "0", False)
         self.test_met1_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -346,7 +347,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met1_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "2", 0, "", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "2", 0, "", "0", False)
         self.test_met2_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -438,7 +439,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4a", 0, "", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "4a", 0, "", "0", False)
         self.test_met4a_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -500,7 +501,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4b", 10, "", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "4b", 10, "", "0", False)
         self.test_met4b_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -592,7 +593,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4c_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4c", 10, "ApeKI", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "4c", 10, "ApeKI", "0", False)
         self.test_met4c_comp(msgs)
         self.afterTest(cwd, testDir)
         
@@ -755,8 +756,117 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_met4d_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "4d", 10, "ApeKI", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "4d", 10, "ApeKI", "0", False)
         self.test_met4d_comp(msgs)
+        self.afterTest(cwd, testDir)
+        
+        
+    #==========================================================================
+    
+    
+    def test_chim_prepare(self):
+        ifq1 = "reads_R1.fastq.gz"
+        ifq2 = "reads_R2.fastq.gz"
+        ifq1Handle = gzip.open(ifq1, "w")
+        ifq2Handle = gzip.open(ifq2, "w")
+        
+        # pair 1: both reads have perfect tag of ind 2 at bp 1, and no chimera
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 1:N:0\n"
+        txt += "TTT" # tag
+        txt += "TCAACCTGGAGTTCCAC\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197391 2:N:0\n"
+        txt += "TTT" # tag
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        # pair 2: read R1 is a chimera (start at the 9-th nucleotide)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 1:N:0\n"
+        txt += "AAA" # tag
+        txt += "TCAACGCAGCGTTCCAC\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~\n"
+        ifq1Handle.write(txt)
+        txt = "@INST1:1:FLOW1:2:2104:15343:197392 2:N:0\n"
+        txt += "AAA" # tag
+        txt += "GTAGCTGAGATCGGAAG\n" # insert
+        txt += "+\n"
+        txt += "~~~~~~~~~~~~~~~~~~~~\n"
+        ifq2Handle.write(txt)
+        
+        ifq1Handle.close()
+        ifq2Handle.close()
+        
+        for f in ["test_ind2_R1.fastq.gz", "test_ind2_R2.fastq.gz",
+                  "test_unassigned_R1.fastq.gz", "test_unassigned_R2.fastq.gz",
+                  "test_chimeras_R1.fastq.gz", "test_chimeras_R2.fastq.gz"]:
+            if os.path.isfile(f):
+                os.remove(f)
+                
+        it = "tags.fa"
+        self.writeTagFile(it)
+        
+        return ifq1, ifq2, it
+        
+        
+    def test_chim_comp(self, msgs):
+        testId = 1
+        if not os.path.exists("test_ind2_R1.fastq.gz") \
+           or not os.path.exists("test_ind2_R2.fastq.gz") \
+           or not os.path.exists("test_chimeras_R1.fastq.gz") \
+           or not os.path.exists("test_chimeras_R2.fastq.gz"):
+            print("test_chim: fail (%s)" % testId)
+            return
+        testId += 1
+        with gzip.open("test_ind2_R1.fastq.gz") as inFqHandle1, \
+             gzip.open("test_ind2_R2.fastq.gz") as inFqHandle2:
+            reads1 = SeqIO.parse(inFqHandle1, "fastq",
+                                 alphabet=IUPAC.ambiguous_dna)
+            reads2 = SeqIO.parse(inFqHandle2, "fastq",
+                                 alphabet=IUPAC.ambiguous_dna)
+            for (read1, read2) in itertools.izip(reads1, reads2):
+                if read1.id != "INST1:1:FLOW1:2:2104:15343:197391" and \
+                   read2.id != "INST1:1:FLOW1:2:2104:15343:197391":
+                    print("test_chim: fail (%s)" % testId)
+                    return
+                testId += 1
+                if str(read1.seq) != "TCAACCTGGAGTTCCAC" or \
+                   str(read2.seq) != "GTAGCTGAGATCGGAAG":
+                    print("test_chim: fail (%s)" % testId)
+                    return
+                testId += 1
+        with gzip.open("test_chimeras_R1.fastq.gz") as inFqHandle1, \
+             gzip.open("test_chimeras_R2.fastq.gz") as inFqHandle2:
+            reads1 = SeqIO.parse(inFqHandle1, "fastq",
+                                 alphabet=IUPAC.ambiguous_dna)
+            reads2 = SeqIO.parse(inFqHandle2, "fastq",
+                                 alphabet=IUPAC.ambiguous_dna)
+            for (read1, read2) in itertools.izip(reads1, reads2):
+                if read1.id != "INST1:1:FLOW1:2:2104:15343:197392" and \
+                   read2.id != "INST1:1:FLOW1:2:2104:15343:197392":
+                    print("test_chim: fail (%s)" % testId)
+                    return
+                testId += 1
+                if str(read1.seq) != "AAATCAACGCAGCGTTCCAC" or \
+                   str(read2.seq) != "AAAGTAGCTGAGATCGGAAG":
+                    print("test_chim: fail (%s)" % testId)
+                    return
+                testId += 1
+        print("test_chim: pass")
+        
+        
+    def test_chim(self):
+        if self.verbose > 0:
+            print("launch test chim ...")
+            sys.stdout.flush()
+        cwd, testDir = self.beforeTest()
+        ifq1, ifq2, it = self.test_chim_prepare()
+        msgs = self.launchProg(ifq1, ifq2, it, "1", 0, "ApeKI", "1", False)
+        self.test_chim_comp(msgs)
         self.afterTest(cwd, testDir)
         
         
@@ -776,6 +886,8 @@ class TestDemultiplex(object):
             self.test_met4c()
         if "4d" in self.testsToRun:
             self.test_met4d()
+        if "chim" in self.testsToRun:
+            self.test_chim()
             
             
 if __name__ == "__main__":
