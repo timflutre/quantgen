@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.2.1" # http://semver.org/
+utils_quantgen.version <- "1.3.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -856,36 +856,58 @@ genotypes.alleles2dose <- function(x, na.string="--"){
   alleles <- matrix(data=NA, nrow=P, ncol=2,
                     dimnames=list(snp.names, c("minor", "major")))
 
-  for(p in 1:P){
+  for(p in 1:P){ # for each SNP
     raw.genos <- unlist(x[p, -1])
-    tmp <- do.call(c, strsplit(raw.genos[raw.genos != na.string], ""))
+    raw.genos[raw.genos == na.string] <- NA
+    if(all(is.na(raw.genos))){
+      next
+    }
+    tmp <- do.call(c, strsplit(raw.genos[! is.na(raw.genos)], ""))
     distinct.alleles <- sort(unique(tmp))
     allele.counts <- sort(table(tmp))
     if(length(distinct.alleles) > 2){ # SNP with more than 2 alleles
-      stop(paste0(x[p,1], " has more than 2 alleles"))
+      stop("SNP ", paste0(x[p,1], " has more than 2 alleles"))
     } else if(length(distinct.alleles) == 2){ # SNP with exactly 2 alleles
       alleles[p, "minor"] <- names(allele.counts)[1]
       alleles[p, "major"] <- names(allele.counts)[2]
       raw.genos <- gsub(pattern=paste0(alleles[p, "minor"], alleles[p, "minor"]),
-                        replacement=2, x=raw.genos)
+                        replacement="2", x=raw.genos)
       raw.genos <- gsub(pattern=paste(paste0(alleles[p, "minor"], alleles[p, "major"]),
                             paste0(alleles[p, "major"], alleles[p, "minor"]), sep="|"),
-                        replacement=1, x=raw.genos)
+                        replacement="1", x=raw.genos)
       raw.genos <- gsub(pattern=paste0(alleles[p, "major"], alleles[p, "major"]),
-                        replacement=0, x=raw.genos)
+                        replacement="0", x=raw.genos)
     } else if(length(distinct.alleles) == 1){ # SNP with only 1 allele
-      alleles[p, "major"] <- names(allele.counts)[2]
+      alleles[p, "major"] <- names(allele.counts)[1]
       raw.genos <- gsub(pattern=paste0(alleles[p, "major"], alleles[p, "major"]),
-                        replacement=0, x=raw.genos)
+                        replacement="0", x=raw.genos)
     }
-    raw.genos <- as.numeric(gsub(pattern=na.string, replacement=NA, x=raw.genos))
+    raw.genos <- as.numeric(raw.genos)
     if(! all(names(table(raw.genos, useNA="no")) %in% c("0", "1", "2")))
-      stop("check ", paste0(x[p,1], " (row ", p, ")"))
+      stop("check SNP ", paste0(x[p,1], " (row ", p, ")"))
     geno.doses[,p] <- raw.genos
   }
 
   return(list(geno.doses=geno.doses,
               alleles=alleles))
+}
+
+##' Estimate minor allele frequencies of SNPs.
+##'
+##' Missing values should be encoded as NA.
+##' @param x matrix of SNP genotypes encoded as allele doses, with SNPs in
+##' columns and individuals in rows
+##' @return vector
+##' @author Timothée Flutre
+maf.from.dose <- function(x){
+  stopifnot(is.matrix(x))
+  if(ncol(x) < nrow(x))
+    message("did you put SNPs in columns and individuals in rows?")
+  maf.hat <- apply(x, 2, function(genos){
+    genos.notmiss <- genos[! is.na(genos)]
+    sum(genos.notmiss) / (2 * length(genos.notmiss))
+  })
+  return(maf.hat)
 }
 
 ##' Plot missing SNP genotypes as a grid.
