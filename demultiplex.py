@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.7.0" # http://semver.org/
+progVersion = "1.8.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -112,16 +112,20 @@ class Demultiplex(object):
         msg += "\t\t2: assign pair if at least one read starts with the tag\n"
         msg += "\t\t3: same as 2 but count if one or both reads start with the tag\n"
         msg += "\t\t4a: assign pair if first read starts with tag (ignore second read)\n"
-        msg += "\t\t4b: assign pair if first read has tag in its first N bases (ignore second read, see --dist)\n"
-        msg += "\t\t4c: assign pair only if first read has tag and remaining cut site in its first N bases (ignore second read, see --dist and --re)\n"
-        msg += "\t\t4d: assign pair only if first and/or second read has tag and remaining cut site in its first N bases (see --dist and --re)\n"
-        msg += "\t\t    PCR chimeras (R1 tag is different than R2 tag) are detected and saved in distinct files than the unassigned\n"
+        msg += "\t\t4b: assign pair if first read has tag in its first N bases\n"
+        msg += "\t\t    (ignore second read, see --dist)\n"
+        msg += "\t\t4c: assign pair only if first read has tag and remaining cut site\n"
+        msg += "\t\t    in its first N bases (ignore second read, see --dist and --re)\n"
+        msg += "\t\t4d: assign pair only if first and/or second read has tag and\n"
+        msg += "\t\t    remaining cut site in its first N bases (see --dist and --re)\n"
+        msg += "\t\t    PCR chimeras (R1 tag is different than R2 tag) are detected\n"
+        msg += "\t\t    and saved in distinct files than the unassigned\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp, default=20)\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
         msg += "      --chim\tsearch if full restriction site found in R1 and/or R2 (default=\"1\", see --re)\n"
         msg += "\t\t0: don't search (but some chimeras may still be detected if --met 4d)\n"
-        msg += "\t\t1: if chimera, don't even try to assign but save pairs in distinct files\n"
-        # msg += "\t\t2: if chimera, crop the site and try to assign the remaining 5'\n"
+        msg += "\t\t1: if chimera, count as such, try to assign, and save in same files as others\n"
+        msg += "\t\t2: if chimera, don't even try to assign and save in distinct files\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -260,7 +264,7 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.findChimeras not in ["0","1"]:
+        if self.findChimeras not in ["0","1","2"]:
             msg = "ERROR: --chim %s is unknown" % self.findChimeras
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -627,11 +631,16 @@ class Demultiplex(object):
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
         nbChimeras = 0
+        nbChimerasSite = 0
+        nbChimerasTags = 0
         nbUnassignedPairs = 0
+        nbUnassignedPairsChimeras = 0
         meanQuals = []
         
+        # iterate over all read pairs
         for (read1_id, read1_seq, read1_q), (read2_id, read2_seq, read2_q) \
             in itertools.izip(reads1, reads2):
+            
             if read1_id.split(" ")[0] != read2_id.split(" ")[0]:
                 msg = "ERROR: for pair %i, reads %s and %s are not paired" \
                       % (nbPairs, read1_id, read2_id)
@@ -642,9 +651,11 @@ class Demultiplex(object):
             assigned = False
             ind = None
             chimera = False
+            chimeraSite = False
+            chimeraTags = False
             if self.findChimeras != "0":
-                chimera = self.identifyChimeras(read1_seq, read2_seq)
-            if not chimera:
+                chimeraSite = self.identifyChimeras(read1_seq, read2_seq)
+            if not chimeraSite or self.findChimeras == "1":
                 if self.method == "1":
                     assigned, ind, idx1, idx2 = self.identifyIndividual_1(
                         read1_seq, read2_seq)
@@ -661,9 +672,17 @@ class Demultiplex(object):
                 elif self.method == "4c":
                     assigned, ind, idx1, idx2 = self.identifyIndividual_4c(read1_seq)
                 elif self.method == "4d":
-                    assigned, ind, idx1, idx2, t2, t1, chimera = self.identifyIndividual_4d(
+                    assigned, ind, idx1, idx2, t2, t1, chimeraTags = self.identifyIndividual_4d(
                         read1_seq, read2_seq)
                     
+            if chimeraSite:
+                nbChimerasSite += 1 
+            if chimeraTags:
+                nbChimerasTags += 1
+            if chimeraSite or chimeraTags:
+                chimera = True
+                nbChimeras += 1
+                
             if assigned:
                 nbAssignedPairs += 1
                 if self.method in ["3","4d"]:
@@ -684,8 +703,9 @@ class Demultiplex(object):
                                              read2_seq[idx2:],
                                              read2_q[idx2:]))
             else: # chimera or unassigned
-                if chimera:
-                    nbChimeras += 1 
+                nbUnassignedPairs += 1
+                if chimera and self.findChimeras != "1":
+                    nbUnassignedPairsChimeras += 1
                     if "chimeras" not in dOutFqHandles:
                         dOutFqHandles["chimeras"] = [
                             gzip.open("%s_chimeras_R1.fastq.gz" %
@@ -700,8 +720,7 @@ class Demultiplex(object):
                                                       (read2_id,
                                                        read2_seq,
                                                        read2_q))
-                else: # unassigned
-                    nbUnassignedPairs += 1
+                else: # chimera or unassigned
                     if "unassigned" not in dOutFqHandles:
                         dOutFqHandles["unassigned"] = [
                             gzip.open("%s_unassigned_R1.fastq.gz" %
@@ -733,19 +752,23 @@ class Demultiplex(object):
                 msg += "\nnb of chimeric read pairs: %i (%.2f%%" % (
                     nbChimeras,
                     100 * nbChimeras / float(nbPairs))
+                if self.findChimeras != "0" and self.method in ["4d"]:
+                    msg += "; site=%i tags=%i" % (nbChimerasSite,
+                                                  nbChimerasTags)
                 msg += ")"
+            msg += "\nnb of unassigned read pairs: %i (%.2f%%" % (
+                nbUnassignedPairs,
+                100 * nbUnassignedPairs / float(nbPairs))
+            msg += ")"
+            if self.findChimeras == "2" or self.method in ["4d"]:
                 msg += "\nnb of unassigned read pairs (excluding chimeras): %i (%.2f%%" % (
-                    nbUnassignedPairs,
-                    100 * nbUnassignedPairs / float(nbPairs))
-                msg += ")"
-                msg += "\nnb of unassigned read pairs (including chimeras): %i (%.2f%%" % (
-                    (nbPairs - nbAssignedPairs),
-                    100 * (nbPairs - nbAssignedPairs) / float(nbPairs))
+                    nbUnassignedPairs - nbUnassignedPairsChimeras,
+                    100 * (nbUnassignedPairs - nbUnassignedPairsChimeras) / float(nbPairs))
                 msg += ")"
             nbInds = len(dOutFqHandles)
-            if nbUnassignedPairs > 0:
+            if "unassigned" in dOutFqHandles:
                 nbInds -= 1
-            if nbChimeras > 0:
+            if "chimeras" in dOutFqHandles:
                 nbInds -= 1
             msg += "\nnb of individuals with assigned reads: %i" % nbInds
             print(msg); sys.stdout.flush()

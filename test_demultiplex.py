@@ -34,7 +34,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.7.0" # http://semver.org/
+progVersion = "1.8.0" # http://semver.org/
 
 
 class TestDemultiplex(object):
@@ -865,7 +865,7 @@ class TestDemultiplex(object):
             sys.stdout.flush()
         cwd, testDir = self.beforeTest()
         ifq1, ifq2, it = self.test_chim_prepare()
-        msgs = self.launchProg(ifq1, ifq2, it, "1", 0, "ApeKI", "1", False)
+        msgs = self.launchProg(ifq1, ifq2, it, "1", 0, "ApeKI", "2", False)
         self.test_chim_comp(msgs)
         self.afterTest(cwd, testDir)
         
