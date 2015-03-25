@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.3.0" # http://semver.org/
+utils_quantgen.version <- "1.3.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -441,18 +441,37 @@ cor2cov <- function(x, sd){
 ##' @param genos.dose matrix with SNPs in rows and individuals in columns,
 ##' and genotypes coded as allele dose (i.e. in [0,2]),
 ##' but no missing data is allowed
-##' @param allele.freqs allele frequencies
+##' @param mafs vector with minor allele frequencies (calculated with `maf.from.dose` if NULL)
+##' @param thresh threshold on allele frequencies below which SNPs are ignored
 ##' @return kinship matrix
 ##' @author Timothée Flutre
-estim.kinship.AstleBalding <- function(genos.dose, allele.freqs=NULL){
-  if(is.null(allele.freqs)){
-    allele.freqs <- apply(genos.dose, 1, function(x){
-      sum(x) / (2 * length(x))
-    })
+estim.kinship.AstleBalding <- function(genos.dose, mafs=NULL, thresh=0.01){
+  stopifnot(is.matrix(genos.dose),
+            sum(is.na(genos.dose)) == 0,
+            thresh > 0,
+            thresh <= 0.5)
+  if(nrow(genos.dose) < ncol(genos.dose))
+    message("did you put SNPs in rows and individuals in columns?")
+
+  if(is.null(mafs)){
+    mafs <- maf.from.dose(t(genos.dose))
+    message(paste0("allele freqs: ",
+                   "min=", format(min(mafs), digits=2),
+                   " Q1=", format(quantile(mafs, 0.25), digits=2),
+                   " med=", format(median(mafs), digits=2),
+                   " Q3=", format(quantile(mafs, 0.75), digits=2),
+                   " max=", format(max(mafs), digits=2)))
   }
-  tmp <- sweep(genos.dose, 1, 2 * allele.freqs, FUN="-")
-  tmp <- sweep(tmp, 1, 2 * sqrt(allele.freqs * (1 - allele.freqs)), FUN="/")
-  K <- (1/nrow(genos.dose)) * crossprod(tmp, tmp)
+  stopifnot(min(mafs) >= 0, max(mafs) <= 0.5)
+
+  idx <- which(mafs < thresh)
+  if(length(idx) > 0)
+    message(paste0("skip ", length(idx), " SNPs with freq below ", thresh))
+
+  tmp <- sweep(genos.dose[-idx,], 1, 2 * mafs[-idx], FUN="-")
+  tmp <- sweep(tmp, 1, 2 * sqrt(mafs[-idx] * (1 - mafs[-idx])), FUN="/")
+  K <- (1/nrow(genos.dose[-idx,])) * crossprod(tmp, tmp)
+
   return(K)
 }
 
