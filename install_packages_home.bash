@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -94,6 +94,16 @@ if [ "$1" == "bsfg" ]; then
     cd $1
     wget http://www.stat.duke.edu/~sayan/bfgr/BSF-G.zip
     unzip BSF-G.zip
+fi
+
+if [ "$1" == "bwa" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://sourceforge.net/projects/bio-bwa/files/bwa-0.7.12.tar.bz2/download
+    tar -xvf bwa-0.7.12.tar.bz2
+    cd bwa-0.7.12/
+    make
+    cp bwa $HOME/bin
 fi
 
 if [ "$1" == "carthagene" ]; then
@@ -334,6 +344,17 @@ fi
 if [ "$1" == "help2man" ]; then
     mkdir -p $1
     cd $1
+    wget -O htslib-1.2.1.tar.bz2 --no-check-certificate https://github.com/samtools/htslib/releases/download/1.2.1/htslib-1.2.1.tar.bz2
+    tar -xvf htslib-1.2.1.tar.bz2 
+    cd htslib-1.2.1/
+    ./configure --prefix=$HOME
+    make
+    make install
+fi
+
+if [ "$1" == "help2man" ]; then
+    mkdir -p $1
+    cd $1
     wget http://mirror.ibcp.fr/pub/gnu/help2man/help2man-1.43.3.tar.gz
     tar -xzvf help2man-1.43.3.tar.gz
     cd help2man-1.43.3
@@ -430,8 +451,8 @@ if [ "$1" == "platypus" ]; then
     cd $1
     # need to register: http://www.well.ox.ac.uk/platypus
     wget http://www.well.ox.ac.uk/bioinformatics/Software/Platypus-latest.tgz
-    tar -xzvf Platypus-latest.tgz
-    cd Platypus_0.7.8/
+    tar -xvf Platypus-latest.tgz
+    cd Platypus_0.8.1/
     ./buildPlatypus.sh
     python setup.py install --home=$HOME
     echo -e '#!/usr/bin/env python\n' > tmp
