@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.3.1" # http://semver.org/
+utils_quantgen.version <- "1.4.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -911,24 +911,6 @@ genotypes.alleles2dose <- function(x, na.string="--"){
               alleles=alleles))
 }
 
-##' Estimate minor allele frequencies of SNPs.
-##'
-##' Missing values should be encoded as NA.
-##' @param x matrix of SNP genotypes encoded as allele doses, with SNPs in
-##' columns and individuals in rows
-##' @return vector
-##' @author Timothée Flutre
-maf.from.dose <- function(x){
-  stopifnot(is.matrix(x))
-  if(ncol(x) < nrow(x))
-    message("did you put SNPs in columns and individuals in rows?")
-  maf.hat <- apply(x, 2, function(genos){
-    genos.notmiss <- genos[! is.na(genos)]
-    sum(genos.notmiss) / (2 * length(genos.notmiss))
-  })
-  return(maf.hat)
-}
-
 ##' Plot missing SNP genotypes as a grid.
 ##'
 ##' Data will be represented in black if missing, white otherwise.
@@ -945,6 +927,60 @@ plotGridMissGenos <- function(x, main="Missing genotypes", xlab="Individuals",
     message("did you put SNPs in columns and individuals in rows?")
   image(1:nrow(x), 1:ncol(x), is.na(x), col=c("white","black"),
         main=main, xlab=xlab, ylab=ylab)
+}
+
+##' Estimate minor allele frequencies of SNPs.
+##'
+##' Missing values should be encoded as NA.
+##' @param X matrix of SNP genotypes encoded as allele doses, with SNPs in
+##' columns and individuals in rows
+##' @return vector
+##' @author Timothée Flutre
+maf.from.dose <- function(X){
+  stopifnot(is.matrix(X))
+  if(ncol(X) < nrow(X))
+    warning("input matrix doesn't seem to have SNPs in columns and individuals in rows")
+  maf.hat <- apply(X, 2, function(x){
+    x <- x[complete.cases(x)]
+    tmp <- sum(x) / (2 * length(x))
+    ifelse(tmp <= 0.5, tmp, 1 - tmp)
+  })
+  return(maf.hat)
+}
+
+##' Plot the histogram of the minor allele frequency per SNP
+##'
+##' Missing values (encoded as NA) are discarded.
+##' @title Histogram of minor allele frequencies
+##' @param X matrix of SNP genotypes encoded as allele doses, with SNPs in
+##' columns and individuals in rows (optional if maf is not null)
+##' @param maf vector of minor allele frequencies (optional if X is not null)
+##' @param main string for the main title (default="")
+##' @param xlim default=c(0,0.5)
+##' @param col
+##' @param border
+##' @param las
+##' @param breaks
+##' @param ...
+##' @return nothing
+##' @author Timothée Flutre
+plotHistMinAllelFreq <- function(X=NULL, maf=NULL, main="", xlim=c(0,0.5),
+                                 col="grey", border="white", las=1,
+                                 breaks="FD", ...){
+  stopifnot(! is.null(X) || ! is.null(maf))
+
+  if(! is.null(X) & is.null(maf)){
+    N <- nrow(X)
+    P <- ncol(X)
+    if(P < N)
+      warning("input matrix doesn't seem to have SNPs in columns and individuals in rows")
+    message(paste0(P, " SNPs and ", N, " individuals"))
+    maf <- maf.from.dose(X)
+  }
+
+  tmp <- hist(x=maf, xlab="Minor allele frequency", ylab="Number of SNPs",
+              main=main, xlim=xlim, col=col, border=border, las=las,
+              breaks=breaks, ...)
 }
 
 ##' Convert genotype data to the "mean genotype" file format from BimBam
