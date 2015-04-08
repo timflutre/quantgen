@@ -30,7 +30,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.1.0" # http://semver.org/
+progVersion = "1.1.1" # http://semver.org/
 
 
 def progressBar(progress):
@@ -199,9 +199,12 @@ class CatGroupedFiles(object):
                       % (i+1, self.inFile)
                 sys.stderr.write("%s\n\n" % msg)
                 sys.exit(1)
-            if not os.path.exists(tokens[1]):
+            p2f = "%s%s%s" % (self.outDir,
+                            "/" if self.outDir != "" else "",
+                            tokens[1])
+            if not os.path.exists(p2f):
                 msg = "ERROR: can't find file %s (line %i of %s)" \
-                      % (tokens[1], i+1, self.inFile)
+                      % (p2f, i+1, self.inFile)
                 sys.stderr.write("%s\n\n" % msg)
                 sys.exit(1)
             # if not tokens[1].endswith(".gz"):
@@ -220,17 +223,29 @@ class CatGroupedFiles(object):
             
     def handleOneGroup(self, group, lFiles):
         """
-        >>> i = CatGroupedFiles()
-        >>> i.useSymLink = True; i.outDir = ""; i.suffix = "txt"
-        >>> group = "indA"; lFiles=["run1/A.txt"]
-        >>> i.handleOneGroup(group, lFiles)
+        >>> i = CatGroupedFiles(); i.suffix = "txt"
+        >>> i.outDir = ""
+        >>> i.useSymLink = False
+        >>> i.handleOneGroup("indA", ["run1/A.txt"])
+        u'cp run1/A.txt indA.txt'
+        >>> i.useSymLink = True
+        >>> i.handleOneGroup("indA", ["run1/A.txt"])
         u'ln -s run1/A.txt indA.txt'
-        >>> lFiles=["run1/A.txt", "run2/A.txt"]
-        >>> i.handleOneGroup(group, lFiles)
+        >>> i.outDir = "inds"
+        >>> i.handleOneGroup("indA", ["../run1/A.txt"])
+        u'cdir=$(pwd); cd inds; ln -s ../run1/A.txt indA.txt; cd ${cdir}'
+        >>> i.outDir = ""
+        >>> i.handleOneGroup("indA", ["run1/A.txt", "run2/A.txt"])
         u'cat run1/A.txt run2/A.txt > indA.txt'
+        >>> i.outDir = "inds"
+        >>> i.handleOneGroup("indA", ["../run1/A.txt", "../run2/A.txt"])
+        u'cdir=$(pwd); cd inds; cat ../run1/A.txt ../run2/A.txt > indA.txt; cd ${cdir}'
         """
         cmd = ""
         
+        if self.outDir != "":
+            cmd += "cdir=$(pwd); cd %s; " % self.outDir
+            
         if len(lFiles) == 1:
             if self.useSymLink:
                 cmd += "ln -s"
@@ -243,10 +258,11 @@ class CatGroupedFiles(object):
                 cmd += " %s" % f
             cmd += " > "
             
-        if self.outDir != "":
-            cmd += "%s/" % self.outDir
         cmd += "%s.%s" % (group, self.suffix)
-        
+
+        if self.outDir != "":
+            cmd += "; cd ${cdir}"
+            
         if self.verbose > 1:
             print(cmd)
         return cmd
