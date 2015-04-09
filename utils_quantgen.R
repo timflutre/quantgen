@@ -434,27 +434,32 @@ cor2cov <- function(x, sd){
   return(sweep(sweep(x, 1, sd, "*"), 2, sd, "*"))
 }
 
-##' Estimate kinship matrix K via the Astle-Balding model
+##' Estimate kinship matrix from genotypes at SNPs.
 ##'
-##' eqn 2.2 of Astle & Balding (Statistical Science, 2009)
-##' @title Astle-Balding estimation of kinship
-##' @param genos.dose matrix with SNPs in rows and individuals in columns,
+##' SNPs with missing data are ignored.
+##' @title Kinship from SNPs.
+##' @param X matrix with SNPs in rows and individuals in columns,
 ##' and genotypes coded as allele dose (i.e. in [0,2]),
-##' but no missing data is allowed
 ##' @param mafs vector with minor allele frequencies (calculated with `maf.from.dose` if NULL)
 ##' @param thresh threshold on allele frequencies below which SNPs are ignored
+##' @param method default is "astle-balding"; "animal-model"; "center", "center-std"
 ##' @return kinship matrix
 ##' @author Timothée Flutre
-estim.kinship.AstleBalding <- function(genos.dose, mafs=NULL, thresh=0.01){
-  stopifnot(is.matrix(genos.dose),
-            sum(is.na(genos.dose)) == 0,
+estim.kinship.AstleBalding <- function(X, mafs=NULL, thresh=0.01,
+                                       method="astle-balding"){
+  stopifnot(is.matrix(X),
             thresh > 0,
-            thresh <= 0.5)
-  if(nrow(genos.dose) < ncol(genos.dose))
+            thresh <= 0.5,
+            method %in% c("astle-balding", "animal-model", "center", "center-std"))
+  N <- ncol(X)
+  P <- nrow(X)
+  if(P < N)
     message("did you put SNPs in rows and individuals in columns?")
 
+  if(any(apply(X,
+
   if(is.null(mafs)){
-    mafs <- maf.from.dose(t(genos.dose))
+    mafs <- maf.from.dose(t(X))
     message(paste0("allele freqs: ",
                    "min=", format(min(mafs), digits=2),
                    " Q1=", format(quantile(mafs, 0.25), digits=2),
@@ -467,10 +472,22 @@ estim.kinship.AstleBalding <- function(genos.dose, mafs=NULL, thresh=0.01){
   idx <- which(mafs < thresh)
   if(length(idx) > 0)
     message(paste0("skip ", length(idx), " SNPs with freq below ", thresh))
+  P <- P - length(idx)
 
-  tmp <- sweep(genos.dose[-idx,], 1, 2 * mafs[-idx], FUN="-")
-  tmp <- sweep(tmp, 1, 2 * sqrt(mafs[-idx] * (1 - mafs[-idx])), FUN="/")
-  K <- (1/nrow(genos.dose[-idx,])) * crossprod(tmp, tmp)
+  if(method == "astle-balding"){
+    tmp <- sweep(x=X[-idx,], MARGIN=1, STATS=2 * mafs[-idx], FUN="-")
+    tmp <- sweep(x=tmp, MARGIN=1, STARTS=2 * sqrt(mafs[-idx] * (1 - mafs[-idx])), FUN="/")
+    K <- crossprod(tmp, tmp) / P
+  } else if(method == "animal-model"){
+    K <- crossprod(X[-idx,], X[-idx,]) / (2  * sum(mafs[-idx] * (1 - mafs[-idx])))
+  } else if(method == "center"){
+    ## tmp <- sweep(x=X[-idx,], MARGIN=1, STATS=rowMeans(X), FUN="-")
+    tmp <- scale(x=t(X[-idx]), center=TRUE, scale=FALSE)
+    K <- crossprod(tmp, tmp) / P
+  } else if(method == "center-std"){
+    tmp <- scale(x=t(X[-idx]), center=TRUE, scale=TRUE)
+    K <- crossprod(tmp, tmp) / P
+  }
 
   return(K)
 }
@@ -918,11 +935,11 @@ genotypes.alleles2dose <- function(x, na.string="--"){
 ##' columns and individuals in rows
 ##' @return vector
 ##' @author Timothée Flutre
-maf.from.dose <- function(x){
-  stopifnot(is.matrix(x))
-  if(ncol(x) < nrow(x))
+maf.from.dose <- function(X){
+  stopifnot(is.matrix(X))
+  if(ncol(X) < nrow(X))
     message("did you put SNPs in columns and individuals in rows?")
-  maf.hat <- apply(x, 2, function(genos){
+  maf.hat <- apply(X, 2, function(genos){
     genos.notmiss <- genos[! is.na(genos)]
     sum(genos.notmiss) / (2 * length(genos.notmiss))
   })
