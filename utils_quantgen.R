@@ -460,59 +460,78 @@ cor2cov <- function(x, sd){
   return(sweep(sweep(x, 1, sd, "*"), 2, sd, "*"))
 }
 
-##' Estimate kinship matrix from genotypes at SNPs.
+##' Estimate kinship matrix from SNPs.
 ##'
 ##' SNPs with missing data are ignored.
-##' @title Kinship from SNPs.
-##' @param X matrix with SNPs in rows and individuals in columns,
-##' and genotypes coded as allele dose (i.e. in [0,2]),
+##' @param X matrix of SNP genotypes encoded as allele doses, with SNPs in
+##' columns and individuals in rows
 ##' @param mafs vector with minor allele frequencies (calculated with `maf.from.dose` if NULL)
 ##' @param thresh threshold on allele frequencies below which SNPs are ignored
 ##' @param method default is "astle-balding"; "animal-model"; "center", "center-std"
-##' @return kinship matrix
+##' @return matrix
 ##' @author Timothée Flutre
-estim.kinship.AstleBalding <- function(X, mafs=NULL, thresh=0.01,
-                                       method="astle-balding"){
+estim.kinship <- function(X, mafs=NULL, thresh=0.01,
+                          method="astle-balding"){
   stopifnot(is.matrix(X),
             thresh > 0,
             thresh <= 0.5,
             method %in% c("astle-balding", "animal-model", "center", "center-std"))
-  N <- ncol(X)
-  P <- nrow(X)
+  N <- nrow(X)
+  P <- ncol(X)
   if(P < N)
-    message("did you put SNPs in rows and individuals in columns?")
+    warning("input matrix doesn't seem to have SNPs in columns and individuals in rows")
 
-  if(any(apply(X,
+  idx.rm <- c()
 
+  ## discard SNPs with missing data
+  snps.na <- apply(X, 2, function(x){
+    any(is.na(x))
+  })
+  if(any(snps.na)){
+    message(paste0("skip ", sum(snps.na), " SNPs with missing data"))
+    idx.rm <- which(snps.na)
+    X <- X[, -idx.rm]
+    P <- ncol(X)
+  }
+
+  ## estimate MAFs
   if(is.null(mafs)){
-    mafs <- maf.from.dose(t(X))
+    mafs <- maf.from.dose(X)
     message(paste0("allele freqs: ",
                    "min=", format(min(mafs), digits=2),
                    " Q1=", format(quantile(mafs, 0.25), digits=2),
                    " med=", format(median(mafs), digits=2),
+                   " mean=", format(mean(mafs), digits=2),
                    " Q3=", format(quantile(mafs, 0.75), digits=2),
                    " max=", format(max(mafs), digits=2)))
   }
-  stopifnot(min(mafs) >= 0, max(mafs) <= 0.5)
 
-  idx <- which(mafs < thresh)
-  if(length(idx) > 0)
-    message(paste0("skip ", length(idx), " SNPs with freq below ", thresh))
-  P <- P - length(idx)
+  ## discard SNPs with low MAFs
+  snps.low <- mafs < thresh
+  if(any(snps.low)){
+    message(paste0("skip ", sum(snps.low), " SNPs with freq below ", thresh))
+    idx.rm <- which(snps.low)
+    X <- X[, -idx.rm]
+    P <- ncol(X)
+    mafs <- mafs[-idx.rm]
+  }
 
+  ## estimate kinship
   if(method == "astle-balding"){
-    tmp <- sweep(x=X[-idx,], MARGIN=1, STATS=2 * mafs[-idx], FUN="-")
-    tmp <- sweep(x=tmp, MARGIN=1, STARTS=2 * sqrt(mafs[-idx] * (1 - mafs[-idx])), FUN="/")
-    K <- crossprod(tmp, tmp) / P
+    tmp <- sweep(x=X, MARGIN=2, STATS=2 * mafs, FUN="-")
+    tmp <- sweep(x=tmp, MARGIN=2, STATS=sqrt(4 * mafs * (1 - mafs)), FUN="/")
+    K <- tcrossprod(tmp, tmp) / P
   } else if(method == "animal-model"){
-    K <- crossprod(X[-idx,], X[-idx,]) / (2  * sum(mafs[-idx] * (1 - mafs[-idx])))
+    K <- tcrossprod(X, X) / (2  * sum(mafs * (1 - mafs)))
   } else if(method == "center"){
-    ## tmp <- sweep(x=X[-idx,], MARGIN=1, STATS=rowMeans(X), FUN="-")
-    tmp <- scale(x=t(X[-idx]), center=TRUE, scale=FALSE)
-    K <- crossprod(tmp, tmp) / P
+    ## tmp <- sweep(x=X, MARGIN=2, STATS=colMeans(X), FUN="-")
+    tmp <- scale(x=X, center=TRUE, scale=FALSE)
+    K <- tcrossprod(tmp, tmp) / P
   } else if(method == "center-std"){
-    tmp <- scale(x=t(X[-idx]), center=TRUE, scale=TRUE)
-    K <- crossprod(tmp, tmp) / P
+    ## X.cs <- sweep(x=X, MARGIN=2, STATS=colMeans(X), FUN="-")
+    ## tmp <- sweep(x=X.cs, MARGIN=2, STATS=apply(X=X.cs, MARGIN=2, sd), FUN="/")
+    tmp <- scale(x=X, center=TRUE, scale=TRUE)
+    K <- tcrossprod(tmp, tmp) / P
   }
 
   return(K)
@@ -1025,24 +1044,6 @@ genotypes.alleles2dose <- function(x, na.string="--"){
               alleles=alleles))
 }
 
-##' Estimate minor allele frequencies of SNPs.
-##'
-##' Missing values should be encoded as NA.
-##' @param x matrix of SNP genotypes encoded as allele doses, with SNPs in
-##' columns and individuals in rows
-##' @return vector
-##' @author Timothée Flutre
-maf.from.dose <- function(X){
-  stopifnot(is.matrix(X))
-  if(ncol(X) < nrow(X))
-    message("did you put SNPs in columns and individuals in rows?")
-  maf.hat <- apply(X, 2, function(genos){
-    genos.notmiss <- genos[! is.na(genos)]
-    sum(genos.notmiss) / (2 * length(genos.notmiss))
-  })
-  return(maf.hat)
-}
-
 ##' Plot missing SNP genotypes as a grid.
 ##'
 ##' Data will be represented in black if missing, white otherwise.
@@ -1070,14 +1071,18 @@ plotGridMissGenos <- function(x, main="Missing genotypes", xlab="Individuals",
 ##' @author Timothée Flutre
 maf.from.dose <- function(X){
   stopifnot(is.matrix(X))
-  if(ncol(X) < nrow(X))
+  N <- nrow(X)
+  P <- ncol(X)
+  if(P < N)
     warning("input matrix doesn't seem to have SNPs in columns and individuals in rows")
-  maf.hat <- apply(X, 2, function(x){
+
+  maf <- apply(X, 2, function(x){
     x <- x[complete.cases(x)]
     tmp <- sum(x) / (2 * length(x))
     ifelse(tmp <= 0.5, tmp, 1 - tmp)
   })
-  return(maf.hat)
+
+  return(maf)
 }
 
 ##' Plot the histogram of the minor allele frequency per SNP
