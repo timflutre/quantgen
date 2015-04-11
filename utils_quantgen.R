@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.6.0" # http://semver.org/
+utils_quantgen.version <- "1.6.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -466,16 +466,16 @@ cor2cov <- function(x, sd){
 ##' @param X matrix of SNP genotypes encoded as allele doses, with SNPs in
 ##' columns and individuals in rows
 ##' @param mafs vector with minor allele frequencies (calculated with `maf.from.dose` if NULL)
-##' @param thresh threshold on allele frequencies below which SNPs are ignored
+##' @param thresh threshold on allele frequencies below which SNPs are ignored (default=0.01, NULL to skip this step)
 ##' @param method default is "astle-balding"; "animal-model"; "center", "center-std"
 ##' @return matrix
 ##' @author Timothée Flutre
 estim.kinship <- function(X, mafs=NULL, thresh=0.01,
                           method="astle-balding"){
   stopifnot(is.matrix(X),
-            thresh > 0,
-            thresh <= 0.5,
             method %in% c("astle-balding", "animal-model", "center", "center-std"))
+  if(! is.null(thresh))
+    stopifnot(thresh >= 0, thresh <= 0.5)
   N <- nrow(X)
   P <- ncol(X)
   if(P < N)
@@ -507,13 +507,15 @@ estim.kinship <- function(X, mafs=NULL, thresh=0.01,
   }
 
   ## discard SNPs with low MAFs
-  snps.low <- mafs < thresh
-  if(any(snps.low)){
-    message(paste0("skip ", sum(snps.low), " SNPs with freq below ", thresh))
-    idx.rm <- which(snps.low)
-    X <- X[, -idx.rm]
-    P <- ncol(X)
-    mafs <- mafs[-idx.rm]
+  if(! is.null(thresh)){
+    snps.low <- mafs < thresh
+    if(any(snps.low)){
+      message(paste0("skip ", sum(snps.low), " SNPs with freq below ", thresh))
+      idx.rm <- which(snps.low)
+      X <- X[, -idx.rm]
+      P <- ncol(X)
+      mafs <- mafs[-idx.rm]
+    }
   }
 
   ## estimate kinship
