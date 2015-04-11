@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.4.0" # http://semver.org/
+utils_quantgen.version <- "1.5.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -256,6 +256,32 @@ getNbPCsMinimAvgSqPartCor <- function(X){
   fm <- sapply(1:(ncol(X2) - 1), partial)
   fm <- c((sum(X2^2) - ncol(X2))/(ncol(X2) * (ncol(X2) - 1)), fm)
   return(max(1, which.min(fm) - 1))
+}
+
+##' Quantile-normalize a vector of numbers to a standard normal distribution.
+##'
+##' TODO: add ref
+##' @param x vector of numeric data
+##' @param break.ties.rand break ties randomly (default=TRUE)
+##' @param seed see for the pseudo-random number generator (default=1859)
+##' @return vector
+##' @author Timothée Flutre
+quant.norm <- function(x, break.ties.rand=TRUE, seed=1859){
+  stopifnot(is.vector(x), is.numeric(x), is.logical(break.ties.rand),
+            is.numeric(seed))
+
+  out <- setNames(object=rep(NA, length(x)), nm=names(x))
+
+  if(break.ties.rand){
+    if(! is.null(seed))
+      set.seed(seed)
+    idx <- sample.int(n=length(x))
+    tmp <- qqnorm(y=x[idx], plot.it=FALSE)$x
+    out <- tmp[sort(idx, index.return=TRUE)$ix]
+  } else
+    out <- qqnorm(y=x, plot.it=FALSE)$x
+
+  return(out)
 }
 
 pca.genexp <- function(X=NULL, algo="svd", method="nb", cutoff=10,
