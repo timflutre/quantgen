@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.5.0" # http://semver.org/
+utils_quantgen.version <- "1.6.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -565,6 +565,77 @@ simul.animal.model <- function(n=300, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
                     response=y[,1])
   return(list(X=X, W=W, Z=Z, G=G, a=a, u=u, sigmau2=sigmau2, sigma2=sigma2,
               h2=h2, dat=dat))
+}
+
+##' Simulate phenotypes according to the BSLMM model.
+##'
+##' See Zhou, Carbonetto & Stephens (2013).
+##' @param X matrix of SNP genotypes encoded as allele doses, with SNPs in
+##' columns and individuals in rows (SNPs with missing values or low MAF
+##' should be discarded beforehand)
+##' @param Q number of covariates (including the intercept)
+##' @param pi proportion of beta-tilde values that are non-zero
+##' @param h approximation to E[PVE] (h and rho should be NULL or not together)
+##' @param rho approximation to E[PGE]
+##' @param seed seed for the pseudo-random number generator
+##' @return list
+##' @author Timothée Flutre
+simul.bslmm <- function(X, Q=1, pi=NULL, h=NULL, rho=NULL, seed=NULL){
+  stopifnot(xor(is.null(h) & is.null(rho), ! (is.null(h) & is.null(rho))),
+            sum(is.na(X)) == 0,
+            ! is.null(rownames(X)))
+  library(MASS)
+  if(! is.null(seed))
+    set.seed(seed)
+
+  ## genetic incidence/design matrices and kinship matrix
+  N <- nrow(X)
+  P <- ncol(X)
+  if(P < N)
+    warning("input matrix doesn't seem to have SNPs in columns and individuals in rows")
+  X.c <- scale(x=X, center=TRUE, scale=FALSE)
+  Z <- diag(N)
+  K <- tcrossprod(X.c, X.c) / P
+
+  ## non-genetic covariates
+  W <- matrix(data=rep(1, N), nrow=N, ncol=1,
+              dimnames=list(rownames(X), c("mu")))
+  if(Q > 1)
+    W <- cbind(W, matrix(data=rnorm(n=N*(Q-1), mean=0, sd=1), nrow=N, ncol=Q-1,
+                         dimnames=list(rownames(X), paste0("c", 1:(Q-1)))))
+  alpha <- rnorm(n=Q, mean=50, sd=5)
+
+  ## hyper-parameters
+  s.a <- (1 / (N*P)) * sum(colSums(X.c^2))
+  s.b <- (1/N)  * sum(diag(K))
+  if(is.null(pi))
+    pi <- exp(runif(n=1, min=log(1/P), max=log(1)))
+  if(is.null(h))
+    h <- runif(n=1, min=0, max=1)
+  if(is.null(rho))
+    rho <- runif(n=1, min=0, max=1)
+  sigma.a2 <- (h * rho) / ((1 - h) * P * pi * s.a)
+  sigma.b2 <- (h * (1 - rho)) / ((1 - h) * s.b)
+  tau <- 1
+
+  ## sparse genetic effects
+  betat <- rep(0, P)
+  gamma <- rbinom(n=P, size=1, prob=pi)
+  betat[gamma == 1] <- rnorm(n=sum(gamma == 1), mean=0,
+            sd=sqrt(sigma.a2 * tau^(-1)))
+
+  ## polygenic effects
+  u <- mvrnorm(n=1, mu=rep(0, N), Sigma=sigma.b2 * tau^(-1) * K)
+
+  ## errors
+  epsilon <- matrix(rnorm(n=N, mean=0, sd=sqrt(tau^(-1))))
+
+  ## phenotypes
+  y <- W %*% alpha + X.c %*% betat + Z %*% u + epsilon
+
+  return(list(y=y, W=W, alpha=alpha, X.c=X.c, s.a=s.a, s.b=s.b, pi=pi, h=h,
+              rho=rho, sigma.a2=sigma.a2, sigma.b2=sigma.b2, tau=tau,
+              betat=betat, u=u))
 }
 
 ##' Make a scatter plot of y as a function of x, along with the regression
