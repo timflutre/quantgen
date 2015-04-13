@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.6.1" # http://semver.org/
+utils_quantgen.version <- "1.6.2" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -604,7 +604,9 @@ simul.animal.model <- function(n=300, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
 simul.bslmm <- function(X, Q=1, pi=NULL, h=NULL, rho=NULL, seed=NULL){
   stopifnot(xor(is.null(h) & is.null(rho), ! (is.null(h) & is.null(rho))),
             sum(is.na(X)) == 0,
-            ! is.null(rownames(X)))
+            ! is.null(rownames(X)),
+            ! is.null(colnames(X)),
+            h >= rho)
   library(MASS)
   if(! is.null(seed))
     set.seed(seed)
@@ -640,19 +642,23 @@ simul.bslmm <- function(X, Q=1, pi=NULL, h=NULL, rho=NULL, seed=NULL){
   tau <- 1
 
   ## sparse genetic effects
-  betat <- rep(0, P)
-  gamma <- rbinom(n=P, size=1, prob=pi)
+  betat <- setNames(object=rep(0, P), nm=colnames(X))
+  gamma <- setNames(object=rbinom(n=P, size=1, prob=pi), nm=colnames(X))
   betat[gamma == 1] <- rnorm(n=sum(gamma == 1), mean=0,
             sd=sqrt(sigma.a2 * tau^(-1)))
 
   ## polygenic effects
-  u <- mvrnorm(n=1, mu=rep(0, N), Sigma=sigma.b2 * tau^(-1) * K)
+  u <- setNames(object=mvrnorm(n=1, mu=rep(0, N),
+                    Sigma=sigma.b2 * tau^(-1) * K),
+                nm=rownames(X))
 
   ## errors
-  epsilon <- matrix(rnorm(n=N, mean=0, sd=sqrt(tau^(-1))))
+  epsilon <- setNames(object=matrix(rnorm(n=N, mean=0, sd=sqrt(tau^(-1)))),
+                      nm=rownames(X))
 
   ## phenotypes
-  y <- W %*% alpha + X.c %*% betat + Z %*% u + epsilon
+  y <- setNames(object=W %*% alpha + X.c %*% betat + Z %*% u + epsilon,
+                nm=rownames(X))
 
   return(list(y=y, W=W, alpha=alpha, X.c=X.c, s.a=s.a, s.b=s.b, pi=pi, h=h,
               rho=rho, sigma.a2=sigma.a2, sigma.b2=sigma.b2, tau=tau,
