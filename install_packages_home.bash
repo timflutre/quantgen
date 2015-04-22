@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -434,6 +434,17 @@ if [ "$1" == "mstrat" ]; then
     unzip MStrat-v4-unix.zip
     cd MStrat-v4-unix
     gcc -o ether Etherv4.c -lm
+fi
+
+if [ "$1" == "openbugs" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://www.openbugs.net/w/OpenBUGS_3_2_3?action=AttachFile&do=get&target=OpenBUGS-3.2.3.tar.gz
+    tar -xzvf OpenBUGS-3.2.3.tar.gz
+    cd OpenBUGS-3.2.3/
+    ./configure --prefix=$HOME
+    make
+    make install
 fi
 
 if [ "$1" == "patman" ]; then
