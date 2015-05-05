@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.6.2" # http://semver.org/
+utils_quantgen.version <- "1.6.3" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -605,8 +605,7 @@ simul.bslmm <- function(X, Q=1, pi=NULL, h=NULL, rho=NULL, seed=NULL){
   stopifnot(xor(is.null(h) & is.null(rho), ! (is.null(h) & is.null(rho))),
             sum(is.na(X)) == 0,
             ! is.null(rownames(X)),
-            ! is.null(colnames(X)),
-            h >= rho)
+            ! is.null(colnames(X)))
   library(MASS)
   if(! is.null(seed))
     set.seed(seed)
