@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.6.3" # http://semver.org/
+utils_quantgen.version <- "1.7.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -460,6 +460,75 @@ cor2cov <- function(x, sd){
   return(sweep(sweep(x, 1, sd, "*"), 2, sd, "*"))
 }
 
+##' Convert the SFS of independent replicates into a matrix of allele dosage.
+##'
+##' SFS stands for site frequency spectrum
+##' @param seg.sites list returned by scrm()
+##' @return matrix with diploid individuals in rows and SNPs in columns
+##' @author Timothée Flutre
+seg.sites2all.doses <- function(seg.sites){
+  stopifnot(is.list(seg.sites),
+            length(unique(sapply(seg.sites, nrow))) == 1)
+  N <- nrow(seg.sites[[1]]) / 2 # nb of diploid individuals
+  P <- sum(sapply(seg.sites, ncol)) # nb of SNPs
+  X <- matrix(data=NA, nrow=N, ncol=P)
+  j <- 1
+  for(x in seq_along(seg.sites)){
+    X[,j:(j+ncol(seg.sites[[x]])-1)] <-
+      do.call(rbind, lapply(seq(1, 2*N, by=2), function(i){
+        colSums(seg.sites[[x]][c(i,i+1),])
+      }))
+    j <- j + ncol(seg.sites[[x]])
+  }
+  return(X)
+}
+
+##' Simulate a matrix of genotypes in allele doses via an approximation to the coalescent with recombination named the Sequential Coalescent with Recombination Model.
+##'
+##' Requires the scrm package (Staab et al, 2014).
+##' @param nb.inds diploids (thus nb of haplotypes is 2 * nb.inds)
+##' @param ind.ids vector of identifiers (one per individual)
+##' @param nb.reps number of independent loci that will be produced (could be seen as distinct chromosomes)
+##' @param pop.mut.rate theta = 4 N0 mu
+##' @param pop.recomb.rate rho = 4 N0 r
+##' @param chrom.len in bp
+##' @param nb.pops number of populations (if > 1, equal migration)
+##' @param mig.rate migration rate = 4 N0 m
+##' @param verbose show scrm cmd-line (default=TRUE)
+##' @return matrix with diploid individuals in rows and SNPs in columns
+##' @author Timothée Flutre
+simul.coalescent <- function(nb.inds,
+                             ind.ids=NULL,
+                             nb.reps=20,
+                             pop.mut.rate=50,
+                             pop.recomb.rate=5,
+                             chrom.len=10^3,
+                             nb.pops=1,
+                             mig.rate=NULL,
+                             verbose=TRUE){
+  library(scrm)
+  if(is.null(ind.ids))
+    ind.ids <- sprintf(fmt=paste0("ind%0", floor(log10(nb.inds))+1, "i"), 1:nb.inds)
+  nb.samples <- nb.inds * 2 # e.g. 2 chr1 in ind1, 2 chr1 in ind2, etc
+  cmd <- paste0(nb.samples, " ", nb.reps)
+  cmd <- paste0(cmd, " -t ", pop.mut.rate)
+  cmd <- paste0(cmd, " -r ", pop.recomb.rate, " ", chrom.len)
+  cmd <- paste0(cmd, " -T") # print genealogies in newick
+  cmd <- paste0(cmd, " -L") # print TMRCA and local tree lengths
+  cmd <- paste0(cmd, " -SC abs") # absolute seq positions in bp
+  cmd <- paste0(cmd, " -oSFS") # print site freq spectrum, requires -t
+  if(nb.pops == 2)
+     cmd <- paste0(cmd, " -I ", nb.pops, " ", floor(nb.samples / 2),
+                   " ", nb.samples - floor(nb.samples / 2),
+                   " ", mig.rate)
+  if(verbose)
+    message(cmd)
+  sum.stats <- scrm(cmd)
+  X <- seg.sites2all.doses(sum.stats$seg_sites)
+  rownames(X) <- ind.ids
+  return(X)
+}
+
 ##' Estimate kinship matrix from SNPs.
 ##'
 ##' SNPs with missing data are ignored.
@@ -468,10 +537,11 @@ cor2cov <- function(x, sd){
 ##' @param mafs vector with minor allele frequencies (calculated with `maf.from.dose` if NULL)
 ##' @param thresh threshold on allele frequencies below which SNPs are ignored (default=0.01, NULL to skip this step)
 ##' @param method default is "astle-balding"; "animal-model"; "center", "center-std"
+##' @param verbose verbosity level (default=1)
 ##' @return matrix
 ##' @author Timothée Flutre
 estim.kinship <- function(X, mafs=NULL, thresh=0.01,
-                          method="astle-balding"){
+                          method="astle-balding", verbose=1){
   stopifnot(is.matrix(X),
             method %in% c("astle-balding", "animal-model", "center", "center-std"))
   if(! is.null(thresh))
@@ -488,7 +558,8 @@ estim.kinship <- function(X, mafs=NULL, thresh=0.01,
     any(is.na(x))
   })
   if(any(snps.na)){
-    message(paste0("skip ", sum(snps.na), " SNPs with missing data"))
+    if(verbose > 0)
+      message(paste0("skip ", sum(snps.na), " SNPs with missing data"))
     idx.rm <- which(snps.na)
     X <- X[, -idx.rm]
     P <- ncol(X)
@@ -497,20 +568,22 @@ estim.kinship <- function(X, mafs=NULL, thresh=0.01,
   ## estimate MAFs
   if(is.null(mafs)){
     mafs <- maf.from.dose(X)
-    message(paste0("allele freqs: ",
-                   "min=", format(min(mafs), digits=2),
-                   " Q1=", format(quantile(mafs, 0.25), digits=2),
-                   " med=", format(median(mafs), digits=2),
-                   " mean=", format(mean(mafs), digits=2),
-                   " Q3=", format(quantile(mafs, 0.75), digits=2),
-                   " max=", format(max(mafs), digits=2)))
+    if(verbose > 1)
+      message(paste0("allele freqs: ",
+                     "min=", format(min(mafs), digits=2),
+                     " Q1=", format(quantile(mafs, 0.25), digits=2),
+                     " med=", format(median(mafs), digits=2),
+                     " mean=", format(mean(mafs), digits=2),
+                     " Q3=", format(quantile(mafs, 0.75), digits=2),
+                     " max=", format(max(mafs), digits=2)))
   }
 
   ## discard SNPs with low MAFs
   if(! is.null(thresh)){
     snps.low <- mafs < thresh
     if(any(snps.low)){
-      message(paste0("skip ", sum(snps.low), " SNPs with freq below ", thresh))
+      if(verbose > 0)
+        message(paste0("skip ", sum(snps.low), " SNPs with freq below ", thresh))
       idx.rm <- which(snps.low)
       X <- X[, -idx.rm]
       P <- ncol(X)
