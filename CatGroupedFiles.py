@@ -30,7 +30,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.1.1" # http://semver.org/
+progVersion = "1.1.2" # http://semver.org/
 
 
 def progressBar(progress):
@@ -91,9 +91,9 @@ class CatGroupedFiles(object):
         msg += "\t\tall files (col 2) with same group (col 1) will be\n"
         msg += "\t\t concatenated to a file named <col1>.<suffix>\n"
         msg += "\t\texample from sequencing applications:\n"
-        msg += "\t\t indA<tab>run1/A.fastq.gz\n"
-        msg += "\t\t indB<tab>run1/B.fastq.gz\n"
-        msg += "\t\t indA<tab>run2/A.fastq.gz\n"
+        msg += "\t\t indA<tab>/data/run1/A.fastq.gz\n"
+        msg += "\t\t indB<tab>/data/run1/B.fastq.gz\n"
+        msg += "\t\t indA<tab>/data/run2/A.fastq.gz\n"
         msg += "  -s, --suffix\tsuffix for the output files (e.g. txt, fastq.gz, etc)\n"
         msg += "  -o, --outdir\toutput directory (default=\"\")\n"
         msg += "  -c, --copy\tcopy if group with single file (symlink otherwise)\n"
@@ -199,17 +199,15 @@ class CatGroupedFiles(object):
                       % (i+1, self.inFile)
                 sys.stderr.write("%s\n\n" % msg)
                 sys.exit(1)
-            p2f = "%s%s%s" % (self.outDir,
-                            "/" if self.outDir != "" else "",
-                            tokens[1])
+            p2f = tokens[1]
             if not os.path.exists(p2f):
                 msg = "ERROR: can't find file %s (line %i of %s)" \
                       % (p2f, i+1, self.inFile)
                 sys.stderr.write("%s\n\n" % msg)
                 sys.exit(1)
-            # if not tokens[1].endswith(".gz"):
+            # if not p2f.endswith(".gz"):
             #     msg = "ERROR: file %s should be gzipped (line %i of %s)" \
-            #           % (tokens[1], i+1, self.inFile)
+            #           % (p2f, i+1, self.inFile)
             #     sys.stderr.write("%s\n\n" % msg)
             #     sys.exit(1)
             if tokens[0] not in self.group2files:
