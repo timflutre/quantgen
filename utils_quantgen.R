@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.7.0" # http://semver.org/
+utils_quantgen.version <- "1.7.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -775,31 +775,36 @@ regplot <- function(x, y, ...){
 ##' of p values can be calculated with: qbeta(0.95, j, N-j+1).
 ##' TODO: look at this https://github.com/stephenturner/qqman/blob/v0.0.0/qqman.r
 ##' @param pvalues vector of raw p values
-##' @param main main title (default="Q-Q plot")
+##' @param plot.conf.int show the confidence interval (default=TRUE)
+##' @param ...
 ##' @author Timothée Flutre (inspired from an anonymous comment to http://gettinggeneticsdone.blogspot.fr/2009/11/qq-plots-of-p-values-in-r-using-ggplot2.html)
-qqplot.pval <- function(pvalues, main="Q-Q plot", ...){
-    N <- length(pvalues)
+qqplot.pval <- function(pvalues, plot.conf.int=TRUE, ...){
+  N <- length(pvalues)
+  expected <- - log10(1:N / N)
+  observed <- - log10(pvalues)
+  MAX <- max(c(expected, observed))
+
+  if(plot.conf.int){
     c95 <- rep(0, N)
     c05 <- rep(0, N)
     for(j in 1:N){
-        c95[j] <- qbeta(0.95, j, N-j+1)
-        c05[j] <- qbeta(0.05, j, N-j+1)
+      c95[j] <- qbeta(0.95, j, N-j+1)
+      c05[j] <- qbeta(0.05, j, N-j+1)
     }
-
-    pvalues <- -log10(pvalues)
-    null <- -log10(1:N/N)
-    MAX <- max(c(pvalues, null))
-
-    plot(null, -log(c95,10), ylim=c(0,MAX), xlim=c(0,MAX), type="l",
+    c95 <- - log10(c95)
+    c05 <- - log10(c05)
+    plot(expected, c95, ylim=c(0,MAX), xlim=c(0,MAX), type="l",
          axes=FALSE, xlab="", ylab="")
     par(new=T)
-    plot(null, -log(c05,10), ylim=c(0,MAX), xlim=c(0,MAX), type="l",
+    plot(expected, c05, ylim=c(0,MAX), xlim=c(0,MAX), type="l",
          axes=FALSE, xlab="", ylab="")
-    abline(0, 1, col="red") # diagonal
     par(new=T)
-    qqplot(x=null, y=pvalues, ylim=c(0,MAX), xlim=c(0,MAX), las=1,
-           main=main, xlab=expression(Expected~~-log[10](italic(p)~values)),
-           ylab=expression(Observed~~-log[10](italic(p)~values)), ...)
+  }
+
+  qqplot(x=expected, y=observed, ylim=c(0,MAX), xlim=c(0,MAX), las=1,
+         xlab=expression(Expected~~-log[10](italic(p)~values)),
+         ylab=expression(Observed~~-log[10](italic(p)~values)), ...)
+  abline(0, 1, col="red")
 }
 
 ##' Plot a Hinton diagram
