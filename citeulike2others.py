@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Aim: download data from CiteULike for usage with Jabref
+# Aim: download data from CiteULike for usage with Jabref or Zotero
 # Copyright (C) 2014-2015 Timothée Flutre
 # Persons: Timothée Flutre [cre,aut]
 # License: GPL-3+
@@ -22,7 +22,8 @@ import gzip
 import getpass
 import json
 import glob
-from pybtex.database.input import bibtex
+from pybtex.database.input import bibtex as bib_i
+from pybtex.database.output import bibtex as bib_o
 # import bibtexparser
 
 if sys.version_info[0] == 2:
@@ -31,7 +32,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.0.0" # http://semver.org/
+progVersion = "1.1.0" # http://semver.org/
 
 
 def user_input(msg):
@@ -45,19 +46,19 @@ def user_input(msg):
         sys.exit(1)
         
         
-class Citeulike2Jabref(object):
+class Citeulike2Others(object):
     
     def __init__(self):
         self.verbose = 1
         self.tasks = []
         self.identifier = "timflutre"
         self.email = "timflutre@gmail.com"
-        self.cookieFile = "cookies_citeulike.txt"
         self.jsonFile = ""
         self.jsonRefs = None
         self.libDir = ""
         self.bibtexFile = ""
         self.bibtexRefs = None
+        self.otherTool = "jabref"
         
         
     def help(self):
@@ -66,7 +67,7 @@ class Citeulike2Jabref(object):
         
         The format complies with help2man (http://www.gnu.org/s/help2man)
         """
-        msg = "`%s' downloads data from CiteULike for usage with Jabref.\n" % os.path.basename(sys.argv[0])
+        msg = "`%s' downloads data from CiteULike for usage with Jabref or Zotero.\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Usage: %s [OPTIONS] ...\n" % os.path.basename(sys.argv[0])
         msg += "\n"
@@ -79,12 +80,13 @@ class Citeulike2Jabref(object):
         msg += "\t\t2: download JSON file (requires -i, -e)\n"
         msg += "\t\t3: download Bibtex file (requires -i, -e)\n"
         msg += "\t\t4: download new files (requires -i, -e, -j, -p)\n"
-        msg += "\t\t5: add 'file' field to Bibtex file (requires -j, -b)\n"
+        msg += "\t\t5: add 'file' field to Bibtex file (requires -j, -b, -o)\n"
         msg += "  -i, --id\tyour CiteULike identifier (default=timflutre)\n"
         msg += "  -e, --email\tyour email (default=timflutre@gmail.com)\n"
         msg += "  -j, --json\tpath to the JSON file\n"
         msg += "  -p, --path\tpath to the directory with all the files\n"
         msg += "  -b, --bibtex\tpath to the Bibtex file\n"
+        msg += "  -o, --other\tother target tool (default=jabref/zotero)\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s -t 1+2+3\n" % os.path.basename(sys.argv[0])
@@ -114,10 +116,10 @@ class Citeulike2Jabref(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:j:b:p:",
+            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:j:p:b:o:",
                                         ["help", "version", "verbose=",
                                          "tasks=", "id=", "email=", "json=",
-                                         "bibtex=", "path="])
+                                         "path=", "bibtex=", "out="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -139,10 +141,12 @@ class Citeulike2Jabref(object):
                 self.email = a
             elif o == "-j" or o == "--json":
                 self.jsonFile = a
-            elif o == "-b" or o == "--bibtex":
-                self.bibtexFile = a
             elif o == "-p" or o == "--path":
                 self.libDir = a
+            elif o == "-b" or o == "--bibtex":
+                self.bibtexFile = a
+            elif o == "-o" or o == "--other":
+                self.otherTool = a
             else:
                 assert False, "invalid option"
                 
@@ -203,12 +207,21 @@ class Citeulike2Jabref(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
+        if "5" in self.tasks and self.otherTool not in ["jabref", "zotero"]:
+            msg = "ERROR: missing compulsory option -o with -t 5"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
             
             
     def saveCookies(self):
         if self.verbose > 0:
             print("save cookies ...")
             sys.stdout.flush()
+            
+        cookieFile = "cookies_citeulike_%s.txt" % self.identifier
+        if os.path.exists(cookieFile):
+            os.remove(cookieFile)
             
         pwd = getpass.getpass()
         
@@ -219,7 +232,7 @@ class Citeulike2Jabref(object):
         cmd += " -O /dev/null"
         cmd += " --quiet"
         cmd += " --keep-session-cookies"
-        cmd += " --save-cookies %s" % self.cookieFile
+        cmd += " --save-cookies %s" % cookieFile
         cmd += " --post-data=\"username=%s" % self.identifier
         cmd += "&password=%s" % pwd
         cmd += "&perm=1\""
@@ -230,21 +243,38 @@ class Citeulike2Jabref(object):
         os.system(cmd)
         
         if self.verbose > 0:
-            print("cookies saved in file %s" % self.cookieFile)
+            print("cookies saved in file %s" % cookieFile)
             
             
+    def getCookieFile(self):
+        cookieFile = "cookies_citeulike_%s.txt" % self.identifier
+        if not os.path.exists(cookieFile):
+            msg = "ERROR: can't find file %s" % cookieFile
+            sys.stderr.write("%s\n\n" % msg)
+            sys.exit(1)
+        return cookieFile
+        
+        
     def downloadFile(self, fileFormat):
         if self.verbose > 0:
             print("download %s file ..." % fileFormat)
             sys.stdout.flush()
             
+        cookieFile = self.getCookieFile()
+        
+        fileExtension = ""
+        if fileFormat == "bibtex":
+            fileExtension = "bib"
+        elif fileFormat == "json":
+            fileExtension = "json"
+            
         cmd = "wget"
         cmd += " --header=\"User-Agent: %s" % self.identifier
         cmd += "/%s" % self.email
         cmd += " downloader/1.0\""
-        cmd += " --load-cookies %s" % self.cookieFile
+        cmd += " --load-cookies %s" % cookieFile
         cmd += " --quiet"
-        cmd += " -O citeulike_%s.%s" % (self.identifier, fileFormat)
+        cmd += " -O citeulike_%s.%s" % (self.identifier, fileExtension)
         cmd += " http://www.citeulike.org/%s" % fileFormat
         cmd += "/user/%s" % self.identifier
         
@@ -255,7 +285,7 @@ class Citeulike2Jabref(object):
         
         if self.verbose > 0:
             print("library saved in file citeulike_%s.%s" \
-                  % (self.identifier, fileFormat))
+                  % (self.identifier, fileExtension))
             
             
     def loadJsonFile(self):
@@ -274,6 +304,9 @@ class Citeulike2Jabref(object):
         if self.verbose > 0:
             print("download the new files ...")
             sys.stdout.flush()
+            
+        cookieFile = self.getCookieFile()
+        
         totalNbFiles = 0
         for entry in self.jsonRefs:
             if "userfiles" in entry:
@@ -287,11 +320,12 @@ class Citeulike2Jabref(object):
                         cmd += " --header=\"User-Agent: %s" % self.identifier
                         cmd += "/%s" % self.email
                         cmd += " downloader/1.0\""
-                        cmd += " --load-cookies %s" % self.cookieFile
+                        cmd += " --load-cookies %s" % cookieFile
                         cmd += " --quiet"
                         cmd += " -O %s" % p
                         cmd += " http://www.citeulike.org/%s" % f["path"]
                         os.system(cmd)
+                        
         if self.verbose > 0:
             print("total nb of files: %i" % totalNbFiles)
             sys.stdout.flush()
@@ -325,16 +359,22 @@ class Citeulike2Jabref(object):
             if self.verbose > 0:
                 print("load Bibtex file ...")
                 sys.stdout.flush()
-            self.bibtexRefs = bibtex.Parser().parse_file(self.bibtexFile)
+                
+            self.bibtexRefs = bib_i.Parser().parse_file(self.bibtexFile)
+            
             # bibtexHandle = open(self.bibtexFile)
             # bibtexRefs = bibtexparser.load(bibtexHandle)
             # bibtexHandle.close()
+            
             if self.verbose > 0:
                 print("Bibtex file: %i entries" % len(self.bibtexRefs.entries))
 
 
     def addFileFieldToBibtex(self):
+        # for Jabref:
         # file = {:~/work/refs/main.pdf:PDF;:~/work/refs/supp.pdf:PDF},
+        # for Zotero:
+        # file = {main.pdf:~/work/refs/main.pdf:application/pdf},
         if self.verbose > 0:
             print("add 'file' field to Bibtex entries ...")
             sys.stdout.flush()
@@ -356,20 +396,31 @@ class Citeulike2Jabref(object):
                 sys.stderr.write("%s\n\n" % msg)
                 sys.exit(1)
                 continue
-            self.bibtexRefs.entries[entry["citation_keys"][ck_idx]].fields["file"] = []
+            # if self.otherTool == "jabref":
+            #     self.bibtexRefs.entries[entry["citation_keys"][ck_idx]].fields["file"] = []
+            # elif self.otherTool == "zotero":
+            #     self.bibtexRefs.entries[entry["citation_keys"][ck_idx]].fields["file"] = []
             
             
     def writeBibtexFile(self):
         if self.verbose > 0:
             print("write new Bibtex file ...")
             sys.stdout.flush()
-        newBibtexFile = "%s_new" % self.bibtexFile
+            
+        newBibtexFile = "%s_new.bib" % self.bibtexFile
+        
+        bibtexRefsWriter = bib_o.Writer().write_file(self.bibtexRefs,
+                                                     newBibtexFile)
+        
         # newBibtexHandle = open(self.newBibtexFile, "w")
         # bibtexparser.dump(bibtexRefs, newBibtexHandle)
         # newBibtexHandle.close()
         # TODO: mv newfile oldfile
         
-        
+        if self.verbose > 0:
+            print("library saved in file %s" % newBibtexFile)
+            
+            
     def run(self):
         if "1" in self.tasks:
             self.saveCookies()
@@ -389,7 +440,7 @@ class Citeulike2Jabref(object):
             
             
 if __name__ == "__main__":
-    i = Citeulike2Jabref()
+    i = Citeulike2Others()
     
     i.setAttributesFromCmdLine()
     
