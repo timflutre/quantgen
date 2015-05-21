@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.7.1" # http://semver.org/
+utils_quantgen.version <- "1.8.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -776,9 +776,16 @@ regplot <- function(x, y, ...){
 ##' TODO: look at this https://github.com/stephenturner/qqman/blob/v0.0.0/qqman.r
 ##' @param pvalues vector of raw p values
 ##' @param plot.conf.int show the confidence interval (default=TRUE)
-##' @param ...
+##' @param xlab a title for the x axis (see default)
+##' @param ylab a title for the x axis (see default)
+##' @param main an overall title for the plot (default: "Q-Q plot (<length(pvalues)> p-values)")
+##' @param col plotting color for the points (default is all points in black)
+##' @param ... graphical parameters other than xlim, ylim, xlab, ylab, las and col
 ##' @author Timothée Flutre (inspired from an anonymous comment to http://gettinggeneticsdone.blogspot.fr/2009/11/qq-plots-of-p-values-in-r-using-ggplot2.html)
-qqplot.pval <- function(pvalues, plot.conf.int=TRUE, ...){
+qqplot.pval <- function(pvalues, plot.conf.int=TRUE,
+                        xlab=expression(Expected~~-log[10](italic(p)~values)),
+                        ylab=expression(Observed~~-log[10](italic(p)~values)),
+                        main=NULL, col=NULL){
   N <- length(pvalues)
   expected <- - log10(1:N / N)
   observed <- - log10(pvalues)
@@ -801,9 +808,18 @@ qqplot.pval <- function(pvalues, plot.conf.int=TRUE, ...){
     par(new=T)
   }
 
-  qqplot(x=expected, y=observed, ylim=c(0,MAX), xlim=c(0,MAX), las=1,
-         xlab=expression(Expected~~-log[10](italic(p)~values)),
-         ylab=expression(Observed~~-log[10](italic(p)~values)), ...)
+  if(is.null(main))
+    main <- paste0("Q-Q plot (", N, " p-values)")
+
+  if(is.null(col)){
+    col <- rep(1, N)
+  } else if(length(col) != N)
+    stop("param 'col' should have the same length as 'pvalues'", call.=FALSE)
+
+  plot(x=sort(expected), y=sort(observed),
+       xlim=c(0,MAX), ylim=c(0,MAX),
+       las=1, col=col[order(observed)],
+       xlab=xlab, ylab=ylab, main=main)
   abline(0, 1, col="red")
 }
 
