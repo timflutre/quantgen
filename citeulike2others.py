@@ -5,6 +5,9 @@
 # Copyright (C) 2014-2015 Timothée Flutre
 # Persons: Timothée Flutre [cre,aut]
 # License: GPL-3+
+# Versioning: https://github.com/timflutre/quantgen
+
+# http://wiki.citeulike.org/index.php/Importing_and_Exporting
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -29,7 +32,7 @@ from pybtex.database.output import bibtex as bib_o
 if sys.version_info[0] == 2:
     if sys.version_info[1] < 7:
         msg = "ERROR: Python should be in version 2.7 or higher"
-        sys.stderr.write("%s\n\n" % msg)
+        sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
 progVersion = "1.1.0" # http://semver.org/
@@ -42,7 +45,7 @@ def user_input(msg):
         return input(msg)
     else:
         msg = "ERROR: Python's major version should be 2 or 3"
-        sys.stderr.write("%s\n\n" % msg)
+        sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
         
@@ -53,6 +56,7 @@ class Citeulike2Others(object):
         self.tasks = []
         self.identifier = "timflutre"
         self.email = "timflutre@gmail.com"
+        self.cookieFile = ""
         self.jsonFile = ""
         self.jsonRefs = None
         self.libDir = ""
@@ -80,13 +84,13 @@ class Citeulike2Others(object):
         msg += "\t\t2: download JSON file (requires -i, -e)\n"
         msg += "\t\t3: download Bibtex file (requires -i, -e)\n"
         msg += "\t\t4: download new files (requires -i, -e, -j, -p)\n"
-        msg += "\t\t5: add 'file' field to Bibtex file (requires -j, -b, -o)\n"
+        msg += "\t\t5: add 'file' field to Bibtex file (requires -j, -p, -b, -o)\n"
         msg += "  -i, --id\tyour CiteULike identifier (default=timflutre)\n"
         msg += "  -e, --email\tyour email (default=timflutre@gmail.com)\n"
         msg += "  -j, --json\tpath to the JSON file\n"
         msg += "  -p, --path\tpath to the directory with all the files\n"
         msg += "  -b, --bibtex\tpath to the Bibtex file\n"
-        msg += "  -o, --other\tother target tool (default=jabref/zotero)\n"
+        msg += "  -o, --other\tother tool (default=jabref/zotero)\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s -t 1+2+3\n" % os.path.basename(sys.argv[0])
@@ -207,11 +211,20 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
+        if "5" in self.tasks and self.libDir == "":
+            msg = "ERROR: missing compulsory option -p with -t 5"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
         if "5" in self.tasks and self.otherTool not in ["jabref", "zotero"]:
             msg = "ERROR: missing compulsory option -o with -t 5"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
+            
+        if "1" in self.tasks or "2" in self.tasks or "3" in self.tasks or \
+           "4" in self.tasks:
+            self.cookieFile = "cookies_citeulike_%s.txt" % self.identifier
             
             
     def saveCookies(self):
@@ -219,9 +232,8 @@ class Citeulike2Others(object):
             print("save cookies ...")
             sys.stdout.flush()
             
-        cookieFile = "cookies_citeulike_%s.txt" % self.identifier
-        if os.path.exists(cookieFile):
-            os.remove(cookieFile)
+        if os.path.exists(self.cookieFile):
+            os.remove(self.cookieFile)
             
         pwd = getpass.getpass()
         
@@ -232,7 +244,7 @@ class Citeulike2Others(object):
         cmd += " -O /dev/null"
         cmd += " --quiet"
         cmd += " --keep-session-cookies"
-        cmd += " --save-cookies %s" % cookieFile
+        cmd += " --save-cookies %s" % self.cookieFile
         cmd += " --post-data=\"username=%s" % self.identifier
         cmd += "&password=%s" % pwd
         cmd += "&perm=1\""
@@ -243,38 +255,36 @@ class Citeulike2Others(object):
         os.system(cmd)
         
         if self.verbose > 0:
-            print("cookies saved in file %s" % cookieFile)
+            print("cookies saved in file '%s'" % self.cookieFile)
+            print("CHECK IT! (to see if it's not empty)")
             
             
-    def getCookieFile(self):
-        cookieFile = "cookies_citeulike_%s.txt" % self.identifier
-        if not os.path.exists(cookieFile):
-            msg = "ERROR: can't find file %s" % cookieFile
-            sys.stderr.write("%s\n\n" % msg)
-            sys.exit(1)
-        return cookieFile
-        
-        
     def downloadFile(self, fileFormat):
         if self.verbose > 0:
             print("download %s file ..." % fileFormat)
             sys.stdout.flush()
             
-        cookieFile = self.getCookieFile()
-        
-        fileExtension = ""
+        if not os.path.exists(self.cookieFile):
+            msg = "ERROR: missing cookie file '%s'" % self.cookieFile
+            sys.stderr.write("%s\n" % msg)
+            sys.exit(1)
+        if self.verbose > 0:
+            print("cookie file: %s" % self.cookieFile)
+            
+        fileExt = ""
         if fileFormat == "bibtex":
-            fileExtension = "bib"
+            fileExt = "bib"
         elif fileFormat == "json":
-            fileExtension = "json"
+            fileExt = "json"
+        outFile = "citeulike_%s.%s" % (self.identifier, fileExt)
             
         cmd = "wget"
         cmd += " --header=\"User-Agent: %s" % self.identifier
         cmd += "/%s" % self.email
         cmd += " downloader/1.0\""
-        cmd += " --load-cookies %s" % cookieFile
+        cmd += " --load-cookies %s" % self.cookieFile
         cmd += " --quiet"
-        cmd += " -O citeulike_%s.%s" % (self.identifier, fileExtension)
+        cmd += " -O %s" % outFile
         cmd += " http://www.citeulike.org/%s" % fileFormat
         cmd += "/user/%s" % self.identifier
         
@@ -284,8 +294,7 @@ class Citeulike2Others(object):
         os.system(cmd)
         
         if self.verbose > 0:
-            print("library saved in file citeulike_%s.%s" \
-                  % (self.identifier, fileExtension))
+            print("library saved in file '%s'" % outFile)
             
             
     def loadJsonFile(self):
@@ -293,9 +302,11 @@ class Citeulike2Others(object):
             if self.verbose > 0:
                 print("load JSON file ...")
                 sys.stdout.flush()
+                
             jsonHandle = open(self.jsonFile)
             self.jsonRefs = json.load(jsonHandle)
             jsonHandle.close()
+            
             if self.verbose > 0:
                 print("JSON file: %i entries" % len(self.jsonRefs))
                 
@@ -305,8 +316,13 @@ class Citeulike2Others(object):
             print("download the new files ...")
             sys.stdout.flush()
             
-        cookieFile = self.getCookieFile()
-        
+        if not os.path.exists(self.cookieFile):
+            msg = "ERROR: missing cookie file '%s'" % self.cookieFile
+            sys.stderr.write("%s\n" % msg)
+            sys.exit(1)
+        if self.verbose > 0:
+            print("cookie file: %s" % self.cookieFile)
+            
         totalNbFiles = 0
         for entry in self.jsonRefs:
             if "userfiles" in entry:
@@ -315,19 +331,19 @@ class Citeulike2Others(object):
                     p = "%s/%s" % (self.libDir, f["name"])
                     root, ext = os.path.splitext(p)
                     if not os.path.exists(p):
-                        print(entry["title"])
+                        print("download '%s'" % entry["title"])
                         cmd = "wget"
                         cmd += " --header=\"User-Agent: %s" % self.identifier
                         cmd += "/%s" % self.email
                         cmd += " downloader/1.0\""
-                        cmd += " --load-cookies %s" % cookieFile
+                        cmd += " --load-cookies %s" % self.cookieFile
                         cmd += " --quiet"
                         cmd += " -O %s" % p
                         cmd += " http://www.citeulike.org/%s" % f["path"]
                         os.system(cmd)
                         
         if self.verbose > 0:
-            print("total nb of files: %i" % totalNbFiles)
+            print("total nb of files in JSON: %i" % totalNbFiles)
             sys.stdout.flush()
             
             
@@ -335,13 +351,24 @@ class Citeulike2Others(object):
         if self.verbose > 0:
             print("remove the old files ...")
             sys.stdout.flush()
+            
         lOldFiles = glob.glob("%s/*" % self.libDir)
+        if self.verbose > 0:
+            print("total nb of files in libDir: %i" % len(lOldFiles))
+            
         sNewFiles = set()
         for entry in self.jsonRefs:
             if "userfiles" in entry:
                 for f in entry["userfiles"]:
                     p = "%s/%s" % (self.libDir, f["name"])
                     sNewFiles.add(p)
+        if self.verbose > 0:
+            print("total nb of files in JSON: %i" % len(sNewFiles))
+        if len(sNewFiles) == 0:
+            msg = "ERROR: no new files, possibly due to incomplete JSON file?"
+            sys.stderr.write("%s\n" % msg)
+            sys.exit(1)
+            
         for f in lOldFiles:
             if f not in sNewFiles:
                 wantRmvFile = user_input("Do you want to remove the file %s? [y/n] " % f)
@@ -362,44 +389,118 @@ class Citeulike2Others(object):
                 
             self.bibtexRefs = bib_i.Parser().parse_file(self.bibtexFile)
             
+            # for bibtexparser:
             # bibtexHandle = open(self.bibtexFile)
             # bibtexRefs = bibtexparser.load(bibtexHandle)
             # bibtexHandle.close()
             
             if self.verbose > 0:
                 print("Bibtex file: %i entries" % len(self.bibtexRefs.entries))
-
-
+                
+                
+    def getSharedCitationKey(self, entryJson):
+        """
+        Among possibly several citation keys in the JSON entry, return the one
+        which is alsos in the Bibtex file.
+        """
+        ck = None
+        
+        if "citation_keys" not in entryJson \
+           or len(entryJson["citation_keys"]) == 0:
+            msg = "ERROR: '%s' has no citation_keys" % entryJson["title"]
+            sys.stderr.write("%s\n" % msg)
+            sys.exit(1)
+            
+        ck_idx = 0
+        while ck_idx < len(entryJson["citation_keys"]):
+            if entryJson["citation_keys"][ck_idx] in self.bibtexRefs.entries:
+                break
+            ck_idx += 1
+        if ck_idx >= len(entryJson["citation_keys"]):
+            msg = "ERROR: can't find entry in Bibtex file for '%s'" % \
+                  entryJson["title"]
+            sys.stderr.write("%s\n" % msg)
+            sys.exit(1)
+            
+        ck = entryJson["citation_keys"][ck_idx]
+        return ck
+        
+        
+    def getFileExtension(self, fName):
+        return os.path.splitext(fName)[1][1:].strip().lower()
+        
+        
+    def getMainPdf(self, entryJson):
+        fMain = None
+        fMainExt = None
+        for idx, f in enumerate(entryJson["userfiles"]):
+            fExt = self.getFileExtension(f["name"])
+            if fExt == "pdf":
+                fMain = f
+                fMainExt = fExt
+                break
+        return fMain, fMainExt
+        
+        
+    def formatFileForBibtex(self, f, fExt):
+        if self.otherTool == "jabref":
+            return "%s:%s/%s:%s" % (f["name"],
+                                    self.libDir,
+                                    f["name"],
+                                    fExt.upper())
+        elif self.otherTool == "zotero":
+            return "%s:%s/%s:application/%s" % (f["name"],
+                                                self.libDir,
+                                                f["name"],
+                                                fExt)
+            
+            
+    def formatFilesForBibtex(self, entryJson):
+        txt = None
+        
+        tmp = []
+        fMain = None
+        if len(entryJson["userfiles"]) > 1:
+            fMain, fMainExt = self.getMainPdf(entryJson)
+            if fMain != None:
+                tmp.append(self.formatFileForBibtex(fMain, fMainExt))
+                
+        for f in entryJson["userfiles"]:
+            if fMain != None and f["name"] == fMain["name"]:
+                continue
+            fExt = self.getFileExtension(f["name"])
+            # if fExt not in ["pdf", "png", "jpg", "jpeg", "gif"]:
+            #     msg = "ERROR: unknown file extension '%s'" % fExt
+            #     msg += "\n%s" % entryJson["title"]
+            #     sys.stderr.write("%s\n" % msg)
+            #     sys.exit(1)
+            tmp.append(self.formatFileForBibtex(f, fExt))
+            
+        if len(tmp) == 1:
+            txt = tmp[0]
+        else:
+            txt = ";".join(tmp)
+        if self.otherTool == "zotero":
+            txt = "{%s}" % txt
+            
+        return txt
+        
+        
     def addFileFieldToBibtex(self):
-        # for Jabref:
-        # file = {:~/work/refs/main.pdf:PDF;:~/work/refs/supp.pdf:PDF},
-        # for Zotero:
-        # file = {main.pdf:~/work/refs/main.pdf:application/pdf},
+        """
+        To each Bibtex entry, add a field 'file' if the Json entry has any.
+        """
         if self.verbose > 0:
             print("add 'file' field to Bibtex entries ...")
             sys.stdout.flush()
-        for entry in self.jsonRefs:
-            if "citation_keys" not in entry \
-               or len(entry["citation_keys"]) == 0:
-                msg = "ERROR: '%s' has no citation_keys" % entry["title"]
-                sys.stderr.write("%s\n\n" % msg)
-                sys.exit(1)
-            ck_idx = 0
-            while ck_idx < len(entry["citation_keys"]):
-                if entry["citation_keys"][ck_idx] in self.bibtexRefs.entries:
-                    break
-                ck_idx += 1
-            if ck_idx >= len(entry["citation_keys"]):
-                msg = "ERROR: can't find entry '%s' in Bibtex file" % \
-                      entry["citation_keys"][ck_idx]
-                msg += "\n%s" % entry["title"]
-                sys.stderr.write("%s\n\n" % msg)
-                sys.exit(1)
+            
+        for entryJson in self.jsonRefs:
+            if "userfiles" not in entryJson or \
+               len(entryJson["userfiles"]) == 0:
                 continue
-            # if self.otherTool == "jabref":
-            #     self.bibtexRefs.entries[entry["citation_keys"][ck_idx]].fields["file"] = []
-            # elif self.otherTool == "zotero":
-            #     self.bibtexRefs.entries[entry["citation_keys"][ck_idx]].fields["file"] = []
+            ck = self.getSharedCitationKey(entryJson)
+            self.bibtexRefs.entries[ck].fields["file"] \
+                = self.formatFilesForBibtex(entryJson)
             
             
     def writeBibtexFile(self):
@@ -407,18 +508,19 @@ class Citeulike2Others(object):
             print("write new Bibtex file ...")
             sys.stdout.flush()
             
-        newBibtexFile = "%s_new.bib" % self.bibtexFile
-        
+        newBibtexFile = "%s_for-%s.bib" % (self.bibtexFile, self.otherTool)
+        if os.path.exists(newBibtexFile):
+            os.remove(newBibtexFile)
+            
         bibtexRefsWriter = bib_o.Writer().write_file(self.bibtexRefs,
                                                      newBibtexFile)
-        
+        # for bibtexparser:
         # newBibtexHandle = open(self.newBibtexFile, "w")
         # bibtexparser.dump(bibtexRefs, newBibtexHandle)
         # newBibtexHandle.close()
-        # TODO: mv newfile oldfile
         
         if self.verbose > 0:
-            print("library saved in file %s" % newBibtexFile)
+            print("library saved in file '%s'" % newBibtexFile)
             
             
     def run(self):
