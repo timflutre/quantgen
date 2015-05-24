@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.8.0" # http://semver.org/
+utils_quantgen.version <- "1.9.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -469,21 +469,59 @@ cor2cov <- function(x, sd){
 seg.sites2all.doses <- function(seg.sites){
   stopifnot(is.list(seg.sites),
             length(unique(sapply(seg.sites, nrow))) == 1)
-  N <- nrow(seg.sites[[1]]) / 2 # nb of diploid individuals
-  P <- sum(sapply(seg.sites, ncol)) # nb of SNPs
-  X <- matrix(data=NA, nrow=N, ncol=P)
+
+  nb.inds <- nrow(seg.sites[[1]]) / 2 # nb of diploid individuals
+  nb.chrs <- sum(sapply(seg.sites, ncol)) # nb of SNPs
+  X <- matrix(data=NA, nrow=nb.inds, ncol=nb.chrs)
+
   j <- 1
   for(x in seq_along(seg.sites)){
     X[,j:(j+ncol(seg.sites[[x]])-1)] <-
-      do.call(rbind, lapply(seq(1, 2*N, by=2), function(i){
+      do.call(rbind, lapply(seq(1, 2*nb.inds, by=2), function(i){
         colSums(seg.sites[[x]][c(i,i+1),])
       }))
     j <- j + ncol(seg.sites[[x]])
   }
+
   return(X)
 }
 
-##' Simulate a matrix of genotypes in allele doses via an approximation to the coalescent with recombination named the Sequential Coalescent with Recombination Model.
+##' Make a data.frame of SNP coordinates from the SFS of independent replicates
+##'
+##' SFS stands for site frequency spectrum
+##' @param seg.sites list returned by scrm()
+##' @param snp.ids vector of identifiers (one per SNP)
+##' @return data.frame with SNPs in rows and 2 columns (chr, pos)
+##' @author Timothée Flutre
+seg.sites2snp.coords <- function(seg.sites, snp.ids){
+  stopifnot(is.list(seg.sites),
+            length(unique(sapply(seg.sites, nrow))) == 1)
+
+  nb.chrs <- length(seg.sites) # nb of chromosomes
+  nb.snps.per.chr <- sapply(seg.sites, ncol)
+  nb.snps <- sum(nb.snps.per.chr) # nb of SNPs
+
+  snp.coords <- data.frame(chr=rep(NA, nb.snps),
+                           pos=-1,
+                           row.names=snp.ids)
+  snp.coords$chr <- rep(paste0("chr", 1:nb.chrs), nb.snps.per.chr)
+  snp.coords$pos <- as.numeric(do.call(c, lapply(seg.sites, colnames)))
+
+  ## convert genomic positions from float to integer
+  i <- 0
+  while(TRUE){
+    tmp <- c(by(floor(snp.coords$pos * 10^i), factor(snp.coords$chr),
+                function(x){anyDuplicated(x)}))
+    if(! any(tmp))
+      break
+    i <- i + 1
+  }
+  snp.coords$pos <- floor(snp.coords$pos * 10^i)
+
+  return(snp.coords)
+}
+
+##' Simulate according to an approximation to the coalescent with recombination named the Sequential Coalescent with Recombination Model.
 ##'
 ##' Requires the scrm package (Staab et al, 2014).
 ##' @param nb.inds diploids (thus nb of haplotypes is 2 * nb.inds)
@@ -492,23 +530,28 @@ seg.sites2all.doses <- function(seg.sites){
 ##' @param pop.mut.rate theta = 4 N0 mu
 ##' @param pop.recomb.rate rho = 4 N0 r
 ##' @param chrom.len in bp
-##' @param nb.pops number of populations (if > 1, equal migration)
-##' @param mig.rate migration rate = 4 N0 m
-##' @param verbose show scrm cmd-line (default=TRUE)
-##' @return matrix with diploid individuals in rows and SNPs in columns
+##' @param nb.pops number of populations
+##' @param mig.rate migration rate = 4 N0 m (symmetric)
+##' @param verbose verbosity level (default=0=nothing, 1=few, 2=more)
+##' @return list with haplotypes (list), genotypes as allele doses (matrix) and SNP coordinates (data.frame)
 ##' @author Timothée Flutre
-simul.coalescent <- function(nb.inds,
+simul.coalescent <- function(nb.inds=100,
                              ind.ids=NULL,
                              nb.reps=20,
                              pop.mut.rate=50,
                              pop.recomb.rate=5,
                              chrom.len=10^3,
                              nb.pops=1,
-                             mig.rate=NULL,
-                             verbose=TRUE){
+                             mig.rate=5,
+                             verbose=0){
   library(scrm)
+  stopifnot(nb.inds > nb.pops)
+
   if(is.null(ind.ids))
-    ind.ids <- sprintf(fmt=paste0("ind%0", floor(log10(nb.inds))+1, "i"), 1:nb.inds)
+    ind.ids <- sprintf(fmt=paste0("ind%0", floor(log10(nb.inds))+1, "i"),
+                       1:nb.inds)
+
+  ## simulate according to the SCRM
   nb.samples <- nb.inds * 2 # e.g. 2 chr1 in ind1, 2 chr1 in ind2, etc
   cmd <- paste0(nb.samples, " ", nb.reps)
   cmd <- paste0(cmd, " -t ", pop.mut.rate)
@@ -517,16 +560,50 @@ simul.coalescent <- function(nb.inds,
   cmd <- paste0(cmd, " -L") # print TMRCA and local tree lengths
   cmd <- paste0(cmd, " -SC abs") # absolute seq positions in bp
   cmd <- paste0(cmd, " -oSFS") # print site freq spectrum, requires -t
-  if(nb.pops == 2)
-     cmd <- paste0(cmd, " -I ", nb.pops, " ", floor(nb.samples / 2),
-                   " ", nb.samples - floor(nb.samples / 2),
-                   " ", mig.rate)
-  if(verbose)
+  if(nb.pops > 1){
+    cmd <- paste0(cmd, " -I ", nb.pops)
+    nb.inds.per.pop <- rep(0, nb.pops)
+    for(p in 1:(nb.pops-1)){
+      nb.inds.per.pop[p] <- floor(nb.inds / nb.pops)
+      cmd <- paste0(cmd, " ", 2 * nb.inds.per.pop[p])
+    }
+    nb.inds.per.pop[nb.pops] <- nb.inds - sum(nb.inds.per.pop)
+    cmd <- paste0(cmd, " ", 2 * nb.inds.per.pop[nb.pops])
+    cmd <- paste0(cmd, " ", mig.rate)
+  }
+  if(verbose > 1)
     message(cmd)
   sum.stats <- scrm(cmd)
+  if(verbose > 1)
+    print(str(sum.stats))
+
+  ## make a data.frame with SNP coordinates
+  nb.snps.per.chr <- sapply(sum.stats$seg_sites, ncol)
+  nb.snps <- sum(nb.snps.per.chr)
+  snp.ids <- sprintf(fmt=paste0("snp%0", floor(log10(nb.snps))+1, "i"),
+                     1:nb.snps)
+  snp.coords <- seg.sites2snp.coords(sum.stats$seg_sites, snp.ids)
+  for(c in 1:nb.reps){
+    colnames(sum.stats$seg_sites[[c]]) <-
+      snp.ids[(ifelse(c == 1, 1, 1 + cumsum(nb.snps.per.chr)[c-1])):
+                (cumsum(nb.snps.per.chr)[c])]
+    rownames(sum.stats$seg_sites[[c]]) <-
+      paste0(rep(ind.ids, each=2), rep(c("_h1", "_h2"), nb.inds))
+  }
+
+  ## make a matrix with genotypes as allele doses
   X <- seg.sites2all.doses(sum.stats$seg_sites)
   rownames(X) <- ind.ids
-  return(X)
+  colnames(X) <- snp.ids
+  if(verbose > 0){
+    txt <- paste0("nb of SNPs: ", nb.snps)
+    write(txt, stdout())
+    print(sapply(sum.stats$seg_sites, ncol))
+  }
+
+  return(list(haplos=sum.stats$seg_sites,
+              genos=X,
+              snp.coords=snp.coords))
 }
 
 ##' Estimate kinship matrix from SNPs.
