@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.9.0" # http://semver.org/
+utils_quantgen.version <- "1.10.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -604,6 +604,31 @@ simul.coalescent <- function(nb.inds=100,
   return(list(haplos=sum.stats$seg_sites,
               genos=X,
               snp.coords=snp.coords))
+}
+
+##' Calculate the distances between SNPs, assuming they are sorted.
+##'
+##' Useful before estimating pairwise linkage disequilibrium.
+##' @param snp.coords data.frame with SNP identifiers as row names, and with two columns "chr" and "pos"
+##' @param nb.cores the number of cores to use (default=1)
+##' @return list with one component per chromosome
+##' @author Timothée Flutre
+snp.distances <- function(snp.coords, nb.cores=1){
+  stopifnot(is.data.frame(snp.coords),
+            colnames(snp.coords) == c("chr", "pos"),
+            ! is.null(rownames(snp.coords)))
+
+  chr.names <- unique(snp.coords$chr)
+  snp.dists <- mclapply(chr.names, function(chr.name){
+    pos <- snp.coords$pos[snp.coords$chr == chr.name]
+    names(pos) <- rownames(snp.coords)[snp.coords$chr == chr.name]
+    dis <- pos[2:length(pos)] - pos[1:(length(pos)-1)]
+    names(dis) <- paste(names(dis), names(pos)[-length(pos)], sep="-")
+    dis
+  }, mc.cores=nb.cores)
+  names(snp.dists) <- chr.names
+
+  return(snp.dists)
 }
 
 ##' Estimate kinship matrix from SNPs.
