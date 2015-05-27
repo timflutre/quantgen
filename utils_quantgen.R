@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.10.0" # http://semver.org/
+utils_quantgen.version <- "1.11.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -714,6 +714,85 @@ estim.kinship <- function(X, mafs=NULL, thresh=0.01,
   return(K)
 }
 
+##' Return estimates of linkage disequilibrium between pairs of SNPs.
+##'
+##' Requires package LDcorSV
+##' @param X matrix of SNP genotypes encoded as allele doses, with SNPs in columns and individuals in rows
+##' @param K matrix of kinship
+##' @param pops vector of characters indicating the population of each individual
+##' @param snp.coords data.frame with SNP identifiers as row names, and two columns, "chr" and "pos"
+##' @param only.chr identifier of a given chromosome
+##' @param only.pop identifier of a given population
+##' @return
+##' @author Timothée Flutre
+estim.ld <- function(X, K=NULL, pops=NULL, snp.coords,
+                     only.chr=NULL, only.pop=NULL, verbose=0){
+  library(LDcorSV)
+  stopifnot(is.matrix(X),
+            ! is.null(dimnames(X)),
+            sum(is.na(X)) == 0,
+            is.data.frame(snp.coords),
+            colnames(snp.coords) == c("chr", "pos"))
+  if(! is.null(K))
+    stopifnot(is.matrix(K),
+              nrow(K) == ncol(K),
+              nrow(K) == nrow(X),
+              ! is.null(dimnames(K)),
+              all(rownames(K) == colnames(K)),
+              all(rownames(K) == rownames(X)))
+  W.s <- NA
+  if(! is.null(pops)){
+    stopifnot(length(pops) == nrow(X),
+              ! is.null(names(pops)),
+              names(pops) == rownames(X))
+    W.s <- model.matrix(~ as.factor(pops))[, -1]
+    rownames(W.s) <- names(pops)
+  }
+  if(! is.null(only.chr))
+    if(! only.chr %in% snp.coords$chr)
+      stop(paste0("chr '", only.chr, "' absent from snp.coords"))
+  if(! is.null(only.pop))
+    if(! only.pop %in% pops)
+      stop(paste0("pop '", only.pop, "' absent from pops"))
+
+  ld <- NULL
+
+  subset.snps <- 1:ncol(X)
+  if(! is.null(only.chr))
+    subset.snps <- which(snp.coords$chr == only.chr)
+  subset.inds <- 1:nrow(X)
+  if(! is.null(only.pop))
+    subset.inds <- which(pops == only.pop)
+
+  if(verbose > 0)
+    write("estimate pairwise LD ...", stdout())
+  if(is.null(K)){
+    if(is.null(only.pop)){
+      ld <- LD.Measures(donnees=X[subset.inds, subset.snps],
+                        V=NA,
+                        S=W.s,
+                        data="G", supinfo=FALSE, na.presence=FALSE)
+    } else
+      ld <- LD.Measures(donnees=X[subset.inds, subset.snps],
+                        V=NA,
+                        S=NA,
+                        data="G", supinfo=FALSE, na.presence=FALSE)
+  } else{
+    if(is.null(only.pop)){
+      ld <- LD.Measures(donnees=X[subset.inds, subset.snps],
+                        V=K[subset.inds, subset.inds],
+                        S=W.s,
+                        data="G", supinfo=FALSE, na.presence=FALSE)
+    } else
+      ld <- LD.Measures(donnees=X[subset.inds, subset.snps],
+                        V=K[subset.inds, subset.inds],
+                        S=NA,
+                        data="G", supinfo=FALSE, na.presence=FALSE)
+  }
+
+  return(ld)
+}
+
 ##' Simulate a data set from a basic animal model.
 ##'
 ##' y = mu 1_n + X b + Z u + e = W a + Z u + e
@@ -916,7 +995,7 @@ qqplot.pval <- function(pvalues, plot.conf.int=TRUE,
   if(is.null(col)){
     col <- rep(1, N)
   } else if(length(col) != N)
-    stop("param 'col' should have the same length as 'pvalues'", call.=FALSE)
+    stop("param 'col' should have the same length as 'pvalues'")
 
   plot(x=sort(expected), y=sort(observed),
        xlim=c(0,MAX), ylim=c(0,MAX),
@@ -1072,9 +1151,9 @@ plot.scale <- function(z, zlim, col = heat.colors(12),
 image.scale <- function(z, main=NULL, idx.rownames=NULL, idx.colnames=NULL,
                         breaks=NULL){
   if(! is.null(idx.rownames) & is.null(rownames(z)))
-    stop("non-null idx.rownames requires z to have row names", call.=FALSE)
+    stop("non-null idx.rownames requires z to have row names")
   if(! is.null(idx.colnames) & is.null(colnames(z)))
-    stop("non-null idx.colnames requires z to have column names", call.=FALSE)
+    stop("non-null idx.colnames requires z to have column names")
   if(is.null(breaks))
     breaks <- seq(min(z), max(z), length.out=100)
 
@@ -1390,7 +1469,7 @@ coancestry2addrel <- function(x, estim.coancestry, estim.inbreeding=NULL,
     for(i in 1:(nrow(A)-1))
       for(j in (i+1):ncol(A))
         if(A[i,j] != A[j,i])
-          stop(paste0("matrix not symmetric at (", i, ",", j, ")"), call.=FALSE)
+          stop(paste0("matrix not symmetric at (", i, ",", j, ")"))
   }
 
   return(A)
