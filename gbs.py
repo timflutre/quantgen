@@ -20,6 +20,13 @@ import datetime
 from subprocess import Popen, PIPE
 import math
 import gzip
+import shlex
+import warnings
+import shutil
+import glob
+import random
+import string
+# import sqlite3
 # import numpy as np
 # import scipy as sp
 
@@ -29,10 +36,136 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.0.0" # http://semver.org/
+progVersion = "1.0.1" # http://semver.org/
 
 
+class TimUtils(object):
+    
+    def __init__(self):
+        pass
+    
+    @staticmethod
+    def user_input(msg):
+        if sys.version_info[0] == 2:
+            return raw_input(msg)
+        elif sys.version_info[0] == 3:
+            return input(msg)
+        else:
+            msg = "Python's major version should be 2 or 3"
+            raise ValueError(msg)
+        
+        
+class Job(object):
+    
+    def __init__(self, groupId, cmd, name):
+        self.groupId = groupId
+        self.cmd = cmd
+        self.name = name
+        self.queue = None # set by JobGroup upon insertion
+        self.duration = None # set by JobGroup upon insertion
+        self.memory = None # set by JobGroup upon insertion
+        self.id = None # set right after submission
+        self.node = None
+        
+    def submit(self):
+        cmd = "echo '%s'" % self.cmd
+        cmd += " | qsub -cwd -j y -V -q %s -N %s" % (self.queue, self.name)
+        if self.duration:
+            pass
+        if self.memory:
+            pass
+        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        p = p[0].split()[2]
+        self.id = int(p)
+        return self.id
+        
+        
+class JobGroup(object):
+    
+    def __init__(self, groupId, scheduler, queue):
+        self.id = groupId
+        self.scheduler = scheduler
+        self.checkScheduler()
+        self.queue = queue
+        self.checkQueue()
+        self.lJobs = [] # filled via self.insert()
+        self.lJobIds = [] # filled via self.submit()
+        
+    def checkScheduler(self):
+        if self.scheduler not in ["SGE"]:
+            msg = "unknown scheduler '%s'" % self.scheduler
+            raise ValueError(msg)
+        
+    def checkQueue(self):
+        if self.scheduler == "SGE":
+            p = Popen(["qconf", "-sql"], shell=False, stdout=PIPE).communicate()
+            p = p[0].split("\n")
+            if self.queue not in p:
+                msg = "unknown queue '%s'" % self.queue
+                raise ValueError(msg)
+            
+    def insert(self, iJob):
+        self.lJobs.append(iJob)
+        self.lJobs[-1].scheduler = self.scheduler
+        self.lJobs[-1].queue = self.queue
+        
+    def submit(self):
+        for i in range(len(self.lJobs)):
+            jobId = self.lJobs[i].submit()
+            self.lJobIds.append(jobId)
+            
+    def getUnfinishedJobIds(self):
+        lUnfinishedJobIds = []
+        cmd = "qstat -u '%s'" % os.getlogin()
+        cmd += " | grep '%s'" % self.queue
+        cmd += " | awk '{print $1}'"
+        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        # p1 = Popen(shlex.split("qstat -u '%s'" % os.getlogin()), stdout=PIPE)
+        # p2 = Popen(shlex.split("grep '%s'" % self.queue), stdin=p1.stdout,
+        #            stdout=PIPE)
+        # p3 = Popen(shlex.split("awk '{print $1}'"), stdin=p2.stdout,
+        #            stdout=PIPE)
+        # p = p3.communicate()
+        p = p[0].split("\n")[:-1]
+        lUnfinishedJobIds = [int(jobId) for jobId in p
+                             if int(jobId) in self.lJobIds]
+        return lUnfinishedJobIds
+    
+    def wait(self):
+        time.sleep(2)
+        if len(self.getUnfinishedJobIds()) == 0:
+            return
+        time.sleep(5)
+        if len(self.getUnfinishedJobIds()) == 0:
+            return
+        time.sleep(10)
+        if len(self.getUnfinishedJobIds()) == 0:
+            return
+        time.sleep(30)
+        if len(self.getUnfinishedJobIds()) == 0:
+            return
+        while True:
+            time.sleep(60)
+            if len(self.getUnfinishedJobIds()) == 0:
+                return
+            
+            
+class JobManager(object):
+    
+    def __init__(self, projectId):
+        self.projectId = projectId
+        self.dbPath = ""
+        self.groupId2group = {}
+        
+    def __getitem__(self, jobGroupId):
+        return self.groupId2group[jobGroupId]
+    
+    def insert(self, iJobGroup):
+        self.groupId2group[iJobGroup.id] = iJobGroup
+        
+        
 class GbsSample(object):
+    
     def __init__(self, name):
         self.name = name
         self.individual = ""
@@ -48,6 +181,22 @@ class GbsSample(object):
         self.initFastqFile1 = ""
         self.initFastqFile2 = None
         
+    def __str__(self):
+        txt = "name=%s" % self.name
+        txt += ";individual=%s" % self.individual
+        txt += ";generation=%s" % self.generation
+        txt += ";species=%s" % self.species
+        txt += ";barcode=%s" % self.barcode
+        txt += ";seqCenter=%s" % self.seqCenter
+        txt += ";seqPlatform=%s" % self.seqPlatform
+        txt += ";seqPlatformModel=%s" % self.seqPlatformModel
+        txt += ";flowcell=%s" % self.flowcell
+        txt += ";lane=%s" % self.lane
+        txt += ";date=%s" % self.date
+        txt += ";initFastqFile1=%s" %self.initFastqFile1
+        txt += ";initFastqFile2=%s" %self.initFastqFile2
+        return txt
+        
         
 class Gbs(object):
     
@@ -56,8 +205,11 @@ class Gbs(object):
         self.lSteps = []
         self.infoFile = ""
         self.dictFile = ""
-        self.clusterQueue = ""
+        self.scheduler = "SGE"
+        self.queue = "normal.q"
+        self.projectId = ""
         self.projectDir = ""
+        self.jobManager = None
         self.infoCol2idx = {"individual": None,
                             "generation": None,
                             "species": None,
@@ -95,6 +247,9 @@ class Gbs(object):
         msg += "  -h, --help\tdisplay the help and exit\n"
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
+        msg += "      --proj\tname of the project\n"
+        msg += "      --schdlr\tname of the cluster scheduler (default=SGE)\n"
+        msg += "      --queue\tname of the cluster queue (default=normal.q)\n"
         msg += "      --step\tstep(s) to perform (1/2/3/4, can be 1-2)\n"
         msg += "\t\t1: raw read quality (with FastQC v >= 0.11.2)\n"
         msg += "\t\t2: demultiplexing\n"
@@ -122,7 +277,6 @@ class Gbs(object):
         msg += "\t\t fastq_file_R1 (one per lane, gzip-compressed)\n"
         msg += "\t\t fastq_file_R2 (one per lane, gzip-compressed)\n"
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
-        msg += "      --queue\tname of the cluster queue\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s --step 1 --info info_gbs.txt\n" % os.path.basename(sys.argv[0])
@@ -153,7 +307,8 @@ class Gbs(object):
         try:
             opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
                                         ["help", "version", "verbose=",
-                                         "step=", "info=", "dict="])
+                                         "proj=", "step=", "info=", "dict=",
+                                         "schdlr=", "queue="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -167,12 +322,18 @@ class Gbs(object):
                 sys.exit(0)
             elif o == "-v" or o == "--verbose":
                 self.verbose = int(a)
+            elif o == "--proj":
+                self.projectId = a
             elif o == "--step":
                 self.lSteps = a.split("-")
             elif o == "--info":
                  self.infoFile = a
             elif o == "--dict":
                  self.dictFile = a
+            elif o == "--schdlr":
+                self.scheduler = a
+            elif o == "--queue":
+                self.queue = a
             else:
                 assert False, "invalid option"
                 
@@ -181,6 +342,25 @@ class Gbs(object):
         """
         Check the values of the command-line parameters.
         """
+        if self.projectId == "":
+            msg = "ERROR: missing compulsory option --proj"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        self.projectDir = os.getcwd()
+        if self.scheduler == "":
+            msg = "ERROR: missing compulsory option --schdlr"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.scheduler == "OGE":
+            self.scheduler = "SGE"
+        if self.queue == "":
+            msg = "ERROR: missing compulsory option --queue"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        self.jobManager = JobManager(self.projectId)
         if self.lSteps == []:
             msg = "ERROR: missing compulsory option --step"
             sys.stderr.write("%s\n\n" % msg)
@@ -197,9 +377,10 @@ class Gbs(object):
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-        self.projectDir = os.getcwd()
-        
-        
+            self.dirStep1 = "%s/%s_%s" % (self.projectDir, self.projectId,
+                                          self.dirStep1)
+            
+            
     def loadHeaderInfoFile(self, line):
         """
         Set values to self.infoCol2idx.
@@ -248,11 +429,11 @@ class Gbs(object):
                 = tokens[self.infoCol2idx["species"]]
             self.dSamples[name].barcode \
                 = tokens[self.infoCol2idx["barcode"]]
-            self.dSamples[name].seq_center \
+            self.dSamples[name].seqCenter \
                 = tokens[self.infoCol2idx["seq_center"]]
-            self.dSamples[name].seq_platform \
+            self.dSamples[name].seqPlatform \
                 = tokens[self.infoCol2idx["seq_platform"]]
-            self.dSamples[name].seq_platform_model \
+            self.dSamples[name].seqPlatformModel \
                 = tokens[self.infoCol2idx["seq_platform_model"]]
             self.dSamples[name].date \
                 = tokens[self.infoCol2idx["date"]]
@@ -264,7 +445,7 @@ class Gbs(object):
                 msg = "file '%s' should be gzipped" \
                       % tokens[self.infoCol2idx["fastq_file_R1"]]
                 raise ValueError(msg)
-            self.dSamples[name].fastq_file_R1 \
+            self.dSamples[name].initFastqFile1 \
                 = tokens[self.infoCol2idx["fastq_file_R1"]]
             if tokens[self.infoCol2idx["fastq_file_R2"]] != "":
                 if not os.path.exists(tokens[self.infoCol2idx["fastq_file_R2"]]):
@@ -275,7 +456,7 @@ class Gbs(object):
                     msg = "file '%s' should be gzipped" \
                           % tokens[self.infoCol2idx["fastq_file_R2"]]
                     raise ValueError(msg)
-                self.dSamples[name].fastq_file_R2 \
+                self.dSamples[name].initFastqFile2 \
                     = tokens[self.infoCol2idx["fastq_file_R2"]]
                 
                 
@@ -285,7 +466,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
         infoHandle = open(self.infoFile)
-
+        
         lines = infoHandle.readlines()
         self.loadHeaderInfoFile(lines[0])
         self.loadContentInfoFile(lines[1:])
@@ -302,7 +483,12 @@ class Gbs(object):
     def enterStepDir(self, dirStep):
         if os.path.isdir(dirStep):
             msg = "directory '%s' already exists" % dirStep
-            raise OSError(msg)
+            warnings.warn(msg, UserWarning)
+            wantRmvDir = TimUtils.user_input("Do you want to remove the directory '%s'? [y/n] " % dirStep)
+            if wantRmvDir == "y":
+                shutil.rmtree(dirStep)
+            else:
+                raise OSError("can't continue")
         os.mkdir(dirStep)
         os.chdir(dirStep)
         
@@ -313,48 +499,58 @@ class Gbs(object):
         """
         for lane,lSamples in self.laneId2samples.items():
             iSample = self.dSamples[lSamples[0]]
-            bn1 = os.path.basename(iSample.fastq_file_R1)
-            os.symlink(iSample.fastq_file_R1, "%s/%s/%s_R1.fastq.gz" \
+            bn1 = os.path.basename(iSample.initFastqFile1)
+            os.symlink(iSample.initFastqFile1, "%s/%s/%s_R1.fastq.gz" \
                        % (self.projectDir, self.dirStep1, lane))
-            if iSample.fastq_file_R2 is not None:
-                bn2 = os.path.basename(iSample.fastq_file_R2)
-                os.symlink(iSample.fastq_file_R2, "%s/%s/%s_R2.fastq.gz" \
+            if iSample.initFastqFile2 is not None:
+                bn2 = os.path.basename(iSample.initFastqFile2)
+                os.symlink(iSample.initFastqFile2, "%s/%s/%s_R2.fastq.gz" \
                            % (self.projectDir, self.dirStep1, lane))
                 
                 
-    def makeGroupJobId(self):
-        pass
-
-
-    def submitJob(self, cmd, groupJobId):
-        pass
-        
-        
+    def makeGroupJobId(self, prefix):
+        return "%s_%s" % (prefix,
+                          "".join(random.choice(string.letters+string.digits) \
+                                  for i in xrange(5)))
+    
+    
     def launchFastqcOnInputFastqFiles(self):
         if self.verbose > 0:
             msg = "launch FastQC on original fastq files ..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        groupJobId = self.makeGroupJobId()
-        for lane in self.laneId2samples:
-            for sample in self.laneId2samples[lane]:
-                iSample = self.dSamples[sample]
-                cmd = "time fastqc -o %s/%s %s" % \
-                      (self.projectDir, self.dirStep1,
-                       iSample.initFastqFile1)
-                self.submitJob(cmd, groupJobId)
-                if iSample.initFastqFile2:
-                    cmd = "time fastqc -o %s/%s %s" % \
-                          (self.projectDir, self.dirStep1,
-                           iSample.initFastqFile1)
-                    self.submitJob(cmd, groupJobId)
-                    
-                    
-    def combineFastqcResults(self):
+            
+        groupJobId = self.makeGroupJobId("%s_gbs-step1-fastqc" % self.projectId)
         if self.verbose > 0:
-            msg = "combine FastQC results ..."
+            msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        self.jobManager.insert(iJobGroup)
+        
+        lFiles = glob.glob("%s/%s/*.fastq.gz" % (self.projectDir,
+                                                 self.dirStep1))
+        lFiles.sort()
+        for idx,f in enumerate(lFiles):
+            cmd = "time fastqc -o %s/%s %s" % (self.projectDir, self.dirStep1,
+                                               f)
+            jobName = "stdout_%s_%i" % (groupJobId, idx + 1)
+            iJob = Job(groupJobId, cmd, jobName)
+            self.jobManager[iJobGroup.id].insert(iJob)
+            
+        self.jobManager[iJobGroup.id].submit()
+        self.jobManager[iJobGroup.id].wait()
+        
+        if self.verbose > 0:
+            msg = "all FastQC jobs finished"
+            sys.stdout.write("%s\n" % msg)
+            
+            
+    def combineFastqcResults(self):
+        # if self.verbose > 0:
+        #     msg = "combine FastQC results ..."
+        #     sys.stdout.write("%s\n" % msg)
+        #     sys.stdout.flush()
         pass
     
     
@@ -471,14 +667,10 @@ class Gbs(object):
             self.step4()
             
         if "5" in self.lSteps:
-            # create dir "realign_bqsr"
-            # launch GATK
             self.localRealignment()
             self.baseQualityScoreRecalibration()
             
         if "6" in self.lSteps:
-            # create dir "calling_variants"
-            # launch GATK HaplotypeCaller
             self.variantCallingPerIndividual()
             self.jointGenotyping()
             self.variantRecalibration()
