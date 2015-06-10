@@ -7,6 +7,10 @@
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
 
+# TODO:
+# - check external tools are in PATH
+# - add option to ignore R2 files
+
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
 from __future__ import unicode_literals # avoid adding "u" to each string
@@ -54,7 +58,12 @@ class TimUtils(object):
             msg = "Python's major version should be 2 or 3"
             raise ValueError(msg)
         
-        
+    @staticmethod
+    def uniq_alphanum(length):
+        return "".join(random.choice(string.letters+string.digits) \
+                       for i in xrange(length))
+    
+    
 class Job(object):
     
     def __init__(self, groupId, cmd, name):
@@ -119,6 +128,7 @@ class JobGroup(object):
         cmd = "qstat -u '%s'" % os.getlogin()
         cmd += " | grep '%s'" % self.queue
         cmd += " | awk '{print $1}'"
+        # print(cmd) # debug
         p = Popen(cmd, shell=True, stdout=PIPE).communicate()
         # p1 = Popen(shlex.split("qstat -u '%s'" % os.getlogin()), stdout=PIPE)
         # p2 = Popen(shlex.split("grep '%s'" % self.queue), stdin=p1.stdout,
@@ -126,6 +136,7 @@ class JobGroup(object):
         # p3 = Popen(shlex.split("awk '{print $1}'"), stdin=p2.stdout,
         #            stdout=PIPE)
         # p = p3.communicate()
+        # print(p) # debug
         p = p[0].split("\n")[:-1]
         lUnfinishedJobIds = [int(jobId) for jobId in p
                              if int(jobId) in self.lJobIds]
@@ -165,9 +176,14 @@ class JobManager(object):
         
         
 class GbsSample(object):
+    """
+    Corresponds to some DNA present on a given lane. This DNA was extracted 
+    from an individual which can also have some DNA on other lanes, which will 
+    then be considered as other "samples".
+    """
     
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, id):
+        self.id = id
         self.individual = ""
         self.generation = ""
         self.species = ""
@@ -180,9 +196,10 @@ class GbsSample(object):
         self.date = ""
         self.initFastqFile1 = ""
         self.initFastqFile2 = None
+        self.dDemultiplexedFastqFiles = {}
         
     def __str__(self):
-        txt = "name=%s" % self.name
+        txt = "id=%s" % self.id
         txt += ";individual=%s" % self.individual
         txt += ";generation=%s" % self.generation
         txt += ";species=%s" % self.species
@@ -196,8 +213,124 @@ class GbsSample(object):
         txt += ";initFastqFile1=%s" %self.initFastqFile1
         txt += ";initFastqFile2=%s" %self.initFastqFile2
         return txt
+    
+    def setDemultiplexedFastqFiles(self, pathToDir):
+        lFilesR1 = glob.glob("%s/*_%s*_R1.fastq.gz" % (pathToDir,
+                                                       self.individual))
+        if len(lFilesR1) != 1:
+            msg = "can't find R1 file for sample '%s' in '%s'" % (self.id,
+                                                                  pathToDir)
+            raise ValueError(msg)
+        self.dDemultiplexedFastqFiles["R1"] = lFilesR1[0]
+        lFilesR2 = glob.glob("%s/*_%s*_R2.fastq.gz" % (pathToDir,
+                                                       self.individual))
+        if len(lFilesR2) == 1:
+            self.dDemultiplexedFastqFiles["R2"] = lFilesR2[0]
+            
+    def clean(self, adpFwd, adpRev, outDir, iJobGroup):
+        cmd = "cutadapt"
+        cmd += " -a %s" % adpFwd
+        cmd += " -A %s" % adpRev
+        cmd += " -o %s_clean_R1.fastq.gz" % self.individual
+        cmd += " -p %s_clean_R2.fastq.gz" % self.individual
+        cmd += " -e 0.2"
+        cmd += " -O 3"
+        cmd += " -m 35"
+        cmd += " -U 3"
+        cmd += " -q 20,20"
+        cmd += " --max-n 0.2"
+        # cmd += " --maximum-length 150"
+        cmd += " %s" % self.dDemultiplexedFastqFiles["R1"]
+        if "R2" in self.dDemultiplexedFastqFiles:
+            cmd += " %s" % self.dDemultiplexedFastqFiles["R2"]
+        print(cmd)
+        sys.exit(1)
+        jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
+        iJob = Job(iJobGroup.id, cmd, jobName)
+        iJobGroup.insert(iJob)
         
         
+class GbsLane(object):
+    
+    def __init__(self, laneId, flowcell, number):
+        self.id = laneId # flowcell identifier + "_" + lane number
+        self.flowcell = flowcell
+        self.number = number
+        self.dSamples = {}
+        self.dInitFastqFileSymlinks = {} # key(s): R1 (and R2, optional)
+        
+    def insert(self, iSample):
+        if iSample.id in self.dSamples:
+            msg = "sample '%s' already in lane '%s'" % (iSample.id, self.id)
+            raise ValueError(msg)
+        self.dSamples[iSample.id] = iSample
+        
+    def getInitFastqFiles(self):
+        lFiles = []
+        for sampleId,iSample in self.dSamples.items():
+            if iSample.initFastqFile1 not in lFiles:
+                lFiles.append(iSample.initFastqFile1)
+            if iSample.initFastqFile2 and iSample.initFastqFile2 not in lFiles:
+                lFiles.append(iSample.initFastqFile2)
+        if len(lFiles) == 0:
+            msg = "lane '%s' has no initial fastq file" % self.id
+            raise ValueError(msg)
+        if len(lFiles) > 2:
+            msg = "lane '%s' has more than 2 initial fastq files" % self.id
+            raise ValueError(msg)
+        return lFiles
+    
+    def setInitFastqFileSymlinks(self, lInitFastqFiles, pathToDir):
+        self.dInitFastqFileSymlinks["R1"] = [lInitFastqFiles[0],
+                                             "%s/%s_R1.fastq.gz" \
+                                             % (pathToDir, self.id)]
+        if len(lInitFastqFiles) > 1:
+            self.dInitFastqFileSymlinks["R2"] = [lInitFastqFiles[1],
+                                                 "%s/%s_R2.fastq.gz" \
+                                                 % (pathToDir, self.id)]
+            
+    def initQc(self, outDir, iJobGroup):
+        for Ri,lFiles in self.dInitFastqFileSymlinks.items():
+            cmd = "time fastqc -o %s %s" % (outDir, lFiles[1])
+            jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
+            iJob = Job(iJobGroup.id, cmd, jobName)
+            iJobGroup.insert(iJob)
+            
+    def saveBarcodeFile(self, format="fasta"):
+        fileName = "barcodes_%s.fa" % self.id
+        fileHandle = open(fileName, "w")
+        for sample,iSample in self.dSamples.items():
+            fileHandle.write(">%s\n%s\n" % (iSample.individual,
+                                            iSample.barcode))
+        fileHandle.close()
+        return fileName
+        
+    def demultiplex(self, outDir, enzyme, iJobGroup):
+        if len(self.dInitFastqFileSymlinks) < 2:
+            msg = "can't demultiplex (yet) lane '%s' if single-end" % self.id
+            raise ValueError(msg)
+        cmd = "demultiplex.py"
+        cmd += " --idir %s" % os.path.dirname(self.dInitFastqFileSymlinks["R1"][1])
+        cmd += " --ifq1 %s" % os.path.basename(self.dInitFastqFileSymlinks["R1"][1])
+        cmd += " --ifq2 %s" % os.path.basename(self.dInitFastqFileSymlinks["R2"][1])
+        cmd += " --it %s" % self.saveBarcodeFile(self)
+        cmd += " --ofqp %s/%s" % (outDir, self.id)
+        cmd += " --met %s" % "4c"
+        cmd += " --re %s" % enzyme
+        cmd += " --chim 1"
+        jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
+        iJob = Job(iJobGroup.id, cmd, jobName)
+        iJobGroup.insert(iJob)
+        
+    def setDemultiplexedFastqFiles(self, pathToDir):
+        for sampleId,iSample in self.dSamples.items():
+            iSample.setDemultiplexedFastqFiles("%s/%s" % (pathToDir, self.id))
+            
+    def clean(self, adpFwd, adpRev, outDir, iJobGroup):
+        for sampleId,iSample in self.dSamples.items():
+            iSample.clean(adpFwd, adpRev, outDir, iJobGroup)
+            
+            
 class Gbs(object):
     
     def __init__(self):
@@ -208,7 +341,7 @@ class Gbs(object):
         self.scheduler = "SGE"
         self.queue = "normal.q"
         self.projectId = ""
-        self.projectDir = ""
+        self.enzyme = "ApeKI"
         self.jobManager = None
         self.infoCol2idx = {"individual": None,
                             "generation": None,
@@ -223,14 +356,16 @@ class Gbs(object):
                             "fastq_file_R1": None,
                             "fastq_file_R2": None}
         self.dSamples = {}
-        self.laneId2samples = {}
+        self.dLanes = {}
         self.ind2samples = {}
-        self.dirStep1 = "lane_qualities"
-        self.dirStep2 = "demultiplexing_lanes"
-        self.dirStep3 = "cleaning_samples"
-        self.dirStep4 = "mapping_samples"
-        self.dirStep5 = "realign_bqsr"
-        self.dirStep6 = "calling_variants"
+        self.lDirSteps = ["lane_qualities",
+                          "demultiplexing_lanes",
+                          "cleaning_samples",
+                          "mapping_samples",
+                          "realign_bqsr",
+                          "calling_variants"]
+        self.adpFile = ""
+        self.adapters = {}
         
         
     def help(self):
@@ -276,7 +411,12 @@ class Gbs(object):
         msg += "\t\t date (e.g. '2015-01-15', see SAM format specification)\n"
         msg += "\t\t fastq_file_R1 (one per lane, gzip-compressed)\n"
         msg += "\t\t fastq_file_R2 (one per lane, gzip-compressed)\n"
+        msg += "      --adp\tpath to the file containing the adapters\n"
+        msg += "\t\tsame format as FastQC: name<tab>sequence\n"
+        msg += "\t\tname: at least 'adpFwd' (also 'adpRev' if paired-end)\n"
+        msg += "\t\tsequence: from 5' to 3'\n"
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
+        msg += "      --enz\tname of the restriction enzyme (default=ApeKI)\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s --step 1 --info info_gbs.txt\n" % os.path.basename(sys.argv[0])
@@ -308,7 +448,7 @@ class Gbs(object):
             opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
                                         ["help", "version", "verbose=",
                                          "proj=", "step=", "info=", "dict=",
-                                         "schdlr=", "queue="])
+                                         "schdlr=", "queue=", "enz=", "adp="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -324,16 +464,20 @@ class Gbs(object):
                 self.verbose = int(a)
             elif o == "--proj":
                 self.projectId = a
+            elif o == "--schdlr":
+                self.scheduler = a
+            elif o == "--queue":
+                self.queue = a
             elif o == "--step":
                 self.lSteps = a.split("-")
             elif o == "--info":
                  self.infoFile = a
             elif o == "--dict":
                  self.dictFile = a
-            elif o == "--schdlr":
-                self.scheduler = a
-            elif o == "--queue":
-                self.queue = a
+            elif o == "--enz":
+                self.enzyme = a
+            elif o == "--adp":
+                self.adpFile = a
             else:
                 assert False, "invalid option"
                 
@@ -347,7 +491,22 @@ class Gbs(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        self.projectDir = os.getcwd()
+        if "_" in self.projectId:
+            msg = "ERROR: forbidden underscore '_' in project identifier '%s'" \
+                  % self.projectId
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.infoFile == "":
+            msg = "ERROR: missing compulsory option --info"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if not os.path.exists(self.infoFile):
+            msg = "ERROR: can't find file %s" % self.infoFile
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
         if self.scheduler == "":
             msg = "ERROR: missing compulsory option --schdlr"
             sys.stderr.write("%s\n\n" % msg)
@@ -366,21 +525,22 @@ class Gbs(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "1" in self.lSteps:
-            if self.infoFile == "":
-                msg = "ERROR: missing compulsory option --info"
+        for i in range(len(self.lDirSteps)):
+            self.lDirSteps[i] = "%s/%s_%s" % (os.getcwd(), self.projectId,
+                                              self.lDirSteps[i])
+        if "3" in self.lSteps:
+            if self.adpFile == "":
+                msg = "ERROR: missing compulsory option --adp"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-            if not os.path.exists(self.infoFile):
-                msg = "ERROR: can't find file %s" % self.infoFile
+            if not os.path.exists(self.adpFile):
+                msg = "ERROR: can't find file %s" % self.adpFile
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-            self.dirStep1 = "%s/%s_%s" % (self.projectDir, self.projectId,
-                                          self.dirStep1)
-            
-            
+                
+                
     def loadHeaderInfoFile(self, line):
         """
         Set values to self.infoCol2idx.
@@ -406,37 +566,22 @@ class Gbs(object):
         for line in lines:
             tokens = line.rstrip("\n").split("\t")
             
+            # create and fill a "GbsSample" object
             individual = tokens[self.infoCol2idx["individual"]]
             flowcell = tokens[self.infoCol2idx["flowcell"]]
-            lane = tokens[self.infoCol2idx["lane"]]
-            name = "%s_%s_%s" % (individual, flowcell, lane)
-            self.dSamples[name] = GbsSample(name)
-            self.dSamples[name].individual = individual
-            self.dSamples[name].flowcell = flowcell
-            self.dSamples[name].lane = lane
-            self.dSamples[name].name = name
-            laneId = "%s_%s" % (flowcell, lane)
-            if laneId not in self.laneId2samples:
-                self.laneId2samples[laneId] = []
-            self.laneId2samples[laneId].append(name)
-            if individual not in self.ind2samples:
-                self.ind2samples[individual] = []
-            self.ind2samples[individual].append(name)
-            
-            self.dSamples[name].generation \
-                = tokens[self.infoCol2idx["generation"]]
-            self.dSamples[name].species \
-                = tokens[self.infoCol2idx["species"]]
-            self.dSamples[name].barcode \
-                = tokens[self.infoCol2idx["barcode"]]
-            self.dSamples[name].seqCenter \
-                = tokens[self.infoCol2idx["seq_center"]]
-            self.dSamples[name].seqPlatform \
-                = tokens[self.infoCol2idx["seq_platform"]]
-            self.dSamples[name].seqPlatformModel \
-                = tokens[self.infoCol2idx["seq_platform_model"]]
-            self.dSamples[name].date \
-                = tokens[self.infoCol2idx["date"]]
+            laneNum = int(tokens[self.infoCol2idx["lane"]])
+            sampleId = "%s_%s_%i" % (individual, flowcell, laneNum)
+            iSample = GbsSample(sampleId)
+            iSample.individual = individual
+            iSample.flowcell = flowcell
+            iSample.lane = laneNum
+            iSample.generation = tokens[self.infoCol2idx["generation"]]
+            iSample.species = tokens[self.infoCol2idx["species"]]
+            iSample.barcode = tokens[self.infoCol2idx["barcode"]]
+            iSample.seqCenter = tokens[self.infoCol2idx["seq_center"]]
+            iSample.seqPlatform = tokens[self.infoCol2idx["seq_platform"]]
+            iSample.seqPlatformModel = tokens[self.infoCol2idx["seq_platform_model"]]
+            iSample.date = tokens[self.infoCol2idx["date"]]
             if not os.path.exists(tokens[self.infoCol2idx["fastq_file_R1"]]):
                 msg = "file '%s' doesn't exist" \
                       % tokens[self.infoCol2idx["fastq_file_R1"]]
@@ -445,8 +590,7 @@ class Gbs(object):
                 msg = "file '%s' should be gzipped" \
                       % tokens[self.infoCol2idx["fastq_file_R1"]]
                 raise ValueError(msg)
-            self.dSamples[name].initFastqFile1 \
-                = tokens[self.infoCol2idx["fastq_file_R1"]]
+            iSample.initFastqFile1 = tokens[self.infoCol2idx["fastq_file_R1"]]
             if tokens[self.infoCol2idx["fastq_file_R2"]] != "":
                 if not os.path.exists(tokens[self.infoCol2idx["fastq_file_R2"]]):
                     msg = "file '%s' doesn't exist" \
@@ -456,10 +600,19 @@ class Gbs(object):
                     msg = "file '%s' should be gzipped" \
                           % tokens[self.infoCol2idx["fastq_file_R2"]]
                     raise ValueError(msg)
-                self.dSamples[name].initFastqFile2 \
-                    = tokens[self.infoCol2idx["fastq_file_R2"]]
-                
-                
+                iSample.initFastqFile2 = tokens[self.infoCol2idx["fastq_file_R2"]]
+            self.dSamples[iSample.id] = iSample
+            
+            laneId = "%s_%i" % (flowcell, laneNum)
+            if laneId not in self.dLanes:
+                self.dLanes[laneId] = GbsLane(laneId, flowcell, laneNum)
+            self.dLanes[laneId].insert(iSample)
+            
+            if individual not in self.ind2samples:
+                self.ind2samples[individual] = []
+            self.ind2samples[individual].append(sampleId)
+            
+            
     def loadInfoFile(self):
         if self.verbose > 0:
             msg = "load information file '%s' ..." % self.infoFile
@@ -474,7 +627,7 @@ class Gbs(object):
         infoHandle.close()
         if self.verbose > 0:
             msg = "nb of samples: %i" % len(self.dSamples)
-            msg += "\nnb of lanes: %i" % len(self.laneId2samples)
+            msg += "\nnb of lanes: %i" % len(self.dLanes)
             msg += "\nnb of individuals: %i" % len(self.ind2samples)
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
@@ -490,33 +643,54 @@ class Gbs(object):
             else:
                 raise OSError("can't continue")
         os.mkdir(dirStep)
+        cwd = os.getcwd()
         os.chdir(dirStep)
-        
-        
+        return cwd
+
+
+    def beginStep(self, stepNum):
+        if self.verbose > 0:
+            msg = "perform step %i ..." % stepNum
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+        cwd = self.enterStepDir(self.lDirSteps[stepNum - 1])
+        return cwd
+    
+    
+    def setPathsToInputFiles(self, stepNum):
+        if stepNum in [1, 2]:
+            for laneId,iLane in self.dLanes.items():
+                lFiles = iLane.getInitFastqFiles()
+                iLane.setInitFastqFileSymlinks(lFiles, self.lDirSteps[0])
+        if stepNum == 3:
+            for laneId,iLane in self.dLanes.items():
+                iLane.setDemultiplexedFastqFiles(self.lDirSteps[1])
+                
+                
+    def endStep(self, stepNum, cwd):
+        os.chdir(cwd)
+        if self.verbose > 0:
+            msg = "step %i is done" % stepNum
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+            
     def makeSymlinksToInputFastqFiles(self):
         """
         Make one symlink per lane for R1 (and R2 if necessary).
         """
-        for lane,lSamples in self.laneId2samples.items():
-            iSample = self.dSamples[lSamples[0]]
-            bn1 = os.path.basename(iSample.initFastqFile1)
-            os.symlink(iSample.initFastqFile1, "%s/%s/%s_R1.fastq.gz" \
-                       % (self.projectDir, self.dirStep1, lane))
-            if iSample.initFastqFile2 is not None:
-                bn2 = os.path.basename(iSample.initFastqFile2)
-                os.symlink(iSample.initFastqFile2, "%s/%s/%s_R2.fastq.gz" \
-                           % (self.projectDir, self.dirStep1, lane))
+        for lane,iLane in self.dLanes.items():
+            for r,lFiles in iLane.dInitFastqFileSymlinks.items():
+                os.symlink(lFiles[0], lFiles[1])
                 
                 
     def makeGroupJobId(self, prefix):
-        return "%s_%s" % (prefix,
-                          "".join(random.choice(string.letters+string.digits) \
-                                  for i in xrange(5)))
+        return "%s_%s" % (prefix, TimUtils.uniq_alphanum(5))
     
     
     def launchFastqcOnInputFastqFiles(self):
         if self.verbose > 0:
-            msg = "launch FastQC on original fastq files ..."
+            msg = "assess quality per lane ..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
@@ -528,21 +702,14 @@ class Gbs(object):
         iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
         self.jobManager.insert(iJobGroup)
         
-        lFiles = glob.glob("%s/%s/*.fastq.gz" % (self.projectDir,
-                                                 self.dirStep1))
-        lFiles.sort()
-        for idx,f in enumerate(lFiles):
-            cmd = "time fastqc -o %s/%s %s" % (self.projectDir, self.dirStep1,
-                                               f)
-            jobName = "stdout_%s_%i" % (groupJobId, idx + 1)
-            iJob = Job(groupJobId, cmd, jobName)
-            self.jobManager[iJobGroup.id].insert(iJob)
+        for laneId,iLane in self.dLanes.items():
+            iLane.initQc(self.lDirSteps[0], iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait()
         
         if self.verbose > 0:
-            msg = "all FastQC jobs finished"
+            msg = "all quality jobs finished"
             sys.stdout.write("%s\n" % msg)
             
             
@@ -555,93 +722,158 @@ class Gbs(object):
     
     
     def step1(self):
-        step = "1"
-        if self.verbose > 0:
-            msg = "perform step %s ..." % step
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-            
-        self.enterStepDir(self.dirStep1)
+        self.setPathsToInputFiles(1)
+        cwd = self.beginStep(1)
         self.makeSymlinksToInputFastqFiles()
         self.launchFastqcOnInputFastqFiles()
         self.combineFastqcResults()
-        os.chdir(self.projectDir)
+        self.endStep(1, cwd)
+        
+        
+    def loadAdpFile(self):
+        if self.verbose > 0:
+            msg = "load adapter file ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        adpHandle = open(self.adpFile)
+        while True:
+            line = adpHandle.readline()
+            if line == "":
+                break
+            tokens = line.rstrip("\n").split("\t")
+            if len(tokens) != 2:
+                msg = "adapter file '%s' should have two columns separated by a tabulation" \
+                      % self.adpFile
+                raise ValueError(msg)
+            self.adapters[tokens[0]] = tokens[1]
+        adpHandle.close()
+        if "adpFwd" not in self.adapters or "adpRev" not in self.adapters:
+            msg = "'adpFwd' or 'adpRev' missing from adapter file '%s'" % \
+                  self.adpFile
+            raise ValueError(msg)
         
         if self.verbose > 0:
-            msg = "step %s is done" % step
+            msg = "nb of adapters: %i" % len(self.adapters)
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
             
     def demultiplexInputFastqFiles(self):
-        pass
-    
-    
+        if self.verbose > 0:
+            msg = "demultiplex samples per lane ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        groupJobId = self.makeGroupJobId("%s_gbs-step2-demultiplex" % self.projectId)
+        if self.verbose > 0:
+            msg = "groupJobId=%s" % groupJobId
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        self.jobManager.insert(iJobGroup)
+        
+        for laneId,iLane in self.dLanes.items():
+            outDir = "%s/%s" % (self.lDirSteps[1], laneId)
+            os.mkdir(outDir)
+            iLane.demultiplex(outDir, self.enzyme, iJobGroup)
+            
+        self.jobManager[iJobGroup.id].submit()
+        self.jobManager[iJobGroup.id].wait()
+        
+        if self.verbose > 0:
+            msg = "all demultiplexing jobs finished"
+            sys.stdout.write("%s\n" % msg)
+            
+            
     def step2(self):
-        step = "2"
-        if self.verbose > 0:
-            msg = "perform step %s ..." % step
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-            
-        self.enterStepDir(self.dirStep2)
+        self.setPathsToInputFiles(2)
+        cwd = self.beginStep(2)
         self.demultiplexInputFastqFiles()
-        os.chdir(self.projectDir)
+        self.endStep(2, cwd)
         
-        if self.verbose > 0:
-            msg = "step %s is done" % step
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-            
-            
+        
     def cleanDemultiplexedFiles(self):
-        pass
-    
-    
+        if self.verbose > 0:
+            msg = "clean reads per sample ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        groupJobId = self.makeGroupJobId("%s_gbs-step3-clean" % self.projectId)
+        if self.verbose > 0:
+            msg = "groupJobId=%s" % groupJobId
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        self.jobManager.insert(iJobGroup)
+        
+        for laneId,iLane in self.dLanes.items():
+            outDir = "%s/%s" % (self.lDirSteps[2], laneId)
+            os.mkdir(outDir)
+            iLane.clean(self.adapters["adpFwd"], self.adapters["adpRev"],
+                        outDir, iJobGroup)
+            
+        self.jobManager[iJobGroup.id].submit()
+        self.jobManager[iJobGroup.id].wait()
+        
+        if self.verbose > 0:
+            msg = "all cleaning jobs finished"
+            sys.stdout.write("%s\n" % msg)
+            
+            
     def step3(self):
-        step = "3"
-        if self.verbose > 0:
-            msg = "perform step %s ..." % step
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-            
-        self.enterStepDir(self.dirStep3)
+        self.loadAdpFile()
+        self.setPathsToInputFiles(3)
+        cwd = self.beginStep(3)
         self.cleanDemultiplexedFiles()
-        os.chdir(self.projectDir)
+        self.endStep(3, cwd)
         
-        if self.verbose > 0:
-            msg = "step %s is done" % step
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-            
-            
+        
     def mapCleanedReads(self):
-        pass
-    
-    
-    def step4(self):
-        step = "4"
         if self.verbose > 0:
-            msg = "perform step %s ..." % step
+            msg = "map reads per sample ..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        self.enterStepDir(self.dirStep4)
-        self.mapCleanedReads()
-        os.chdir(self.projectDir)
-        
+        groupJobId = self.makeGroupJobId("%s_gbs-step4-map" % self.projectId)
         if self.verbose > 0:
-            msg = "step %s is done" % step
+            msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-    
-    
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        self.jobManager.insert(iJobGroup)
+        
+        for sampleId,iSample in self.dSamples.items():
+            iSample.map(iJobGroup)
+            
+        self.jobManager[iJobGroup.id].submit()
+        self.jobManager[iJobGroup.id].wait()
+        
+        if self.verbose > 0:
+            msg = "all mapping jobs finished"
+            sys.stdout.write("%s\n" % msg)
+            
+            
+    def step4(self):
+        cwd = self.beginStep(4)
+        self.mapCleanedReads()
+        self.endStep(4, cwd)
+        
+        
     def localRealignment(self):
         pass
     
     def baseQualityScoreRecalibration(self):
         pass
     
+    
+    def step5(self):
+        cwd = self.beginStep(5)
+        self.localRealignment()
+        self.baseQualityScoreRecalibration()
+        self.endStep(5, cwd)
+        
+        
     def variantCallingPerIndividual(self):
         pass
     
@@ -652,28 +884,40 @@ class Gbs(object):
         pass
     
     
+    def step6(self):
+        cwd = self.beginStep(6)
+        self.variantCallingPerIndividual()
+        self.jointGenotyping()
+        self.variantRecalibration()
+        self.endStep(6, cwd)
+        
+        
     def run(self):
+        self.loadInfoFile()
+        
         if "1" in self.lSteps:
-            self.loadInfoFile()
+            # QC: parallelize over lanes
             self.step1()
             
         if "2" in self.lSteps:
+            # demultiplex: parallelize over lanes
             self.step2()
             
         if "3" in self.lSteps:
+            # clean: parallelize over samples
             self.step3()
             
         if "4" in self.lSteps:
+            # map: parallelize over samples
             self.step4()
             
         if "5" in self.lSteps:
-            self.localRealignment()
-            self.baseQualityScoreRecalibration()
+            # recalibrate: parallelize over lanes
+            self.step5()
             
         if "6" in self.lSteps:
-            self.variantCallingPerIndividual()
-            self.jointGenotyping()
-            self.variantRecalibration()
+            # genotype: parallelize over individuals
+            self.step6()
             
             
 if __name__ == "__main__":
