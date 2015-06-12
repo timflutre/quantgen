@@ -24,6 +24,7 @@ import tempfile
 import shutil
 import itertools
 import random
+import hashlib
 
 from Bio import SeqIO
 from Bio.Seq import Seq, reverse_complement
@@ -37,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.0" # http://semver.org/
+progVersion = "0.1.1" # http://semver.org/
 
 
 class TestGbs(object):
@@ -167,13 +168,13 @@ class TestGbs(object):
         
         infoHandle = open(infoFile, "w")
         
-        lane2info["1"] = {"R1": "init_reads_lane1_R1.fastq.gz",
-                          "R2": "init_reads_lane1_R2.fastq.gz",
+        lane2info["1"] = {"R1": "%s/init_reads_lane1_R1.fastq.gz" % os.getcwd(),
+                          "R2": "%s/init_reads_lane1_R2.fastq.gz" % os.getcwd(),
                           "inds": {"ind1": {"gen":0, "tag":"AAAA"},
                                    "ind2": {"gen":0, "tag":"GGGG"},
                                    "ind3": {"gen":1, "tag":"TTTT"}}}
-        lane2info["2"] = {"R1": "init_reads_lane2_R1.fastq.gz",
-                          "R2": "init_reads_lane2_R2.fastq.gz",
+        lane2info["2"] = {"R1": "%s/init_reads_lane2_R1.fastq.gz" % os.getcwd(),
+                          "R2": "%s/init_reads_lane2_R2.fastq.gz" % os.getcwd(),
                           "inds": {"ind1": {"gen":0, "tag":"CCCC"},
                                    "ind2": {"gen":0, "tag":"TTTT"},
                                    "ind4": {"gen":1, "tag":"AAAA"}}}
@@ -285,8 +286,8 @@ class TestGbs(object):
         infoHandle.write("%s\n" % txt)
         infoHandle.close()
         return infoFile, lane2info
-        
-        
+    
+    
     def simulRefGenomeWoMotif(self, nbChrs, lenChr):
         """
         >>> i = TestGbs()
@@ -364,6 +365,7 @@ class TestGbs(object):
                        maxFragLen, motif):
         """
         the reference genome is haploid
+        motif -- string with what remains of the restriction site after being cut
         """
         refGen = self.simulRefGenomeWoMotif(nbChrs, lenChr)
         lFragCoords = self.chooseFragCoords(nbChrs, lenChr, nbFragsPerChr,
@@ -533,7 +535,7 @@ class TestGbs(object):
                 
                 
     def makeInputSequences(self, lane2info, nbChrs=2, lenChr=100000, nbFragsPerChr=50,
-                           minFragLen=30, maxFragLen=600, motif="GCAGC",
+                           minFragLen=30, maxFragLen=600, motif="CAGC",
                            nbReads=1000, lenRead=100, paired=True):
         refGen, lFragCoords \
             = self.simulRefGenome(nbChrs, lenChr, nbFragsPerChr, minFragLen,
@@ -547,8 +549,43 @@ class TestGbs(object):
         
         refFile = self.saveRefGenome(refGen)
         self.saveReads(lane2info, lane2reads, paired)
+        return refGen, refFile
+    
+    
+    def makeAdapterFile(self):
+        adpFile = "testGbs_adp.txt"
+        dAdps = {}
         
+        dAdps["adpFwd"] = "CTCTTCCGATCT"
+        dAdps["adpRev"] = "AGATCGGAAGAG"
         
+        adpHandle = open(adpFile, "w")
+        for adp,seq in dAdps.items():
+            adpHandle.write("%s\t%s\n" % (adp, seq))
+        adpHandle.close()
+        
+        return adpFile, dAdps
+    
+    
+    def makeDictFile(self, refGen, refFile):
+        dictFile = "refgenome.dict"
+        
+        dictHandle = open(dictFile, "w")
+        dictHandle.write("@HD\tVN:1.4\tSO:unsorted\n")
+        for c in range(len(refGen)):
+            txt = "@SQ"
+            txt += "\tSN:%s" % refGen[c].id
+            txt += "\tLN:%i" % len(refGen[c])
+            txt += "\tSP:%s" % "Test example"
+            txt += "\tAS:%s" % "v1"
+            txt += "\tM5:%s" % hashlib.md5(str(refGen[c].seq)).hexdigest()
+            txt += "\tUR:file:%s" % refFile
+            dictHandle.write("%s\n" % txt)
+        dictHandle.close()
+        
+        return dictFile
+    
+    
     def launchProg(self, options):
         """
         Launch gbs.py.
@@ -592,12 +629,15 @@ class TestGbs(object):
         nbFragsPerChr = 50
         minFragLen = 30
         maxFragLen = 300
-        motif = "GCAGC"
+        motif = "CAGC"
         nbReads = 1000 # for a given sample, over all its chrs
         lenRead = 100
-        refFile = self.makeInputSequences(lane2info, nbChrs, lenChr, nbFragsPerChr,
-                                          minFragLen, maxFragLen, motif,
-                                          nbReads, lenRead)
+        refGen, refFile = self.makeInputSequences(lane2info, nbChrs, lenChr,
+                                                  nbFragsPerChr, minFragLen,
+                                                  maxFragLen, motif,
+                                                  nbReads, lenRead)
+        adpFile, dAdps = self.makeAdapterFile()
+        dictFile = self.makeDictFile(refGen, refFile)
         options.append("--info")
         options.append(infoFile)
         

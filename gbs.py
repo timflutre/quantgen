@@ -34,13 +34,19 @@ import string
 # import numpy as np
 # import scipy as sp
 
+from Bio import SeqIO
+from Bio.Seq import Seq, reverse_complement
+from Bio.SeqRecord import SeqRecord
+from Bio.Alphabet import IUPAC, generic_dna
+from Bio.Data.IUPACData import ambiguous_dna_values
+
 if sys.version_info[0] == 2:
     if sys.version_info[1] < 7:
         msg = "ERROR: Python should be in version 2.7 or higher"
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.3" # http://semver.org/
+progVersion = "0.1.4" # http://semver.org/
 
 
 class TimUtils(object):
@@ -229,9 +235,9 @@ class GbsSample(object):
             self.dDemultiplexedFastqFiles["R2"] = lFilesR2[0]
             
     def clean(self, adpFwd, adpRev, outDir, iJobGroup):
-        cmd = "cutadapt"
-        cmd += " -a %s" % adpFwd
-        cmd += " -A %s" % adpRev
+        cmd = "time cutadapt"
+        cmd += " -a %s" % reverse_complement(str(adpFwd))
+        cmd += " -A %s%s" % (reverse_complement(str(self.barcode)), adpRev)
         cmd += " -o %s/%s_clean_R1.fastq.gz" % (outDir, self.individual)
         cmd += " -p %s/%s_clean_R2.fastq.gz" % (outDir, self.individual)
         cmd += " -e 0.2"
@@ -250,15 +256,15 @@ class GbsSample(object):
         iJobGroup.insert(iJob)
         
     def setCleanedFastqFiles(self, pathToDir):
-        lFilesR1 = glob.glob("%s/*_%s*_clean_R1.fastq.gz" % (pathToDir,
-                                                             self.individual))
+        lFilesR1 = glob.glob("%s/%s_clean_R1.fastq.gz" % (pathToDir,
+                                                          self.individual))
         if len(lFilesR1) != 1:
             msg = "can't find R1 file for sample '%s' in '%s'" % (self.id,
                                                                   pathToDir)
             raise ValueError(msg)
         self.dCleanedFastqFiles["R1"] = lFilesR1[0]
-        lFilesR2 = glob.glob("%s/*_%s*_clean_R2.fastq.gz" % (pathToDir,
-                                                             self.individual))
+        lFilesR2 = glob.glob("%s/%s_clean_R2.fastq.gz" % (pathToDir,
+                                                          self.individual))
         if len(lFilesR2) == 1:
             self.dCleanedFastqFiles["R2"] = lFilesR2[0]
             
@@ -270,7 +276,7 @@ class GbsSample(object):
         """
         cmd = "date"
         cmd += "; bwa mem"
-        cmd += " -R '@RG"
+        cmd += " -R \'@RG"
         cmd += "\tID:%s" % self.id
         cmd += "\tCN:%s" % self.seqCenter
         cmd += "\tDT:%s" % self.date
@@ -279,7 +285,7 @@ class GbsSample(object):
         cmd += "\tPM:%s" % self.seqPlatformModel
         cmd += "\tPU:%s_%s" % (self.flowcell, self.lane)
         cmd += "\tSM:%s" % self.individual
-        cmd += "'"
+        cmd += "\'"
         cmd += " -M %s" % pathToPrefixRefGenome
         cmd += " %s" % self.dCleanedFastqFiles["R1"]
         if "R2" in self.dCleanedFastqFiles:
@@ -294,7 +300,7 @@ class GbsSample(object):
         cmd += " | samtools sort"
         cmd += " -o %s" % tmpBamFile
         cmd += " -O bam"
-        cmd += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum, self.id)
+        cmd += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum(5), self.id)
         cmd += " -" # stdin
         
         tmpHeaderFile = "tmp_%s_header.sam" % self.id
@@ -364,7 +370,10 @@ class GbsLane(object):
     def saveBarcodeFile(self, format="fasta"):
         fileName = "barcodes_%s.fa" % self.id
         fileHandle = open(fileName, "w")
-        for sample,iSample in self.dSamples.items():
+        lSamples = self.dSamples.keys()
+        lSamples.sort()
+        for sample in lSamples:
+            iSample = self.dSamples[sample]
             fileHandle.write(">%s\n%s\n" % (iSample.individual,
                                             iSample.barcode))
         fileHandle.close()
@@ -378,7 +387,7 @@ class GbsLane(object):
         cmd += " --idir %s" % os.path.dirname(self.dInitFastqFileSymlinks["R1"][1])
         cmd += " --ifq1 %s" % os.path.basename(self.dInitFastqFileSymlinks["R1"][1])
         cmd += " --ifq2 %s" % os.path.basename(self.dInitFastqFileSymlinks["R2"][1])
-        cmd += " --it %s" % self.saveBarcodeFile(self)
+        cmd += " --it %s" % self.saveBarcodeFile()
         cmd += " --ofqp %s/%s" % (outDir, self.id)
         cmd += " --met %s" % "4c"
         cmd += " --re %s" % enzyme
@@ -766,7 +775,9 @@ class Gbs(object):
     def endStep(self, stepNum, cwd):
         os.chdir(cwd)
         if self.verbose > 0:
-            msg = "step %i is done" % stepNum
+            msg = "step %i is done (see '%s/')" \
+                  % (stepNum,
+                     os.path.basename(self.lDirSteps[stepNum - 1]))
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
