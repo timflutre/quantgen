@@ -40,7 +40,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.0.1" # http://semver.org/
+progVersion = "0.1.3" # http://semver.org/
 
 
 class TimUtils(object):
@@ -183,7 +183,7 @@ class GbsSample(object):
     """
     
     def __init__(self, id):
-        self.id = id
+        self.id = id # individual + "_" + flowcell + "_" + lane
         self.individual = ""
         self.generation = ""
         self.species = ""
@@ -197,6 +197,7 @@ class GbsSample(object):
         self.initFastqFile1 = ""
         self.initFastqFile2 = None
         self.dDemultiplexedFastqFiles = {}
+        self.dCleanedFastqFiles = {}
         
     def __str__(self):
         txt = "id=%s" % self.id
@@ -231,8 +232,8 @@ class GbsSample(object):
         cmd = "cutadapt"
         cmd += " -a %s" % adpFwd
         cmd += " -A %s" % adpRev
-        cmd += " -o %s_clean_R1.fastq.gz" % self.individual
-        cmd += " -p %s_clean_R2.fastq.gz" % self.individual
+        cmd += " -o %s/%s_clean_R1.fastq.gz" % (outDir, self.individual)
+        cmd += " -p %s/%s_clean_R2.fastq.gz" % (outDir, self.individual)
         cmd += " -e 0.2"
         cmd += " -O 3"
         cmd += " -m 35"
@@ -243,8 +244,72 @@ class GbsSample(object):
         cmd += " %s" % self.dDemultiplexedFastqFiles["R1"]
         if "R2" in self.dDemultiplexedFastqFiles:
             cmd += " %s" % self.dDemultiplexedFastqFiles["R2"]
-        print(cmd)
-        sys.exit(1)
+        # print(cmd) # debug
+        jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
+        iJob = Job(iJobGroup.id, cmd, jobName)
+        iJobGroup.insert(iJob)
+        
+    def setCleanedFastqFiles(self, pathToDir):
+        lFilesR1 = glob.glob("%s/*_%s*_clean_R1.fastq.gz" % (pathToDir,
+                                                             self.individual))
+        if len(lFilesR1) != 1:
+            msg = "can't find R1 file for sample '%s' in '%s'" % (self.id,
+                                                                  pathToDir)
+            raise ValueError(msg)
+        self.dCleanedFastqFiles["R1"] = lFilesR1[0]
+        lFilesR2 = glob.glob("%s/*_%s*_clean_R2.fastq.gz" % (pathToDir,
+                                                             self.individual))
+        if len(lFilesR2) == 1:
+            self.dCleanedFastqFiles["R2"] = lFilesR2[0]
+            
+    def align(self, pathToPrefixRefGenome, tmpDir, dictFile, outDir,
+              iJobGroup):
+        """
+        http://www.htslib.org/workflow/#mapping_to_variant
+        https://www.broadinstitute.org/gatk/guide/best-practices
+        """
+        cmd = "date"
+        cmd += "; bwa mem"
+        cmd += " -R '@RG"
+        cmd += "\tID:%s" % self.id
+        cmd += "\tCN:%s" % self.seqCenter
+        cmd += "\tDT:%s" % self.date
+        cmd += "\tLB:%s" % self.id
+        cmd += "\tPL:%s" % self.seqPlatform
+        cmd += "\tPM:%s" % self.seqPlatformModel
+        cmd += "\tPU:%s_%s" % (self.flowcell, self.lane)
+        cmd += "\tSM:%s" % self.individual
+        cmd += "'"
+        cmd += " -M %s" % pathToPrefixRefGenome
+        cmd += " %s" % self.dCleanedFastqFiles["R1"]
+        if "R2" in self.dCleanedFastqFiles:
+            cmd += " %s" % self.dCleanedFastqFiles["R2"]
+            
+        cmd += " | samtools fixmate"
+        cmd += " -O bam"
+        cmd += " -" # stdin
+        cmd += " -" # stdout
+        
+        tmpBamFile = "tmp_%s.bam" % self.id
+        cmd += " | samtools sort"
+        cmd += " -o %s" % tmpBamFile
+        cmd += " -O bam"
+        cmd += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum, self.id)
+        cmd += " -" # stdin
+        
+        tmpHeaderFile = "tmp_%s_header.sam" % self.id
+        cmd += "; cat"
+        cmd += " <(samtools view -H tmp_%s.bam | grep -v '@SQ')" % self.id
+        cmd += " <(grep '@SQ' %s)" % dictFile
+        cmd += " > %s" % tmpHeaderFile
+        cmd += "; samtools reheader"
+        cmd += " %s" % tmpHeaderFile
+        cmd += " %s" % tmpBamFile
+        cmd += " > %s/%s.bam" % (outDir, self.id)
+        cmd += "; rm %s %s" % (tmpBamFile, tmpHeaderFile)
+        cmd += "; date"
+        # print(cmd) # debug
+        
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
         iJob = Job(iJobGroup.id, cmd, jobName)
         iJobGroup.insert(iJob)
@@ -330,6 +395,16 @@ class GbsLane(object):
         for sampleId,iSample in self.dSamples.items():
             iSample.clean(adpFwd, adpRev, outDir, iJobGroup)
             
+    def setCleanedFastqFiles(self, pathToDir):
+        for sampleId,iSample in self.dSamples.items():
+            iSample.setCleanedFastqFiles("%s/%s" % (pathToDir, self.id))
+            
+    def align(self, pathToPrefixRefGenome, tmpDir, dictFile, outDir,
+              iJobGroup):
+        for sampleId,iSample in self.dSamples.items():
+            iSample.align(pathToPrefixRefGenome, tmpDir, dictFile, outDir,
+                          iJobGroup)
+            
             
 class Gbs(object):
     
@@ -337,7 +412,6 @@ class Gbs(object):
         self.verbose = 1
         self.lSteps = []
         self.infoFile = ""
-        self.dictFile = ""
         self.scheduler = "SGE"
         self.queue = "normal.q"
         self.projectId = ""
@@ -361,11 +435,13 @@ class Gbs(object):
         self.lDirSteps = ["lane_qualities",
                           "demultiplexing_lanes",
                           "cleaning_samples",
-                          "mapping_samples",
+                          "aligning_samples",
                           "realign_bqsr",
                           "calling_variants"]
         self.adpFile = ""
         self.adapters = {}
+        self.pathToPrefixRefGenome = ""
+        self.dictFile = ""
         
         
     def help(self):
@@ -389,7 +465,7 @@ class Gbs(object):
         msg += "\t\t1: raw read quality (with FastQC v >= 0.11.2)\n"
         msg += "\t\t2: demultiplexing\n"
         msg += "\t\t3: cleaning (with CutAdapt v >= 1.8)\n"
-        msg += "\t\t4: mapping (with BWA MEM v >= 0.7.12 and Samtools v >= 1.1)\n"
+        msg += "\t\t4: aligning (with BWA MEM v >= 0.7.12 and Samtools v >= 1.1)\n"
         msg += "\t\t5: local realignment and BQSR (with GATK v >= 3.3)\n"
         msg += "\t\t6: SNP and genotype calling (with GATK HC and/or BcfTools)\n"
         msg += "      --info\tpath to the 'information' file\n"
@@ -415,8 +491,11 @@ class Gbs(object):
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
         msg += "\t\tname: at least 'adpFwd' (also 'adpRev' if paired-end)\n"
         msg += "\t\tsequence: from 5' to 3'\n"
-        msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
         msg += "      --enz\tname of the restriction enzyme (default=ApeKI)\n"
+        msg += "      --ref\tpath to the prefix of files for the reference genome\n"
+        msg += "\t\t'/data/Atha_v2' for '/data/Atha_v2.bwt', etc\n"
+        msg += "\t\tthese files are produced via 'bwa index ...'\n"
+        msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s --step 1 --info info_gbs.txt\n" % os.path.basename(sys.argv[0])
@@ -448,7 +527,8 @@ class Gbs(object):
             opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
                                         ["help", "version", "verbose=",
                                          "proj=", "step=", "info=", "dict=",
-                                         "schdlr=", "queue=", "enz=", "adp="])
+                                         "schdlr=", "queue=", "enz=", "adp=",
+                                         "ref="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -472,12 +552,14 @@ class Gbs(object):
                 self.lSteps = a.split("-")
             elif o == "--info":
                  self.infoFile = a
-            elif o == "--dict":
-                 self.dictFile = a
             elif o == "--enz":
                 self.enzyme = a
             elif o == "--adp":
                 self.adpFile = a
+            elif o == "--ref":
+                self.pathToPrefixRefGenome = a
+            elif o == "--dict":
+                 self.dictFile = a
             else:
                 assert False, "invalid option"
                 
@@ -536,6 +618,17 @@ class Gbs(object):
                 sys.exit(1)
             if not os.path.exists(self.adpFile):
                 msg = "ERROR: can't find file %s" % self.adpFile
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+        if "4" in self.lSteps:
+            if self.pathToPrefixRefGenome == "":
+                msg = "ERROR: missing compulsory option --ref"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if not os.path.exists(self.pathToPrefixRefGenome):
+                msg = "ERROR: can't find file %s.bwt" % self.pathToPrefixRefGenome
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -665,6 +758,9 @@ class Gbs(object):
         if stepNum == 3:
             for laneId,iLane in self.dLanes.items():
                 iLane.setDemultiplexedFastqFiles(self.lDirSteps[1])
+        if stepNum == 4:
+            for laneId,iLane in self.dLanes.items():
+                iLane.setCleanedFastqFiles(self.lDirSteps[2])
                 
                 
     def endStep(self, stepNum, cwd):
@@ -829,13 +925,13 @@ class Gbs(object):
         self.endStep(3, cwd)
         
         
-    def mapCleanedReads(self):
+    def alignCleanedReads(self):
         if self.verbose > 0:
-            msg = "map reads per sample ..."
+            msg = "align reads per sample ..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step4-map" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step4-align" % self.projectId)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -843,8 +939,11 @@ class Gbs(object):
         iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
         self.jobManager.insert(iJobGroup)
         
-        for sampleId,iSample in self.dSamples.items():
-            iSample.map(iJobGroup)
+        for laneId,iLane in self.dLanes.items():
+            outDir = "%s/%s" % (self.lDirSteps[3], laneId)
+            os.mkdir(outDir)
+            iLane.align(self.pathToPrefixRefGenome, ".", self.dictFile, outDir,
+                        iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait()
@@ -854,9 +953,19 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             
             
+    def summarizeAlignments(self):
+        # if self.verbose > 0:
+        #     msg = "summarize alignments ..."
+        #     sys.stdout.write("%s\n" % msg)
+        #     sys.stdout.flush()
+        pass
+        
+        
     def step4(self):
+        self.setPathsToInputFiles(4)
         cwd = self.beginStep(4)
-        self.mapCleanedReads()
+        self.alignCleanedReads()
+        self.summarizeAlignments()
         self.endStep(4, cwd)
         
         
@@ -868,6 +977,7 @@ class Gbs(object):
     
     
     def step5(self):
+        self.setPathsToInputFiles(5)
         cwd = self.beginStep(5)
         self.localRealignment()
         self.baseQualityScoreRecalibration()
