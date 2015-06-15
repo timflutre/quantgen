@@ -30,6 +30,7 @@ import shutil
 import glob
 import random
 import string
+import stat
 # import sqlite3
 # import numpy as np
 # import scipy as sp
@@ -46,7 +47,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.4" # http://semver.org/
+progVersion = "0.1.5" # http://semver.org/
 
 
 class TimUtils(object):
@@ -72,29 +73,42 @@ class TimUtils(object):
     
 class Job(object):
     
-    def __init__(self, groupId, cmd, name):
+    def __init__(self, groupId, name, cmd=None, bashFile=None):
         self.groupId = groupId
-        self.cmd = cmd
         self.name = name
+        self.cmd = cmd
+        self.bashFile = bashFile
         self.queue = None # set by JobGroup upon insertion
         self.duration = None # set by JobGroup upon insertion
         self.memory = None # set by JobGroup upon insertion
         self.id = None # set right after submission
-        self.node = None
+        self.node = None # not used yet
         
     def submit(self):
-        cmd = "echo '%s'" % self.cmd
-        cmd += " | qsub -cwd -j y -V -q %s -N %s" % (self.queue, self.name)
+        qsubCmd = "qsub -cwd -j y -V -q %s -N %s" % (self.queue, self.name)
         if self.duration:
             pass
         if self.memory:
             pass
+        
+        cmd = ""
+        if self.bashFile:
+            cmd += "%s %s" % (qsubCmd, self.bashFile)
+        elif self.cmd:
+            cmd += "echo -e '%s'" % self.cmd.encode('unicode-escape')
+            cmd += " | %s" % qsubCmd
+        else:
+            msg = "try to submit job '%s' with neither cmd nor bash file" \
+                  % self.name
+            raise ValueError(msg)
+        
         p = Popen(cmd, shell=True, stdout=PIPE).communicate()
         p = p[0].split()[2]
         self.id = int(p)
+        
         return self.id
-        
-        
+    
+    
 class JobGroup(object):
     
     def __init__(self, groupId, scheduler, queue):
@@ -252,7 +266,7 @@ class GbsSample(object):
             cmd += " %s" % self.dDemultiplexedFastqFiles["R2"]
         # print(cmd) # debug
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(iJobGroup.id, cmd, jobName)
+        iJob = Job(iJobGroup.id, jobName, cmd)
         iJobGroup.insert(iJob)
         
     def setCleanedFastqFiles(self, pathToDir):
@@ -273,51 +287,79 @@ class GbsSample(object):
         """
         http://www.htslib.org/workflow/#mapping_to_variant
         https://www.broadinstitute.org/gatk/guide/best-practices
+        Need to give bashFile to Job to keep <tab> in BWA cmd-line
         """
-        cmd = "date"
-        cmd += "; bwa mem"
-        cmd += " -R \'@RG"
-        cmd += "\tID:%s" % self.id
-        cmd += "\tCN:%s" % self.seqCenter
-        cmd += "\tDT:%s" % self.date
-        cmd += "\tLB:%s" % self.id
-        cmd += "\tPL:%s" % self.seqPlatform
-        cmd += "\tPM:%s" % self.seqPlatformModel
-        cmd += "\tPU:%s_%s" % (self.flowcell, self.lane)
-        cmd += "\tSM:%s" % self.individual
-        cmd += "\'"
-        cmd += " -M %s" % pathToPrefixRefGenome
-        cmd += " %s" % self.dCleanedFastqFiles["R1"]
+        bashFile = "job_%s_%s.bash" % (iJobGroup.id, self.id)
+        bashHandle = open(bashFile, "w")
+        txt = "#!/usr/bin/env bash"
+        txt += "\ndate"
+        txt += "\noutDir=\"%s\"" % outDir
+        txt += "\n\necho \"align, fixmate and sort ...\""
+        bashHandle.write("%s\n" % txt)
+        
+        txt = "bwa mem"
+        txt += " -R \'@RG"
+        txt += "\tID:%s" % self.id
+        txt += "\tCN:%s" % self.seqCenter
+        txt += "\tDT:%s" % self.date
+        txt += "\tLB:%s" % self.individual
+        txt += "\tPL:%s" % self.seqPlatform
+        txt += "\tPM:%s" % self.seqPlatformModel
+        txt += "\tPU:%s_%s" % (self.flowcell, self.lane)
+        txt += "\tSM:%s" % self.individual
+        txt += "\'"
+        txt += " -M %s" % pathToPrefixRefGenome
+        txt += " %s" % self.dCleanedFastqFiles["R1"]
         if "R2" in self.dCleanedFastqFiles:
-            cmd += " %s" % self.dCleanedFastqFiles["R2"]
-            
-        cmd += " | samtools fixmate"
-        cmd += " -O bam"
-        cmd += " -" # stdin
-        cmd += " -" # stdout
+            txt += " %s" % self.dCleanedFastqFiles["R2"]
+        bashHandle.write("%s" % txt.encode('unicode-escape'))
         
         tmpBamFile = "tmp_%s.bam" % self.id
-        cmd += " | samtools sort"
-        cmd += " -o %s" % tmpBamFile
-        cmd += " -O bam"
-        cmd += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum(5), self.id)
-        cmd += " -" # stdin
+        txt = " | samtools fixmate"
+        txt += " -O bam"
+        txt += " -" # stdin
+        txt += " -" # stdout
+        txt += " | samtools sort"
+        txt += " -o ${outDir}/%s" % tmpBamFile
+        txt += " -O bam"
+        txt += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum(5), self.id)
+        txt += " -" # stdin
+        bashHandle.write("%s\n" % txt)
+        # tmpBamFile = "tmp_%s.bam" % self.id
+        # txt = " | samtools fixmate"
+        # txt += " -O bam"
+        # txt += " -" # stdin
+        # txt += " ${outDir}/%s" % tmpBamFile
+        # bashHandle.write("%s\n" % txt)
         
+        # update the header with @SQ from dictFile
         tmpHeaderFile = "tmp_%s_header.sam" % self.id
-        cmd += "; cat"
-        cmd += " <(samtools view -H tmp_%s.bam | grep -v '@SQ')" % self.id
-        cmd += " <(grep '@SQ' %s)" % dictFile
-        cmd += " > %s" % tmpHeaderFile
-        cmd += "; samtools reheader"
-        cmd += " %s" % tmpHeaderFile
-        cmd += " %s" % tmpBamFile
-        cmd += " > %s/%s.bam" % (outDir, self.id)
-        cmd += "; rm %s %s" % (tmpBamFile, tmpHeaderFile)
-        cmd += "; date"
-        # print(cmd) # debug
+        txt = "\necho \"update header ...\""
+        txt += "\ncat"
+        txt += " <(samtools view -H ${outDir}/tmp_%s.bam" % self.id
+        txt += " | grep -v '@SQ')"
+        txt += " <(grep '@SQ' %s)" % dictFile
+        txt += " > ${outDir}/%s" % tmpHeaderFile
+        txt += "\ntime samtools reheader"
+        txt += " ${outDir}/%s" % tmpHeaderFile
+        txt += " ${outDir}/%s" % tmpBamFile
+        txt += " > ${outDir}/%s.bam" % self.id
+        txt += "\nrm ${outDir}/%s ${outDir}/%s" % (tmpBamFile, tmpHeaderFile)
+        bashHandle.write("%s\n" % txt)
+        
+        # get basic stats
+        txt = "\necho \"flagstat\""
+        txt += "\ntime samtools flagstat"
+        txt += " ${outDir}/%s.bam" % self.id
+        txt += " >& ${outDir}/flagstat_%s.txt" % self.id
+        txt += "\ndate"
+        bashHandle.write("%s\n" % txt)
+        
+        bashHandle.close()
+        os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
         
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(iJobGroup.id, cmd, jobName)
+        iJob = Job(iJobGroup.id, jobName, bashFile=bashFile)
         iJobGroup.insert(iJob)
         
         
@@ -364,7 +406,7 @@ class GbsLane(object):
         for Ri,lFiles in self.dInitFastqFileSymlinks.items():
             cmd = "time fastqc -o %s %s" % (outDir, lFiles[1])
             jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
-            iJob = Job(iJobGroup.id, cmd, jobName)
+            iJob = Job(iJobGroup.id, jobName, cmd)
             iJobGroup.insert(iJob)
             
     def saveBarcodeFile(self, format="fasta"):
@@ -393,7 +435,7 @@ class GbsLane(object):
         cmd += " --re %s" % enzyme
         cmd += " --chim 1"
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(iJobGroup.id, cmd, jobName)
+        iJob = Job(iJobGroup.id, jobName, cmd)
         iJobGroup.insert(iJob)
         
     def setDemultiplexedFastqFiles(self, pathToDir):
@@ -414,7 +456,24 @@ class GbsLane(object):
             iSample.align(pathToPrefixRefGenome, tmpDir, dictFile, outDir,
                           iJobGroup)
             
-            
+    def gather(self, outDir, iJobGroup):
+        cmd = "time samtools merge -f"
+        cmd += " %s/%s.bam" % (outDir, self.id)
+        lSamples = self.dSamples.keys()
+        lSamples.sort()
+        for sampleId in lSamples:
+            cmd += " %s/%s/%s.bam" % (outDir, self.id,
+                                      self.dSamples[sampleId].id)
+        cmd += "; java -Xmx8g -jar `which picard.jar` CollectInsertSizeMetrics"
+        cmd += " HISTOGRAM_FILE=%s/hist_insert-sizes_picard_%s.pdf" \
+               % (outDir, self.id)
+        cmd += " INPUT=%s/%s.bam" % (outDir, self.id)
+        cmd += " OUTPUT=%s/insert-sizes_picard_%s.txt" % (outDir, self.id)
+        jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
+        iJob = Job(iJobGroup.id, jobName, cmd)
+        iJobGroup.insert(iJob)
+        
+        
 class Gbs(object):
     
     def __init__(self):
@@ -563,6 +622,7 @@ class Gbs(object):
                  self.infoFile = a
             elif o == "--enz":
                 self.enzyme = a
+
             elif o == "--adp":
                 self.adpFile = a
             elif o == "--ref":
@@ -636,11 +696,26 @@ class Gbs(object):
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-            if not os.path.exists(self.pathToPrefixRefGenome):
+            if not os.path.exists("%s.bwt" % self.pathToPrefixRefGenome):
                 msg = "ERROR: can't find file %s.bwt" % self.pathToPrefixRefGenome
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
+            if os.path.dirname(self.pathToPrefixRefGenome) == '':
+                self.pathToPrefixRefGenome = "%s/%s" % (os.getcwd(),
+                                                        self.pathToPrefixRefGenome)
+            if self.dictFile == "":
+                msg = "ERROR: missing compulsory option --dict"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if not os.path.exists(self.dictFile):
+                msg = "ERROR: can't find file %s" % self.dictFile
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if os.path.dirname(self.dictFile) == '':
+                self.dictFile = "%s/%s" % (os.getcwd(), self.dictFile)
                 
                 
     def loadHeaderInfoFile(self, line):
@@ -964,24 +1039,42 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             
             
-    def summarizeAlignments(self):
-        # if self.verbose > 0:
-        #     msg = "summarize alignments ..."
-        #     sys.stdout.write("%s\n" % msg)
-        #     sys.stdout.flush()
-        pass
+    def gatherSamplesPerLane(self):
+        if self.verbose > 0:
+            msg = "gather samples per lane ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        groupJobId = self.makeGroupJobId("%s_gbs-step4-gather" % self.projectId)
+        if self.verbose > 0:
+            msg = "groupJobId=%s" % groupJobId
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        self.jobManager.insert(iJobGroup)
         
+        for laneId,iLane in self.dLanes.items():
+            iLane.gather(self.lDirSteps[3], iJobGroup)
+            
+        self.jobManager[iJobGroup.id].submit()
+        self.jobManager[iJobGroup.id].wait()
         
+        if self.verbose > 0:
+            msg = "all gathering jobs finished"
+            sys.stdout.write("%s\n" % msg)
+            
+            
     def step4(self):
         self.setPathsToInputFiles(4)
         cwd = self.beginStep(4)
         self.alignCleanedReads()
-        self.summarizeAlignments()
+        self.gatherSamplesPerLane()
         self.endStep(4, cwd)
         
         
     def localRealignment(self):
         pass
+    
     
     def baseQualityScoreRecalibration(self):
         pass
@@ -1029,7 +1122,7 @@ class Gbs(object):
             self.step3()
             
         if "4" in self.lSteps:
-            # map: parallelize over samples
+            # align: parallelize over samples
             self.step4()
             
         if "5" in self.lSteps:

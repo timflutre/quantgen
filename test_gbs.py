@@ -586,6 +586,14 @@ class TestGbs(object):
         return dictFile
     
     
+    def makeBwaIndexFiles(self, refFile):
+        cmd = "bwa index"
+        cmd += " -p %s" % refFile.split(".fa.gz")[0]
+        cmd +=" %s" % refFile
+        cmd += " >& bwa_index.log"
+        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        
+        
     def launchProg(self, options):
         """
         Launch gbs.py.
@@ -638,6 +646,7 @@ class TestGbs(object):
                                                   nbReads, lenRead)
         adpFile, dAdps = self.makeAdapterFile()
         dictFile = self.makeDictFile(refGen, refFile)
+        self.makeBwaIndexFiles(refFile)
         options.append("--info")
         options.append(infoFile)
         
