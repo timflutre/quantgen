@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.1" # http://semver.org/
+progVersion = "0.1.2" # http://semver.org/
 
 
 class TestGbs(object):
@@ -163,7 +163,7 @@ class TestGbs(object):
         4 individuals: ind1 (mother), ind2 (father), ind3 (child), ind4 (child)
         2 lanes, 6 samples (3 individuals per lane, parents present in both)
         """
-        infoFile = "testGbs_info.txt"
+        infoFile = "info.txt"
         lane2info = {}
         
         infoHandle = open(infoFile, "w")
@@ -511,8 +511,8 @@ class TestGbs(object):
         
         
     def saveRefGenome(self, refGen):
-        refFile = "refgenome.fa.gz"
-        refHandle = gzip.open(refFile, "w")
+        refFile = "refgenome.fa"
+        refHandle = open(refFile, "w")
         for chrRec in refGen:
             refHandle.write(chrRec.format("fasta"))
         refHandle.close()
@@ -553,7 +553,7 @@ class TestGbs(object):
     
     
     def makeAdapterFile(self):
-        adpFile = "testGbs_adp.txt"
+        adpFile = "adapters.txt"
         dAdps = {}
         
         dAdps["adpFwd"] = "CTCTTCCGATCT"
@@ -586,6 +586,21 @@ class TestGbs(object):
         return dictFile
     
     
+    def makeBwaIndexFiles(self, refFile):
+        cmd = "bwa index"
+        cmd += " -p %s" % refFile.split(".fa")[0]
+        cmd +=" %s" % refFile
+        cmd += " >& bwa_index.log"
+        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        
+        
+    def makeFaIndexFile(self, refFile):
+        cmd = "samtools faidx"
+        cmd += " %s" % refFile
+        cmd += " >& faidx.log"
+        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        
+        
     def launchProg(self, options):
         """
         Launch gbs.py.
@@ -638,6 +653,8 @@ class TestGbs(object):
                                                   nbReads, lenRead)
         adpFile, dAdps = self.makeAdapterFile()
         dictFile = self.makeDictFile(refGen, refFile)
+        self.makeBwaIndexFiles(refFile)
+        self.makeFaIndexFile(refFile)
         options.append("--info")
         options.append(infoFile)
         
