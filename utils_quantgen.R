@@ -544,7 +544,7 @@ simul.coalescent <- function(nb.inds=100,
                              nb.pops=1,
                              mig.rate=5,
                              verbose=0){
-  library(scrm)
+  suppressPackageStartupMessages(library(scrm))
   stopifnot(nb.inds > nb.pops)
 
   if(is.null(ind.ids))
@@ -727,7 +727,7 @@ estim.kinship <- function(X, mafs=NULL, thresh=0.01,
 ##' @author Timothée Flutre
 estim.ld <- function(X, K=NULL, pops=NULL, snp.coords,
                      only.chr=NULL, only.pop=NULL, verbose=0){
-  library(LDcorSV)
+  suppressPackageStartupMessages(library(LDcorSV))
   stopifnot(is.matrix(X),
             ! is.null(dimnames(X)),
             sum(is.na(X)) == 0,
@@ -811,8 +811,9 @@ estim.ld <- function(X, K=NULL, pops=NULL, snp.coords,
 ##' @author Timothée Flutre
 simul.animal.model <- function(n=300, mu=4, P=1, b=2, nb.snps=1000, maf=0.3,
                                A=NULL, sigma2=5, lambda=3){
-  library(MASS)
-  library(Matrix)
+  suppressPackageStartupMessages(library(MASS))
+  suppressPackageStartupMessages(library(Matrix))
+
   animal.ids <- sprintf(fmt=paste0("ind%0", floor(log10(n))+1, "i"), 1:n)
   X <- matrix(data=rnorm(n=n), nrow=n, ncol=P)
   b <- matrix(data=rep(b, P), nrow=P, ncol=1)
@@ -860,7 +861,7 @@ simul.bslmm <- function(X, Q=1, pi=NULL, h=NULL, rho=NULL, seed=NULL){
             sum(is.na(X)) == 0,
             ! is.null(rownames(X)),
             ! is.null(colnames(X)))
-  library(MASS)
+  suppressPackageStartupMessages(library(MASS))
   if(! is.null(seed))
     set.seed(seed)
 
