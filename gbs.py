@@ -47,7 +47,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.6" # http://semver.org/
+progVersion = "0.1.7" # http://semver.org/
 
 
 class TimUtils(object):
@@ -249,7 +249,7 @@ class GbsSample(object):
         if len(lFilesR2) == 1:
             self.dDemultiplexedFastqFiles["R2"] = lFilesR2[0]
             
-    def clean(self, adpFwd, adpRev, outDir, iJobGroup):
+    def clean(self, adpFwd, adpRev, outDir, iJobGroup, useBashScript=True):
         cmd = "time cutadapt"
         cmd += " -a %s" % reverse_complement(str(adpFwd))
         cmd += " -A %s%s" % (reverse_complement(str(self.barcode)), adpRev)
@@ -267,7 +267,20 @@ class GbsSample(object):
             cmd += " %s" % self.dDemultiplexedFastqFiles["R2"]
         # print(cmd) # debug
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(iJobGroup.id, jobName, cmd)
+        iJob = None
+        if useBashScript:
+            bashFile = "job_%s_%s.bash" % (iJobGroup.id, self.id)
+            bashHandle = open(bashFile, "w")
+            txt = "#!/usr/bin/env bash"
+            txt += "\ndate"
+            txt += "\n%s" % cmd
+            txt += "\ndate"
+            bashHandle.write("%s\n" % txt)
+            bashHandle.close()
+            os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
+            iJob = Job(iJobGroup.id, jobName, bashFile=bashFile)
+        else:
+            iJob = Job(iJobGroup.id, jobName, cmd)
         iJobGroup.insert(iJob)
         
     def setCleanedFastqFiles(self, pathToDir):
