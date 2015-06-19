@@ -10,6 +10,7 @@
 # TODO:
 # - check external tools are in PATH
 # - add option to ignore R2 files
+# - turn Job's classes into https://docs.python.org/2/tutorial/modules.html#packages
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -47,7 +48,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.7" # http://semver.org/
+progVersion = "0.1.8" # http://semver.org/
 
 
 class TimUtils(object):
@@ -249,17 +250,20 @@ class GbsSample(object):
         if len(lFilesR2) == 1:
             self.dDemultiplexedFastqFiles["R2"] = lFilesR2[0]
             
-    def clean(self, adpFwd, adpRev, outDir, iJobGroup, useBashScript=True):
+    def clean(self, adpR1, adpR2, outDir, iJobGroup, useBashScript=True):
+        """
+        https://cutadapt.readthedocs.org/en/stable/
+        """
         cmd = "time cutadapt"
-        cmd += " -a %s" % reverse_complement(str(adpFwd))
-        cmd += " -A %s%s" % (reverse_complement(str(self.barcode)), adpRev)
+        cmd += " -a %s" % reverse_complement(str(adpR2)) # to be removed from R1 reads
+        cmd += " -A %s" % reverse_complement(str(adpR1) + str(self.barcode)) # idem from R2 reads
         cmd += " -o %s/%s_clean_R1.fastq.gz" % (outDir, self.individual)
         cmd += " -p %s/%s_clean_R2.fastq.gz" % (outDir, self.individual)
-        cmd += " -e 0.2"
-        cmd += " -O 3"
-        cmd += " -m 35"
-        cmd += " -U 3"
-        cmd += " -q 20,20"
+        cmd += " -e 0.2" # error tolerance
+        cmd += " -O 3" # min overlap length btw reads and seq passed to -a/-A
+        cmd += " -m 35" # min read length
+        # cmd += " -U 3" # fixed nb of bases removed from starts of R2 reads
+        cmd += " -q 20,20" # quality trimming
         cmd += " --max-n 0.2"
         # cmd += " --maximum-length 150"
         cmd += " %s" % self.dDemultiplexedFastqFiles["R1"]
@@ -283,6 +287,14 @@ class GbsSample(object):
             iJob = Job(iJobGroup.id, jobName, cmd)
         iJobGroup.insert(iJob)
         
+    def cleanQc(self, outDir, iJobGroup):
+        for Ri in ["R1", "R2"]:
+            cmd = "time fastqc -o %s %s/%s_clean_%s.fastq.gz" \
+                  % (outDir, outDir, self.individual, Ri)
+            jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
+            iJob = Job(iJobGroup.id, jobName, cmd)
+            iJobGroup.insert(iJob)
+            
     def setCleanedFastqFiles(self, pathToDir):
         lFilesR1 = glob.glob("%s/%s_clean_R1.fastq.gz" % (pathToDir,
                                                           self.individual))
@@ -339,12 +351,6 @@ class GbsSample(object):
         txt += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum(5), self.id)
         txt += " -" # stdin
         bashHandle.write("%s\n" % txt)
-        # tmpBamFile = "tmp_%s.bam" % self.id
-        # txt = " | samtools fixmate"
-        # txt += " -O bam"
-        # txt += " -" # stdin
-        # txt += " ${outDir}/%s" % tmpBamFile
-        # bashHandle.write("%s\n" % txt)
         
         # update the header with @SQ from dictFile
         tmpHeaderFile = "tmp_%s_header.sam" % self.id
@@ -533,9 +539,13 @@ class GbsLane(object):
         for sampleId,iSample in self.dSamples.items():
             iSample.setDemultiplexedFastqFiles("%s/%s" % (pathToDir, self.id))
             
-    def clean(self, adpFwd, adpRev, outDir, iJobGroup):
+    def clean(self, adpR1, adpR2, outDir, iJobGroup):
         for sampleId,iSample in self.dSamples.items():
-            iSample.clean(adpFwd, adpRev, outDir, iJobGroup)
+            iSample.clean(adpR1, adpR2, outDir, iJobGroup)
+            
+    def cleanQc(self, outDir, iJobGroup):
+        for sampleId,iSample in self.dSamples.items():
+            iSample.cleanQc(outDir, iJobGroup)
             
     def setCleanedFastqFiles(self, pathToDir):
         for sampleId,iSample in self.dSamples.items():
@@ -734,8 +744,8 @@ class Gbs(object):
         msg += "\t\t fastq_file_R2 (one per lane, gzip-compressed)\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
-        msg += "\t\tname: at least 'adpFwd' (also 'adpRev' if paired-end)\n"
-        msg += "\t\tsequence: from 5' to 3'\n"
+        msg += "\t\tname: at least 'adpR1' (also 'adpR2' if paired-end)\n"
+        msg += "\t\tsequence: from 5' (left) to 3' (right)\n"
         msg += "      --enz\tname of the restriction enzyme (default=ApeKI)\n"
         msg += "      --ref\tpath to the prefix of files for the reference genome\n"
         msg += "\t\t'/data/Atha_v2' for '/data/Atha_v2.fa', '/data/Atha_v2.bwt', etc\n"
@@ -1140,8 +1150,8 @@ class Gbs(object):
                 raise ValueError(msg)
             self.adapters[tokens[0]] = tokens[1]
         adpHandle.close()
-        if "adpFwd" not in self.adapters or "adpRev" not in self.adapters:
-            msg = "'adpFwd' or 'adpRev' missing from adapter file '%s'" % \
+        if "adpR1" not in self.adapters or "adpR2" not in self.adapters:
+            msg = "'adpR1' or 'adpR2' missing from adapter file '%s'" % \
                   self.adpFile
             raise ValueError(msg)
         
@@ -1202,7 +1212,7 @@ class Gbs(object):
         for laneId,iLane in self.dLanes.items():
             outDir = "%s/%s" % (self.lDirSteps[2], laneId)
             os.mkdir(outDir)
-            iLane.clean(self.adapters["adpFwd"], self.adapters["adpRev"],
+            iLane.clean(self.adapters["adpR1"], self.adapters["adpR2"],
                         outDir, iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
@@ -1213,11 +1223,38 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             
             
+    def launchFastqcOnCleanFastqFiles(self):
+        if self.verbose > 0:
+            msg = "assess quality per sample ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        groupJobId = self.makeGroupJobId("%s_gbs-step3-fastqc" % self.projectId)
+        if self.verbose > 0:
+            msg = "groupJobId=%s" % groupJobId
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        self.jobManager.insert(iJobGroup)
+        
+        for laneId,iLane in self.dLanes.items():
+            outDir = "%s/%s" % (self.lDirSteps[2], laneId)
+            iLane.cleanQc(outDir, iJobGroup)
+            
+        self.jobManager[iJobGroup.id].submit()
+        self.jobManager[iJobGroup.id].wait()
+        
+        if self.verbose > 0:
+            msg = "all quality jobs finished"
+            sys.stdout.write("%s\n" % msg)
+            
+            
     def step3(self):
         self.loadAdpFile()
         self.setPathsToInputFiles(3)
         cwd = self.beginStep(3)
         self.cleanDemultiplexedFiles()
+        self.launchFastqcOnCleanFastqFiles()
         self.endStep(3, cwd)
         
         

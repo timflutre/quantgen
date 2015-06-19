@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.2" # http://semver.org/
+progVersion = "0.1.3" # http://semver.org/
 
 
 class TestGbs(object):
@@ -553,11 +553,14 @@ class TestGbs(object):
     
     
     def makeAdapterFile(self):
+        """
+        Illumina's universal adapters, written from 5' (left) to 3' (right).
+        """
         adpFile = "adapters.txt"
         dAdps = {}
         
-        dAdps["adpFwd"] = "CTCTTCCGATCT"
-        dAdps["adpRev"] = "AGATCGGAAGAG"
+        dAdps["adpR1"] = "CTCTTCCGATCT"
+        dAdps["adpR2"] = dAdps["adpR1"]
         
         adpHandle = open(adpFile, "w")
         for adp,seq in dAdps.items():
