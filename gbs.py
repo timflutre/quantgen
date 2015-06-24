@@ -10,7 +10,8 @@
 # TODO:
 # - check external tools are in PATH
 # - add option to ignore R2 files
-# - turn Job's classes into https://docs.python.org/2/tutorial/modules.html#packages
+# - add option to give VCF of known indels
+# - turn Job & co into https://docs.python.org/2/tutorial/modules.html#packages
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -32,6 +33,7 @@ import glob
 import random
 import string
 import stat
+import xml.dom.minidom
 # import sqlite3
 # import numpy as np
 # import scipy as sp
@@ -48,7 +50,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.8" # http://semver.org/
+progVersion = "0.1.9" # http://semver.org/
 
 
 class TimUtils(object):
@@ -119,6 +121,7 @@ class JobGroup(object):
         self.queue = queue
         self.checkQueue()
         self.lJobs = [] # filled via self.insert()
+        self.lJobNames = [] # filled via self.insert()
         self.lJobIds = [] # filled via self.submit()
         
     def checkScheduler(self):
@@ -138,32 +141,55 @@ class JobGroup(object):
         self.lJobs.append(iJob)
         self.lJobs[-1].scheduler = self.scheduler
         self.lJobs[-1].queue = self.queue
+        self.lJobNames.append(iJob.name)
         
     def submit(self):
         for i in range(len(self.lJobs)):
             jobId = self.lJobs[i].submit()
             self.lJobIds.append(jobId)
             
-    def getUnfinishedJobIds(self):
+    def getUnfinishedJobIds(self, method="oneliner"):
+        if method not in ["oneliner", "xml"]:
+            msg = "unknown method '%s'" % method
+            raise ValueError(msg)
+        
         lUnfinishedJobIds = []
         cmd = "qstat -u '%s'" % os.getlogin()
-        cmd += " | grep '%s'" % self.queue
-        cmd += " | awk '{print $1}'"
-        # print(cmd) # debug
-        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
-        # p1 = Popen(shlex.split("qstat -u '%s'" % os.getlogin()), stdout=PIPE)
-        # p2 = Popen(shlex.split("grep '%s'" % self.queue), stdin=p1.stdout,
-        #            stdout=PIPE)
-        # p3 = Popen(shlex.split("awk '{print $1}'"), stdin=p2.stdout,
-        #            stdout=PIPE)
-        # p = p3.communicate()
-        # print(p) # debug
-        p = p[0].split("\n")[:-1]
-        lUnfinishedJobIds = [int(jobId) for jobId in p
-                             if int(jobId) in self.lJobIds]
+        cmd += " -q %s" % self.queue
+        
+        if method == "oneliner":
+            cmd += " | sed 1,2d"
+            cmd += " | awk '{print $1}'"
+            # print(cmd) # debug
+            p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+            p = p[0].split("\n")[:-1]
+            # print(p) # debug
+            lUnfinishedJobIds = [int(jobId) for jobId in p
+                                 if int(jobId) in self.lJobIds]
+        elif method == "xml": # http://stackoverflow.com/a/26104540/597069
+            cmd += " -r -xml"
+            f = os.popen(cmd)
+            dom = xml.dom.minidom.parse(f)
+            jobs = dom.getElementsByTagName('job_info')
+            print(jobs) # debug
+            for job in jobs:
+                jobname = job.getElementsByTagName('JB_name')[0].childNodes[0].data
+                jobown = job.getElementsByTagName('JB_owner')[0].childNodes[0].data
+                jobstate = job.getElementsByTagName('state')[0].childNodes[0].data
+                jobnum = job.getElementsByTagName('JB_job_number')[0].childNodes[0].data
+                if jobname in self.lJobNames:
+                    lUnfinishedJobIds.append(jobnum)
+            print(lUnfinishedJobIds) # debug
+            
         return lUnfinishedJobIds
     
-    def wait(self):
+    def wait(self, verbose=1):
+        if verbose > 0:
+            msg = "nb of jobs: %i (first=%i last=%i)" % (len(self.lJobIds),
+                                                         self.lJobIds[0],
+                                                         self.lJobIds[-1])
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
         time.sleep(2)
         if len(self.getUnfinishedJobIds()) == 0:
             return
@@ -397,11 +423,13 @@ class GbsSample(object):
         cmd1 += " -T RealignerTargetCreator"
         cmd1 += " -R %s.fa" % pathToPrefixRefGenome
         cmd1 += " -I %s" % self.initialBamFile
+        # cmd1 += " --known indels.vcf"
         cmd1 += " -o %s/%s.intervals" % (outDir, self.id)
         cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
         cmd2 += " -T IndelRealigner"
         cmd2 += " -R %s.fa" % pathToPrefixRefGenome
         cmd2 += " -I %s" % self.initialBamFile
+        # cmd2 += " --known indels.vcf"
         cmd2 += " -targetIntervals %s/%s.intervals" % (outDir, self.id)
         cmd2 += " -o %s/%s_realigned.bam" % (outDir, self.id)
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
@@ -639,7 +667,7 @@ class GbsInd(object):
         cmd += " --variant_index_parameter 128000"
         if knownFile != "":
             cmd += " --known %s" % knownFile
-        cmd += " -o %s/%s.g.vcf" % (outDir, self.id)
+        cmd += " -o %s/%s.g.vcf.gz" % (outDir, self.id)
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
         iJob = None
         if useBashScript:
@@ -752,7 +780,7 @@ class Gbs(object):
         msg += "\t\tthese files are produced via 'bwa index ...'\n"
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
         msg += "      --jvm\tmemory given to the Java Virtual Machine (default=4, in Gb)\n"
-        msg += "\t\tused in steps 4 and 5 for Picard and GATK\n"
+        msg += "\t\tused in steps 4, 5 and 6 for Picard and GATK\n"
         msg += "      --known\tpath to a VCF file with known sites (e.g. from dbSNP)\n"
         msg += "\n"
         msg += "Examples:\n"
@@ -1108,7 +1136,7 @@ class Gbs(object):
             iLane.initQc(self.lDirSteps[0], iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait()
+        self.jobManager[iJobGroup.id].wait(self.verbose)
         
         if self.verbose > 0:
             msg = "all quality jobs finished"
@@ -1321,7 +1349,7 @@ class Gbs(object):
         
     def localRealignment(self):
         if self.verbose > 0:
-            msg = "locally realign reads per lane ..."
+            msg = "locally realign reads per sample ..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
@@ -1349,7 +1377,7 @@ class Gbs(object):
             
     def baseQualityRecalibration(self):
         if self.verbose > 0:
-            msg = "recalibrate base qualities per lane ..."
+            msg = "recalibrate base qualities per sample ..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
@@ -1388,7 +1416,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step5-indcall" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step6-indcall" % self.projectId)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1396,9 +1424,14 @@ class Gbs(object):
         iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
         self.jobManager.insert(iJobGroup)
         
-        for indId,iInd in self.dInds.items():
+        lIndIds = self.dInds.keys()
+        lIndIds.sort()
+        for i,indId in enumerate(lIndIds):
+            iInd = self.dInds[indId]
             iInd.variantCalling(self.memJvm, self.pathToPrefixRefGenome,
                                 self.knownFile, self.lDirSteps[5], iJobGroup)
+            if i == 2:
+                break
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait()
@@ -1414,7 +1447,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step5-joincall" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step6-joincall" % self.projectId)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1425,11 +1458,13 @@ class Gbs(object):
         cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd += " -T GenotypeGVCFs"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
-        lInds = self.dInds.keys()
-        lInds.sort()
-        for indId in lInds:
-            cmd += " --variant %s/%s.g.vcf" % (self.lDirSteps[5], indId)
-        cmd += " -o %s/%s_raw.vcf" % (self.lDirSteps[5], self.projectId)
+        lIndIds = self.dInds.keys()
+        lIndIds.sort()
+        for i,indId in enumerate(lIndIds):
+            cmd += " --variant %s/%s.g.vcf.gz" % (self.lDirSteps[5], indId)
+            if i == 2:
+                break
+        cmd += " -o %s/%s_raw.vcf.gz" % (self.lDirSteps[5], self.projectId)
         if self.verbose > 1:
             print(cmd)
         jobName = "stdout_%s" % (iJobGroup.id)
@@ -1450,7 +1485,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step5-recalibcall" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step6-recalibcall" % self.projectId)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1461,7 +1496,7 @@ class Gbs(object):
         cmd1 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd1 += " -T VariantRecalibrator"
         cmd1 += " -R %s.fa" % self.pathToPrefixRefGenome
-        cmd1 += " -input %s/%s_raw.vcf" % (self.lDirSteps[5], self.projectId)
+        cmd1 += " -input %s/%s_raw.vcf.gz" % (self.lDirSteps[5], self.projectId)
         # cmd1 += " -resource:%s" % TODO
         cmd1 += " -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR -an InbreedingCoeff"
         cmd1 += " -mode BOTH"
@@ -1473,11 +1508,11 @@ class Gbs(object):
         cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd2 += " -T ApplyRecalibration"
         cmd2 += " -R %s.fa" % self.pathToPrefixRefGenome
-        cmd2 += " -input %s/%s_raw.vcf" % (self.lDirSteps[5], self.projectId)
+        cmd2 += " -input %s/%s_raw.vcf.gz" % (self.lDirSteps[5], self.projectId)
         cmd2 += " -tranchesFile %s/%s.tranches" % (self.lDirSteps[5], self.projectId)
         cmd2 += " -recalFile %s/%s.recal" % (self.lDirSteps[5], self.projectId)
         cmd2 += " -mode BOTH"
-        cmd2 += " -o %s/%s.vcf" % (self.lDirSteps[5], self.projectId)
+        cmd2 += " -o %s/%s.vcf.gz" % (self.lDirSteps[5], self.projectId)
         if self.verbose > 1:
             print(cmd2)
         cmd = "%s; %s" % (cmd1, cmd2)
@@ -1506,27 +1541,21 @@ class Gbs(object):
         self.loadInfoFile()
         
         if "1" in self.lSteps:
-            # QC: parallelize over lanes
             self.step1()
             
         if "2" in self.lSteps:
-            # demultiplex: parallelize over lanes
             self.step2()
             
         if "3" in self.lSteps:
-            # clean: parallelize over samples
             self.step3()
             
         if "4" in self.lSteps:
-            # align: parallelize over samples
             self.step4()
             
         if "5" in self.lSteps:
-            # recalibrate: parallelize over lanes
             self.step5()
             
         if "6" in self.lSteps:
-            # genotype: parallelize over individuals
             self.step6()
             
             
