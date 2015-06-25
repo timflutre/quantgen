@@ -8,10 +8,10 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # TODO:
-# - check external tools are in PATH
 # - add option to ignore R2 files
 # - add option to give VCF of known indels
 # - turn Job & co into https://docs.python.org/2/tutorial/modules.html#packages
+# - try sgeparse https://pypi.python.org/pypi/sgeparse https://github.com/mindriot101/sgeparse
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -23,7 +23,7 @@ import os
 import getopt
 import time
 import datetime
-from subprocess import Popen, PIPE
+import subprocess
 import math
 import gzip
 import shlex
@@ -50,7 +50,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.9" # http://semver.org/
+progVersion = "0.1.10" # http://semver.org/
 
 
 class TimUtils(object):
@@ -73,7 +73,20 @@ class TimUtils(object):
         return "".join(random.choice(string.letters+string.digits) \
                        for i in xrange(length))
     
-    
+    @staticmethod
+    def isProgramInPath(prgName):
+        args = ["which", prgName]
+        try:
+            p = subprocess.check_output(args, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError, e:
+            # msg = "can't find '%s' in PATH" % prgName
+            # raise ValueError(msg)
+            return False
+        else:
+            prgPath = p.rstrip()
+            return True
+        
+        
 class Job(object):
     
     def __init__(self, groupId, name, cmd=None, bashFile=None):
@@ -105,7 +118,7 @@ class Job(object):
                   % self.name
             raise ValueError(msg)
         
-        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE).communicate()
         p = p[0].split()[2]
         self.id = int(p)
         
@@ -131,7 +144,7 @@ class JobGroup(object):
         
     def checkQueue(self):
         if self.scheduler == "SGE":
-            p = Popen(["qconf", "-sql"], shell=False, stdout=PIPE).communicate()
+            p = subprocess.Popen(["qconf", "-sql"], shell=False, stdout=subprocess.PIPE).communicate()
             p = p[0].split("\n")
             if self.queue not in p:
                 msg = "unknown queue '%s'" % self.queue
@@ -161,7 +174,7 @@ class JobGroup(object):
             cmd += " | sed 1,2d"
             cmd += " | awk '{print $1}'"
             # print(cmd) # debug
-            p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE).communicate()
             p = p[0].split("\n")[:-1]
             # print(p) # debug
             lUnfinishedJobIds = [int(jobId) for jobId in p
@@ -901,7 +914,24 @@ class Gbs(object):
         for i in range(len(self.lDirSteps)):
             self.lDirSteps[i] = "%s/%s_%s" % (os.getcwd(), self.projectId,
                                               self.lDirSteps[i])
+        if "1" in self.lSteps:
+            if not TimUtils.isProgramInPath("fastqc"):
+                msg = "ERROR: can't find 'fastqc' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+        if "2" in self.lSteps:
+            if not TimUtils.isProgramInPath("demultiplex.py"):
+                msg = "ERROR: can't find 'demultiplex.py' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
         if "3" in self.lSteps:
+            if not TimUtils.isProgramInPath("cutadapt"):
+                msg = "ERROR: can't find 'cutadapt' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
             if self.adpFile == "":
                 msg = "ERROR: missing compulsory option --adp"
                 sys.stderr.write("%s\n\n" % msg)
@@ -913,6 +943,21 @@ class Gbs(object):
                 self.help()
                 sys.exit(1)
         if "4" in self.lSteps:
+            if not TimUtils.isProgramInPath("bwa"):
+                msg = "ERROR: can't find 'bwa' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if not TimUtils.isProgramInPath("samtools"):
+                msg = "ERROR: can't find 'samtools' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if not TimUtils.isProgramInPath("picard.jar"):
+                msg = "ERROR: can't find 'picard.jar' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
             if self.dictFile == "":
                 msg = "ERROR: missing compulsory option --dict"
                 sys.stderr.write("%s\n\n" % msg)
@@ -925,6 +970,23 @@ class Gbs(object):
                 sys.exit(1)
             if os.path.dirname(self.dictFile) == '':
                 self.dictFile = "%s/%s" % (os.getcwd(), self.dictFile)
+        if "5" in self.lSteps:
+            if not TimUtils.isProgramInPath("GenomeAnalysisTK.jar"):
+                msg = "ERROR: can't find 'GenomeAnalysisTK.jar' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if self.knownFile != "" and not os.path.exists(self.knownFile):
+                msg = "ERROR: can't find file %s" % self.knownFile
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+        if "6" in self.lSteps:
+            if not TimUtils.isProgramInPath("GenomeAnalysisTK.jar"):
+                msg = "ERROR: can't find 'GenomeAnalysisTK.jar' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
         if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps:
             if self.pathToPrefixRefGenome == "":
                 msg = "ERROR: missing compulsory option --ref"
@@ -944,12 +1006,6 @@ class Gbs(object):
             if os.path.dirname(self.pathToPrefixRefGenome) == '':
                 self.pathToPrefixRefGenome = "%s/%s" % (os.getcwd(),
                                                         self.pathToPrefixRefGenome)
-        if "5" in self.lSteps:
-            if self.knownFile != "" and not os.path.exists(self.knownFile):
-                msg = "ERROR: can't find file %s" % self.knownFile
-                sys.stderr.write("%s\n\n" % msg)
-                self.help()
-                sys.exit(1)
                 
                 
     def loadHeaderInfoFile(self, line):
@@ -1430,8 +1486,8 @@ class Gbs(object):
             iInd = self.dInds[indId]
             iInd.variantCalling(self.memJvm, self.pathToPrefixRefGenome,
                                 self.knownFile, self.lDirSteps[5], iJobGroup)
-            if i == 2:
-                break
+            # if i == 2:
+            #     break
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait()
@@ -1462,8 +1518,8 @@ class Gbs(object):
         lIndIds.sort()
         for i,indId in enumerate(lIndIds):
             cmd += " --variant %s/%s.g.vcf.gz" % (self.lDirSteps[5], indId)
-            if i == 2:
-                break
+            # if i == 2:
+            #     break
         cmd += " -o %s/%s_raw.vcf.gz" % (self.lDirSteps[5], self.projectId)
         if self.verbose > 1:
             print(cmd)
@@ -1586,8 +1642,8 @@ if __name__ == "__main__":
                                        math.floor(endTime - startTime))
         msg += " (%s" % str(runLength)
         if "linux" in sys.platform:
-            p = Popen(["grep", "VmHWM", "/proc/%s/status" % os.getpid()],
-                      shell=False, stdout=PIPE).communicate()
+            p = subprocess.Popen(["grep", "VmHWM", "/proc/%s/status" % os.getpid()],
+                      shell=False, stdout=subprocess.PIPE).communicate()
             maxMem = p[0].split()[1]
             msg += "; %s kB)" % maxMem
         else:
