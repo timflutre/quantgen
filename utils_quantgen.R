@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.11.0" # http://semver.org/
+utils_quantgen.version <- "1.12.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -1577,6 +1577,25 @@ init.plates <- function(n, nrow, ncol, names){
                            ncol=ncol[i],
                            dimnames=list(LETTERS[1:nrow[i]], 1:ncol[i])))
   }
+  return(plates)
+}
+
+##' Reads each file into a data frame and gather them into a list.
+##'
+##'
+##' @param files vector
+##' @return list
+##' @author Timothée Flutre
+load.plates <- function(files){
+  plates <- list()
+
+  for(i in seq_along(files)){
+    plate.name <- strsplit(x=basename(files[i]), split="\\.")[[1]][1]
+    plates[[plate.name]] <- read.csv(file=files[i], stringsAsFactors=FALSE,
+                                     row.names=1)
+    colnames(plates[[plate.name]]) <- as.character(1:ncol(plates[[plate.name]]))
+  }
+
   return(plates)
 }
 
