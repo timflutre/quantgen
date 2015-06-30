@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.12.1" # http://semver.org/
+utils_quantgen.version <- "1.13.0" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -1607,6 +1607,30 @@ load.plates <- function(files, verbose=1){
   }
 
   return(plates)
+}
+
+##' Plot the arrangement of samples on a given plate.
+##'
+##'
+##' @param plate matrix
+##' @param main string containing the text for the main title
+##' @return nothing
+##' @author Timothée Flutre
+plot.plate <- function(plate, main="Plate"){
+  stopifnot(is.matrix(plate))
+
+  par(mar=c(3, 3, 5, 1) + 0.1)
+  plot(x=0, y=0, type="n",
+       xlim=c(0.7, ncol(plate)+0.3),
+       ylim=c(0.7, nrow(plate)+0.3),
+       main="", xlab="", ylab="", xaxt="n", yaxt="n")
+  mtext(text=main, side=3, line=3, cex=2, font=2)
+  axis(side=3, at=1:ncol(plate), labels=colnames(plate))
+  axis(side=2, at=1:nrow(plate), labels=rev(rownames(plate)), las=1)
+
+  text(x=rep(1:ncol(plate), each=nrow(plate)),
+       y=rep(nrow(plate):1, ncol(plate)),
+       c(plate))
 }
 
 ##' Lengthen a "wide" plate into 3 columns for easier processing.
