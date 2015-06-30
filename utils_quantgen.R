@@ -18,7 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with this program. If not, see <http://www.gnu.org/licenses/>.
 
-utils_quantgen.version <- "1.12.0" # http://semver.org/
+utils_quantgen.version <- "1.12.1" # http://semver.org/
 
 ##' Read a large file as fast as possible
 ##'
@@ -1560,40 +1560,50 @@ stats.all.pair.aligns <- function(aligns, nb.sequences){
 							nmismatchs=nmismatchs, ninss=ninss, ndels=ndels))
 }
 
-##' Initialize plates as data.frames with missing data.
+##' Initialize plates as matrices with missing data.
 ##'
 ##' Useful for molecular biologists.
 ##' @param n number of plates
 ##' @param nrow vector of number of rows for each plate
 ##' @param ncol vector of number of columns for each plate
 ##' @param names vector of names for each plate
-##' @return list of data.frame, one per plate, in the "wide" format
+##' @return list of matrices, one per plate, in the "wide" format
 ##' @author Timothée Flutre
 init.plates <- function(n, nrow, ncol, names){
   plates <- list()
-  for(i in 1:n){
+
+  for(i in 1:n)
     plates[[names[i]]] <-
-      as.data.frame(matrix(data=NA, nrow=nrow[i],
-                           ncol=ncol[i],
-                           dimnames=list(LETTERS[1:nrow[i]], 1:ncol[i])))
-  }
+      matrix(data=NA, nrow=nrow[i],
+             ncol=ncol[i],
+             dimnames=list(LETTERS[1:nrow[i]], 1:ncol[i]))
+
   return(plates)
 }
 
-##' Reads each file into a data frame and gather them into a list.
+##' Read each file into a matrix and gather them into a list.
 ##'
-##'
-##' @param files vector
-##' @return list
+##' Useful for molecular biologists.
+##' @param files vector of paths to csv file, one per plate
+##' @param verbose verbosity level (0/default=1)
+##' @return list of matrices, one per plate, in the "wide" format
 ##' @author Timothée Flutre
-load.plates <- function(files){
+load.plates <- function(files, verbose=1){
   plates <- list()
 
   for(i in seq_along(files)){
     plate.name <- strsplit(x=basename(files[i]), split="\\.")[[1]][1]
-    plates[[plate.name]] <- read.csv(file=files[i], stringsAsFactors=FALSE,
-                                     row.names=1)
-    colnames(plates[[plate.name]]) <- as.character(1:ncol(plates[[plate.name]]))
+    plate <- read.csv(file=files[i], stringsAsFactors=FALSE,
+                      row.names=1)
+    plate <- as.matrix(plate)
+    colnames(plate) <- as.character(1:ncol(plate))
+    plate[plate == ""] <- NA
+    if(verbose > 0){
+      write(paste0(plate.name, ": ", sum(is.na(plate)),
+                   " missing data"),
+            stdout())
+    }
+    plates[[plate.name]] <- plate
   }
 
   return(plates)
@@ -1602,17 +1612,19 @@ load.plates <- function(files){
 ##' Lengthen a "wide" plate into 3 columns for easier processing.
 ##'
 ##' Useful for molecular biologists.
-##' @param plate data.frame of a plate in the "wide" format
+##' @param plate matrix of a plate in the "wide" format
 ##' @return data.frame of a plate in the "long" format (1 well per row)
 ##' @author Timothée Flutre
 lengthen.plate <- function(plate.w){
-  stopifnot(is.data.frame(plate.w),
+  stopifnot(is.matrix(plate.w),
             ! is.null(rownames(plate.w)),
             ! is.null(colnames(plate.w)))
+
   nb.samples <- nrow(plate.w) * ncol(plate.w)
   plate.l <- data.frame(sample=rep(NA, nb.samples),
-                      row=rep(NA, nb.samples),
-                      col=rep(NA, nb.samples))
+                        row=rep(NA, nb.samples),
+                        col=rep(NA, nb.samples))
+
   sample.id <- 1
   for(i in 1:nrow(plate.w)){
     for(j in 1:ncol(plate.w)){
@@ -1622,13 +1634,14 @@ lengthen.plate <- function(plate.w){
       sample.id <- sample.id + 1
     }
   }
+
   return(plate.l)
 }
 
 ##' Identify empty wells, if any, in a plate.
 ##'
 ##' Useful for molecular biologists.
-##' @param plates data.frame of a plate in the "wide" format
+##' @param plate.w matrix of a plate in the "wide" format
 ##' @return 2 column data.frame (row;col) corresponding to empty wells
 ##' @author Timothée Flutre
 empty.wells <- function(plate.w){
