@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.8.0" # http://semver.org/
+progVersion = "1.9.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -63,7 +63,7 @@ class Demultiplex(object):
         self.inFqFile1 = ""
         self.inFqFile2 = ""
         self.tagFile = ""
-        self.outFqPrefix = ""
+        self.outPrefix = ""
         self.method = "4a"
         self.dist = 20
         self.restrictEnzyme = None
@@ -76,6 +76,7 @@ class Demultiplex(object):
         self.lenRemainMotif = -1
         self.regexpRemainMotif = "" # remaining motif (as uncompiled regexp)
         self.patterns = {} # keys are individuals and values are tag+motif (as compiled regexp)
+        self.dInd2NbAssigned = {}
         
         
     def help(self):
@@ -106,6 +107,8 @@ class Demultiplex(object):
         msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 for unassigned, 1 for chimeras)\n"
         msg += "\t\tthe suffix will be based on \".fastq.gz\" (not \".fq\" because of FastQC)\n"
         msg += "\t\twill be compressed with gzip\n"
+        msg += "\t\tthis prefix will also be used for a gzipped text file\n"
+        msg += "\t\t counting assigned read pairs per individual\n"
         msg += "      --met\tmethod to assign pairs of reads to individuals via tags (default=4a)\n"
         msg += "\t\tonly forward strand is considered\n"
         msg += "\t\t1: assign pair if both reads start with the tag\n"
@@ -182,7 +185,7 @@ class Demultiplex(object):
             elif o == "--it":
                  self.tagFile = a
             elif o == "--ofqp":
-                 self.outFqPrefix = a
+                 self.outPrefix = a
             elif o == "--met":
                 self.method = a
             elif o == "--dist":
@@ -248,7 +251,7 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.outFqPrefix == "":
+        if self.outPrefix == "":
             msg = "ERROR: missing compulsory option --ofqp"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -327,6 +330,9 @@ class Demultiplex(object):
                 line = tagHandle.readline()
                 tokens = line.split()
             tagHandle.close()
+            
+        for ind in self.tags:
+            self.dInd2NbAssigned[ind] = 0
             
         if self.verbose > 0:
             msg = "nb of tags: %i" % len(self.tags)
@@ -598,11 +604,31 @@ class Demultiplex(object):
                     AssignedPairsOneTag += 1
                     idx1 = idx2
                 break
-                
+            
         if not self.clipIdx:
             idx1 = idx2 = 0
             
         return assigned, tagId, idx1, idx2, AssignedPairsTwoTags, AssignedPairsOneTag, chimera
+    
+    
+    def saveStatsPerInd(self):
+        outFile = "%s_stats-demultiplex.txt.gz" % self.outPrefix
+        outHandle = gzip.open(outFile, "w")
+        
+        txt = "ind"
+        txt += "\tbarcode"
+        txt += "\tassigned"
+        outHandle.write("%s\n" % txt)
+        
+        lInds = self.tags.keys()
+        lInds.sort()
+        for ind in lInds:
+            txt = "%s" % ind
+            txt += "\t%s" % self.tags[ind]
+            txt += "\t%i" % self.dInd2NbAssigned[ind]
+            outHandle.write("%s\n" % txt)
+            
+        outHandle.close()
         
         
     def demultiplexPairedReads(self):
@@ -691,9 +717,9 @@ class Demultiplex(object):
                 if ind not in dOutFqHandles:
                     dOutFqHandles[ind] = [
                         gzip.open("%s_%s_R1.fastq.gz" %
-                                  (self.outFqPrefix, ind), "w"),
+                                  (self.outPrefix, ind), "w"),
                         gzip.open("%s_%s_R2.fastq.gz" %
-                                  (self.outFqPrefix, ind), "w")]
+                                  (self.outPrefix, ind), "w")]
                 dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
                                             (read1_id,
                                              read1_seq[idx1:],
@@ -702,6 +728,7 @@ class Demultiplex(object):
                                             (read2_id,
                                              read2_seq[idx2:],
                                              read2_q[idx2:]))
+                self.dInd2NbAssigned[ind] += 1
             else: # chimera or unassigned
                 nbUnassignedPairs += 1
                 if chimera and self.findChimeras != "1":
@@ -709,9 +736,9 @@ class Demultiplex(object):
                     if "chimeras" not in dOutFqHandles:
                         dOutFqHandles["chimeras"] = [
                             gzip.open("%s_chimeras_R1.fastq.gz" %
-                                      self.outFqPrefix, "w"),
+                                      self.outPrefix, "w"),
                             gzip.open("%s_chimeras_R2.fastq.gz" %
-                                      self.outFqPrefix, "w")]
+                                      self.outPrefix, "w")]
                     dOutFqHandles["chimeras"][0].write("@%s\n%s\n+\n%s\n" %
                                                       (read1_id,
                                                        read1_seq,
@@ -724,9 +751,9 @@ class Demultiplex(object):
                     if "unassigned" not in dOutFqHandles:
                         dOutFqHandles["unassigned"] = [
                             gzip.open("%s_unassigned_R1.fastq.gz" %
-                                      self.outFqPrefix, "w"),
+                                      self.outPrefix, "w"),
                             gzip.open("%s_unassigned_R2.fastq.gz" %
-                                      self.outFqPrefix, "w")]
+                                      self.outPrefix, "w")]
                         
                     dOutFqHandles["unassigned"][0].write("@%s\n%s\n+\n%s\n" %
                                                          (read1_id,
@@ -741,6 +768,8 @@ class Demultiplex(object):
         inFqHandle2.close()
         [handle.close() for (ind,handles) in dOutFqHandles.items() \
          for handle in handles]
+        
+        self.saveStatsPerInd()
         
         if self.verbose > 0:
             msg = "total nb of read pairs: %i" % nbPairs
