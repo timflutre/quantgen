@@ -8,6 +8,7 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # TODO:
+# - check version of external programs
 # - add option to ignore R2 files
 # - add option to give VCF of known indels
 # - turn Job & co into https://docs.python.org/2/tutorial/modules.html#packages
@@ -50,7 +51,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.10" # http://semver.org/
+progVersion = "0.1.11" # http://semver.org/
 
 
 class TimUtils(object):
@@ -235,6 +236,103 @@ class JobManager(object):
         self.groupId2group[iJobGroup.id] = iJobGroup
         
         
+class SamtoolsFlagstat(object):
+    
+    @staticmethod
+    def initListStats():
+        lStats = []
+        lStats.append({"id": "total",
+                       "name": "total",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "second",
+                       "name": "secondary",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "suppl",
+                       "name": "supplimentary",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "dupl",
+                       "name": "duplicates",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "map",
+                       "name": "mapped",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "pairedseq",
+                       "name": "paired in sequencing",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "r1",
+                       "name": "read1",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "r2",
+                       "name": "read2",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "proppaired",
+                       "name": "properly paired",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "itmatemap",
+                       "name": "with itself and mate mapped",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "single",
+                       "name": "singletons",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "matediffchr",
+                       "name": "with mate mapped to a different chr",
+                       "qc.passed": None, "qc.failed": None})
+        lStats.append({"id": "matediffchrQ5",
+                       "name": "with mate mapped to a different chr (mapQ>=5)",
+                       "qc.passed": None, "qc.failed": None})
+        return lStats
+    
+    @staticmethod
+    def getHeaderBasicAlignStats():
+        lStats = SamtoolsFlagstat.initListStats()
+        txt = "%s.qc.passed" % lStats[0]["id"]
+        txt += "\t%s.qc.failed" % lStats[0]["id"]
+        for dStat in lStats[1:]:
+            txt += "\t%s.qc.passed" % dStat["id"]
+            txt += "\t%s.qc.failed" % dStat["id"]
+        return txt
+    
+    def __init__(self, inFile):
+        self.inFile = inFile
+        if not os.path.exists(self.inFile):
+            msg = "can't find file '%s'" % self.inFile
+            raise ValueError(msg)
+        self.lStats = SamtoolsFlagstat.initListStats()
+        self.load()
+        
+    def load(self):
+        inHandle = open(self.inFile, "r")
+        lines = inHandle.readlines()
+        inHandle.close()
+        
+        if len(lines) != 13:
+            print(lines)
+            msg = "file '%s' has %i lines instead of 13" % (self.inFile, len(lines))
+            raise ValueError(msg)
+        
+        for idx,dStat in enumerate(self.lStats):
+            if string.find(lines[idx], dStat["name"]) == -1:
+                print(lines[idx])
+                msg = "can't find '%s' on line %i of file '%s'" \
+                      % (dStat["name"], idx + 1, self.inFile)
+                raise ValueError(msg)
+            toks = lines[idx].split(" ")
+            if len(toks) < 4:
+                msg = "output format of 'samtools flagstat' may have changed"
+                msg += " for '%s' (lane %i)" % (dStat["name"], idx + 1)
+                raise ValueError(msg)
+            self.lStats[idx]["qc.passed"] = int(toks[0])
+            self.lStats[idx]["qc.failed"] = int(toks[2])
+            
+    def getTxtToWrite(self):
+        txt = "%i" % self.lStats[0]["qc.passed"]
+        txt += "\t%i" % self.lStats[0]["qc.failed"]
+        for dStat in self.lStats[1:]:
+            txt += "\t%i" % dStat["qc.passed"]
+            txt += "\t%i" % dStat["qc.failed"]
+        return txt
+    
+    
 class GbsSample(object):
     """
     Corresponds to some DNA present on a given lane. This DNA was extracted 
@@ -427,6 +525,15 @@ class GbsSample(object):
         iJob = Job(iJobGroup.id, jobName, bashFile=bashFile)
         iJobGroup.insert(iJob)
         
+    def saveSamtoolsFlagstat(self, inDir, outHandle):
+        inFile = "%s/flagstat_%s.txt" % (inDir, self.id)
+        iSf = SamtoolsFlagstat(inFile)
+        txt = "%s" % self.individual
+        txt += "\t%s" % self.flowcell
+        txt += "\t%s" % self.lane
+        txt += "\t%s" % iSf.getTxtToWrite()
+        outHandle.write("%s\n" % txt)
+        
     def setInitialBamFile(self, pathToDir):
         self.initialBamFile = "%s/%s.bam" % (pathToDir, self.id)
         
@@ -618,6 +725,10 @@ class GbsLane(object):
         iJob = Job(iJobGroup.id, jobName, cmd)
         iJobGroup.insert(iJob)
         
+    def saveSamtoolsFlagstat(self, inDir, outHandle):
+        for sampleId,iSample in self.dSamples.items():
+            iSample.saveSamtoolsFlagstat(inDir, outHandle)
+            
     def setInitialBamFiles(self, pathToDir):
         for sampleId,iSample in self.dSamples.items():
             iSample.setInitialBamFile("%s/%s" % (pathToDir, self.id))
@@ -1395,11 +1506,35 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             
             
+    def saveBasicAlignStats(self):
+        if self.verbose > 0:
+            msg = "save basic alignment statistics ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        outFile = "%s/%s_basic-align-stats.txt.gz" % (self.lDirSteps[3],
+                                                      self.projectId)
+        outHandle = gzip.open(outFile, "w")
+        
+        txt = "ind"
+        txt += "\tflowcell"
+        txt += "\tlane"
+        txt += "\t%s" % SamtoolsFlagstat.getHeaderBasicAlignStats()
+        outHandle.write("%s\n" % txt)
+        
+        for laneId,iLane in self.dLanes.items():
+            inDir = "%s/%s" % (self.lDirSteps[3], laneId)
+            iLane.saveSamtoolsFlagstat(inDir, outHandle)
+            
+        outHandle.close()
+        
+        
     def step4(self):
         self.setPathsToInputFiles(4)
         cwd = self.beginStep(4)
         self.alignCleanedReads()
         self.gatherSamplesPerLane()
+        self.saveBasicAlignStats()
         self.endStep(4, cwd)
         
         
