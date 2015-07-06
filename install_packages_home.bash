@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -588,6 +588,15 @@ if [ "$1" == "repet" ]; then
     tar -xzvf REPET_linux-x64-2.2.tar.gz
     cd REPET_linux-x64-2.2
     cp bin/* $HOME/bin
+fi
+
+if [ "$1" == "rpy2" ]; then
+    mkdir -p $1
+    cd $1
+    wget https://pypi.python.org/packages/source/r/rpy2/rpy2-2.6.0.tar.gz#md5=679898fbc832d4f05a5efcf1a7eb1a68
+    tar -xzvf rpy2-2.6.0.tar.gz
+    cd rpy2-2.6.0
+    python setup.py install --user
 fi
 
 if [ "$1" == "tabula" ]; then
