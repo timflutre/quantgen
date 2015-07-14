@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -330,22 +330,11 @@ if [ "$1" == "gsl" ]; then
     make install
 fi
 
-if [ "$1" == "latex2html" ]; then
-    mkdir -p $1
-    cd $1
-    wget http://mirrors.ctan.org/support/latex2html/latex2html-2012.tgz
-    tar -xzvf latex2html-2012.tgz
-    cd latex2html-2012
-    ./configure --prefix=$HOME
-    make
-    make install
-fi
-
-if [ "$1" == "help2man" ]; then
+if [ "$1" == "htslib" ]; then
     mkdir -p $1
     cd $1
     wget -O htslib-1.2.1.tar.bz2 --no-check-certificate https://github.com/samtools/htslib/releases/download/1.2.1/htslib-1.2.1.tar.bz2
-    tar -xvf htslib-1.2.1.tar.bz2 
+    tar -xvf htslib-1.2.1.tar.bz2
     cd htslib-1.2.1/
     ./configure --prefix=$HOME
     make
@@ -358,6 +347,29 @@ if [ "$1" == "help2man" ]; then
     wget http://mirror.ibcp.fr/pub/gnu/help2man/help2man-1.43.3.tar.gz
     tar -xzvf help2man-1.43.3.tar.gz
     cd help2man-1.43.3
+    ./configure --prefix=$HOME
+    make
+    make install
+fi
+
+if [ "$1" == "igv" ]; then
+    mkdir -p $1
+    cd $1
+    # wget https://github.com/igvteam/igv/archive/v2.3.57.zip
+    # unzip v2.3.57.zip
+    # cd igv-2.3.57/
+    wget http://data.broadinstitute.org/igv/projects/downloads/IGV_2.3.57.zip
+    unzip IGV_2.3.57.zip
+    cd IGV_2.3.57/
+    cp igv.jar igv.sh $HOME
+fi
+
+if [ "$1" == "latex2html" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://mirrors.ctan.org/support/latex2html/latex2html-2012.tgz
+    tar -xzvf latex2html-2012.tgz
+    cd latex2html-2012
     ./configure --prefix=$HOME
     make
     make install
