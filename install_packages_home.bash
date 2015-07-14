@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -78,6 +78,19 @@ if [ "$1" == "bedtools" ]; then
     cd bedtools2-2.19.1
     make
     cp bin/* $HOME/bin/
+fi
+
+if [ "$1" == "biobambam" ]; then
+    mkdir -p $1
+    cd $1
+    wget https://github.com/gt1/biobambam2/releases/download/2.0.9-release-20150619154907/biobambam2-2.0.9-release-20150619154907-x86_64-etch-linux-gnu.tar.gz
+    tar -xzvf biobambam2-2.0.9-release-20150619154907-x86_64-etch-linux-gnu.tar.gz
+    cd biobambam2-2.0.9-release-20150619154907-x86_64-etch-linux-gnu/
+    cp bin/bamsormadup \
+       bin/bamcollate2 \
+       bin/bammarkduplicates2 \
+       bin/bamtofastq \
+       $HOME/bin/
 fi
 
 if [ "$1" == "blup_gen_snp" ]; then
