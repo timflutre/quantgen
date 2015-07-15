@@ -8,6 +8,7 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # TODO:
+# - add substep after mapping to get nb of "properly mapped pairs" (neither alignments nor reads but pairs of reads)
 # - check version of external programs
 # - add option to ignore R2 files
 # - add option to give VCF of known indels
@@ -31,13 +32,10 @@ import shlex
 import warnings
 import shutil
 import glob
-import random
 import string
 import stat
-import xml.dom.minidom
+# import xml.dom.minidom
 # import sqlite3
-# import numpy as np
-# import scipy as sp
 
 from Bio import SeqIO
 from Bio.Seq import Seq, reverse_complement
@@ -45,294 +43,18 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC, generic_dna
 from Bio.Data.IUPACData import ambiguous_dna_values
 
+from pyutilstimflutre import Utils, Job, JobGroup, JobManager, Fastqc, \
+    SamtoolsFlagstat
+
 if sys.version_info[0] == 2:
     if sys.version_info[1] < 7:
         msg = "ERROR: Python should be in version 2.7 or higher"
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.11" # http://semver.org/
+progVersion = "0.1.12" # http://semver.org/
 
 
-class TimUtils(object):
-    
-    def __init__(self):
-        pass
-    
-    @staticmethod
-    def user_input(msg):
-        if sys.version_info[0] == 2:
-            return raw_input(msg)
-        elif sys.version_info[0] == 3:
-            return input(msg)
-        else:
-            msg = "Python's major version should be 2 or 3"
-            raise ValueError(msg)
-        
-    @staticmethod
-    def uniq_alphanum(length):
-        return "".join(random.choice(string.letters+string.digits) \
-                       for i in xrange(length))
-    
-    @staticmethod
-    def isProgramInPath(prgName):
-        args = ["which", prgName]
-        try:
-            p = subprocess.check_output(args, stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError, e:
-            # msg = "can't find '%s' in PATH" % prgName
-            # raise ValueError(msg)
-            return False
-        else:
-            prgPath = p.rstrip()
-            return True
-        
-        
-class Job(object):
-    
-    def __init__(self, groupId, name, cmd=None, bashFile=None):
-        self.groupId = groupId
-        self.name = name
-        self.cmd = cmd
-        self.bashFile = bashFile
-        self.queue = None # set by JobGroup upon insertion
-        self.duration = None # set by JobGroup upon insertion
-        self.memory = None # set by JobGroup upon insertion
-        self.id = None # set right after submission
-        self.node = None # not used yet
-        
-    def submit(self):
-        qsubCmd = "qsub -cwd -j y -V -q %s -N %s" % (self.queue, self.name)
-        if self.duration:
-            pass
-        if self.memory:
-            pass
-        
-        cmd = ""
-        if self.bashFile:
-            cmd += "%s %s" % (qsubCmd, self.bashFile)
-        elif self.cmd:
-            cmd += "echo -e '%s'" % self.cmd.encode('unicode-escape')
-            cmd += " | %s" % qsubCmd
-        else:
-            msg = "try to submit job '%s' with neither cmd nor bash file" \
-                  % self.name
-            raise ValueError(msg)
-        
-        p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE).communicate()
-        p = p[0].split()[2]
-        self.id = int(p)
-        
-        return self.id
-    
-    
-class JobGroup(object):
-    
-    def __init__(self, groupId, scheduler, queue):
-        self.id = groupId
-        self.scheduler = scheduler
-        self.checkScheduler()
-        self.queue = queue
-        self.checkQueue()
-        self.lJobs = [] # filled via self.insert()
-        self.lJobNames = [] # filled via self.insert()
-        self.lJobIds = [] # filled via self.submit()
-        
-    def checkScheduler(self):
-        if self.scheduler not in ["SGE"]:
-            msg = "unknown scheduler '%s'" % self.scheduler
-            raise ValueError(msg)
-        
-    def checkQueue(self):
-        if self.scheduler == "SGE":
-            p = subprocess.Popen(["qconf", "-sql"], shell=False, stdout=subprocess.PIPE).communicate()
-            p = p[0].split("\n")
-            if self.queue not in p:
-                msg = "unknown queue '%s'" % self.queue
-                raise ValueError(msg)
-            
-    def insert(self, iJob):
-        self.lJobs.append(iJob)
-        self.lJobs[-1].scheduler = self.scheduler
-        self.lJobs[-1].queue = self.queue
-        self.lJobNames.append(iJob.name)
-        
-    def submit(self):
-        for i in range(len(self.lJobs)):
-            jobId = self.lJobs[i].submit()
-            self.lJobIds.append(jobId)
-            
-    def getUnfinishedJobIds(self, method="oneliner"):
-        if method not in ["oneliner", "xml"]:
-            msg = "unknown method '%s'" % method
-            raise ValueError(msg)
-        
-        lUnfinishedJobIds = []
-        cmd = "qstat -u '%s'" % os.getlogin()
-        cmd += " -q %s" % self.queue
-        
-        if method == "oneliner":
-            cmd += " | sed 1,2d"
-            cmd += " | awk '{print $1}'"
-            # print(cmd) # debug
-            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE).communicate()
-            p = p[0].split("\n")[:-1]
-            # print(p) # debug
-            lUnfinishedJobIds = [int(jobId) for jobId in p
-                                 if int(jobId) in self.lJobIds]
-        elif method == "xml": # http://stackoverflow.com/a/26104540/597069
-            cmd += " -r -xml"
-            f = os.popen(cmd)
-            dom = xml.dom.minidom.parse(f)
-            jobs = dom.getElementsByTagName('job_info')
-            print(jobs) # debug
-            for job in jobs:
-                jobname = job.getElementsByTagName('JB_name')[0].childNodes[0].data
-                jobown = job.getElementsByTagName('JB_owner')[0].childNodes[0].data
-                jobstate = job.getElementsByTagName('state')[0].childNodes[0].data
-                jobnum = job.getElementsByTagName('JB_job_number')[0].childNodes[0].data
-                if jobname in self.lJobNames:
-                    lUnfinishedJobIds.append(jobnum)
-            print(lUnfinishedJobIds) # debug
-            
-        return lUnfinishedJobIds
-    
-    def wait(self, verbose=1):
-        if verbose > 0:
-            msg = "nb of jobs: %i (first=%i last=%i)" % (len(self.lJobIds),
-                                                         self.lJobIds[0],
-                                                         self.lJobIds[-1])
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-        time.sleep(2)
-        if len(self.getUnfinishedJobIds()) == 0:
-            return
-        time.sleep(5)
-        if len(self.getUnfinishedJobIds()) == 0:
-            return
-        time.sleep(10)
-        if len(self.getUnfinishedJobIds()) == 0:
-            return
-        time.sleep(30)
-        if len(self.getUnfinishedJobIds()) == 0:
-            return
-        while True:
-            time.sleep(60)
-            if len(self.getUnfinishedJobIds()) == 0:
-                return
-            
-            
-class JobManager(object):
-    
-    def __init__(self, projectId):
-        self.projectId = projectId
-        self.dbPath = ""
-        self.groupId2group = {}
-        
-    def __getitem__(self, jobGroupId):
-        return self.groupId2group[jobGroupId]
-    
-    def insert(self, iJobGroup):
-        self.groupId2group[iJobGroup.id] = iJobGroup
-        
-        
-class SamtoolsFlagstat(object):
-    
-    @staticmethod
-    def initListStats():
-        lStats = []
-        lStats.append({"id": "total",
-                       "name": "total",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "second",
-                       "name": "secondary",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "suppl",
-                       "name": "supplimentary",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "dupl",
-                       "name": "duplicates",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "map",
-                       "name": "mapped",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "pairedseq",
-                       "name": "paired in sequencing",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "r1",
-                       "name": "read1",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "r2",
-                       "name": "read2",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "proppaired",
-                       "name": "properly paired",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "itmatemap",
-                       "name": "with itself and mate mapped",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "single",
-                       "name": "singletons",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "matediffchr",
-                       "name": "with mate mapped to a different chr",
-                       "qc.passed": None, "qc.failed": None})
-        lStats.append({"id": "matediffchrQ5",
-                       "name": "with mate mapped to a different chr (mapQ>=5)",
-                       "qc.passed": None, "qc.failed": None})
-        return lStats
-    
-    @staticmethod
-    def getHeaderBasicAlignStats():
-        lStats = SamtoolsFlagstat.initListStats()
-        txt = "%s.qc.passed" % lStats[0]["id"]
-        txt += "\t%s.qc.failed" % lStats[0]["id"]
-        for dStat in lStats[1:]:
-            txt += "\t%s.qc.passed" % dStat["id"]
-            txt += "\t%s.qc.failed" % dStat["id"]
-        return txt
-    
-    def __init__(self, inFile):
-        self.inFile = inFile
-        if not os.path.exists(self.inFile):
-            msg = "can't find file '%s'" % self.inFile
-            raise ValueError(msg)
-        self.lStats = SamtoolsFlagstat.initListStats()
-        self.load()
-        
-    def load(self):
-        inHandle = open(self.inFile, "r")
-        lines = inHandle.readlines()
-        inHandle.close()
-        
-        if len(lines) != 13:
-            print(lines)
-            msg = "file '%s' has %i lines instead of 13" % (self.inFile, len(lines))
-            raise ValueError(msg)
-        
-        for idx,dStat in enumerate(self.lStats):
-            if string.find(lines[idx], dStat["name"]) == -1:
-                print(lines[idx])
-                msg = "can't find '%s' on line %i of file '%s'" \
-                      % (dStat["name"], idx + 1, self.inFile)
-                raise ValueError(msg)
-            toks = lines[idx].split(" ")
-            if len(toks) < 4:
-                msg = "output format of 'samtools flagstat' may have changed"
-                msg += " for '%s' (lane %i)" % (dStat["name"], idx + 1)
-                raise ValueError(msg)
-            self.lStats[idx]["qc.passed"] = int(toks[0])
-            self.lStats[idx]["qc.failed"] = int(toks[2])
-            
-    def getTxtToWrite(self):
-        txt = "%i" % self.lStats[0]["qc.passed"]
-        txt += "\t%i" % self.lStats[0]["qc.failed"]
-        for dStat in self.lStats[1:]:
-            txt += "\t%i" % dStat["qc.passed"]
-            txt += "\t%i" % dStat["qc.failed"]
-        return txt
-    
-    
 class GbsSample(object):
     """
     Corresponds to some DNA present on a given lane. This DNA was extracted 
@@ -445,6 +167,25 @@ class GbsSample(object):
         if len(lFilesR2) == 1:
             self.dCleanedFastqFiles["R2"] = lFilesR2[0]
             
+    def saveNbReadsFromFastqc(self, inDir, outHandle):
+        inFile = "%s/%s_clean_R1_fastqc.zip" % (inDir, self.individual)
+        iFqc = Fastqc(inFile)
+        txt = "%s" % self.individual
+        txt += "\t%s" % self.flowcell
+        txt += "\t%s" % self.lane
+        txt += "\tR1"
+        txt += "\t%s" % iFqc.lStats[1]["content"][3]["value"]
+        outHandle.write("%s\n" % txt)
+        if"R2" in self.dCleanedFastqFiles:
+            inFile = "%s/%s_clean_R2_fastqc.zip" % (inDir, self.id)
+            iFqc = Fastqc(inFile)
+            txt = "%s" % self.individual
+            txt += "\t%s" % self.flowcell
+            txt += "\t%s" % self.lane
+            txt += "\tR2"
+            txt += "\t%s" % iFqc.lStats[1]["content"][3]["value"]
+            outHandle.write("%s\n" % txt)
+            
     def align(self, pathToPrefixRefGenome, tmpDir, dictFile, outDir,
               iJobGroup):
         """
@@ -485,7 +226,7 @@ class GbsSample(object):
         txt += " | samtools sort"
         txt += " -o ${outDir}/%s" % tmpBamFile
         txt += " -O bam"
-        txt += " -T %s/tmp%s_%s" % (tmpDir, TimUtils.uniq_alphanum(5), self.id)
+        txt += " -T %s/tmp%s_%s" % (tmpDir, Utils.uniq_alphanum(5), self.id)
         txt += " -" # stdin
         bashHandle.write("%s\n" % txt)
         
@@ -699,6 +440,13 @@ class GbsLane(object):
         for sampleId,iSample in self.dSamples.items():
             iSample.setCleanedFastqFiles("%s/%s" % (pathToDir, self.id))
             
+    def saveNbReadsFromFastqc(self, inDir, outHandle):
+        lSamples = self.dSamples.keys()
+        lSamples.sort()
+        for sampleId in lSamples:
+            iSample = self.dSamples[sampleId]
+            iSample.saveNbReadsFromFastqc(inDir, outHandle)
+            
     def align(self, pathToPrefixRefGenome, tmpDir, dictFile, outDir,
               iJobGroup):
         for sampleId,iSample in self.dSamples.items():
@@ -726,7 +474,10 @@ class GbsLane(object):
         iJobGroup.insert(iJob)
         
     def saveSamtoolsFlagstat(self, inDir, outHandle):
-        for sampleId,iSample in self.dSamples.items():
+        lSamples = self.dSamples.keys()
+        lSamples.sort()
+        for sampleId in lSamples:
+            iSample = self.dSamples[sampleId]
             iSample.saveSamtoolsFlagstat(inDir, outHandle)
             
     def setInitialBamFiles(self, pathToDir):
@@ -1026,19 +777,19 @@ class Gbs(object):
             self.lDirSteps[i] = "%s/%s_%s" % (os.getcwd(), self.projectId,
                                               self.lDirSteps[i])
         if "1" in self.lSteps:
-            if not TimUtils.isProgramInPath("fastqc"):
+            if not Utils.isProgramInPath("fastqc"):
                 msg = "ERROR: can't find 'fastqc' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
         if "2" in self.lSteps:
-            if not TimUtils.isProgramInPath("demultiplex.py"):
+            if not Utils.isProgramInPath("demultiplex.py"):
                 msg = "ERROR: can't find 'demultiplex.py' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
         if "3" in self.lSteps:
-            if not TimUtils.isProgramInPath("cutadapt"):
+            if not Utils.isProgramInPath("cutadapt"):
                 msg = "ERROR: can't find 'cutadapt' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -1054,17 +805,17 @@ class Gbs(object):
                 self.help()
                 sys.exit(1)
         if "4" in self.lSteps:
-            if not TimUtils.isProgramInPath("bwa"):
+            if not Utils.isProgramInPath("bwa"):
                 msg = "ERROR: can't find 'bwa' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-            if not TimUtils.isProgramInPath("samtools"):
+            if not Utils.isProgramInPath("samtools"):
                 msg = "ERROR: can't find 'samtools' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-            if not TimUtils.isProgramInPath("picard.jar"):
+            if not Utils.isProgramInPath("picard.jar"):
                 msg = "ERROR: can't find 'picard.jar' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -1082,7 +833,7 @@ class Gbs(object):
             if os.path.dirname(self.dictFile) == '':
                 self.dictFile = "%s/%s" % (os.getcwd(), self.dictFile)
         if "5" in self.lSteps:
-            if not TimUtils.isProgramInPath("GenomeAnalysisTK.jar"):
+            if not Utils.isProgramInPath("GenomeAnalysisTK.jar"):
                 msg = "ERROR: can't find 'GenomeAnalysisTK.jar' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -1093,7 +844,7 @@ class Gbs(object):
                 self.help()
                 sys.exit(1)
         if "6" in self.lSteps:
-            if not TimUtils.isProgramInPath("GenomeAnalysisTK.jar"):
+            if not Utils.isProgramInPath("GenomeAnalysisTK.jar"):
                 msg = "ERROR: can't find 'GenomeAnalysisTK.jar' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -1223,7 +974,7 @@ class Gbs(object):
         if os.path.isdir(dirStep):
             msg = "directory '%s' already exists" % dirStep
             warnings.warn(msg, UserWarning)
-            wantRmvDir = TimUtils.user_input("Do you want to remove the directory '%s'? [y/n] " % dirStep)
+            wantRmvDir = Utils.user_input("Do you want to remove the directory '%s'? [y/n] " % dirStep)
             if wantRmvDir == "y":
                 shutil.rmtree(dirStep)
             else:
@@ -1232,8 +983,8 @@ class Gbs(object):
         cwd = os.getcwd()
         os.chdir(dirStep)
         return cwd
-
-
+    
+    
     def beginStep(self, stepNum):
         if self.verbose > 0:
             msg = "perform step %i ..." % stepNum
@@ -1282,7 +1033,7 @@ class Gbs(object):
                 
                 
     def makeGroupJobId(self, prefix):
-        return "%s_%s" % (prefix, TimUtils.uniq_alphanum(5))
+        return "%s_%s" % (prefix, Utils.uniq_alphanum(5))
     
     
     def launchFastqcOnInputFastqFiles(self):
@@ -1442,14 +1193,42 @@ class Gbs(object):
         if self.verbose > 0:
             msg = "all quality jobs finished"
             sys.stdout.write("%s\n" % msg)
+
+
+    def saveNbReadsFromFastqc(self):
+        if self.verbose > 0:
+            msg = "save nb of clean reads per sample ..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
             
+        outFile = "%s/%s_clean-reads-per-sample.txt.gz" % (self.lDirSteps[2],
+                                                           self.projectId)
+        outHandle = gzip.open(outFile, "w")
+        
+        txt = "ind"
+        txt += "\tflowcell"
+        txt += "\tlane"
+        txt += "\tmate" # R1 or R2
+        txt += "\tnb.clean.reads"
+        outHandle.write("%s\n" % txt)
+        
+        lLanes = self.dLanes.keys()
+        lLanes.sort()
+        for laneId in lLanes:
+            inDir = "%s/%s" % (self.lDirSteps[2], laneId)
+            iLane = self.dLanes[laneId]
+            iLane.saveNbReadsFromFastqc(inDir, outHandle)
             
+        outHandle.close()
+        
+        
     def step3(self):
         self.loadAdpFile()
         self.setPathsToInputFiles(3)
         cwd = self.beginStep(3)
         self.cleanDemultiplexedFiles()
         self.launchFastqcOnCleanFastqFiles()
+        self.saveNbReadsFromFastqc()
         self.endStep(3, cwd)
         
         
@@ -1519,11 +1298,14 @@ class Gbs(object):
         txt = "ind"
         txt += "\tflowcell"
         txt += "\tlane"
-        txt += "\t%s" % SamtoolsFlagstat.getHeaderBasicAlignStats()
+        txt += "\t%s" % SamtoolsFlagstat.header2str()
         outHandle.write("%s\n" % txt)
         
-        for laneId,iLane in self.dLanes.items():
+        lLanes = self.dLanes.keys()
+        lLanes.sort()
+        for laneId in lLanes:
             inDir = "%s/%s" % (self.lDirSteps[3], laneId)
+            iLane = self.dLanes[laneId]
             iLane.saveSamtoolsFlagstat(inDir, outHandle)
             
         outHandle.close()
