@@ -8,7 +8,7 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # TODO:
-# - add substep after mapping to get nb of "properly mapped pairs" (neither alignments nor reads but pairs of reads)
+# - add option to load pedigree
 # - check version of external programs
 # - add option to ignore R2 files
 # - add option to give VCF of known indels
@@ -52,7 +52,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.12" # http://semver.org/
+progVersion = "0.1.13" # http://semver.org/
 
 
 class GbsSample(object):
@@ -65,7 +65,6 @@ class GbsSample(object):
     def __init__(self, id):
         self.id = id # individual + "_" + flowcell + "_" + lane
         self.individual = ""
-        self.generation = ""
         self.species = ""
         self.barcode = ""
         self.seqCenter = ""
@@ -83,7 +82,6 @@ class GbsSample(object):
     def __str__(self):
         txt = "id=%s" % self.id
         txt += ";individual=%s" % self.individual
-        txt += ";generation=%s" % self.generation
         txt += ";species=%s" % self.species
         txt += ";barcode=%s" % self.barcode
         txt += ";seqCenter=%s" % self.seqCenter
@@ -191,7 +189,7 @@ class GbsSample(object):
         """
         http://www.htslib.org/workflow/#mapping_to_variant
         https://www.broadinstitute.org/gatk/guide/best-practices
-        Need to give bashFile to Job to keep <tab> -R given to BWA
+        Need to give bashFile to Job to keep <tab> in -R given to BWA
         """
         bashFile = "job_%s_%s.bash" % (iJobGroup.id, self.id)
         bashHandle = open(bashFile, "w")
@@ -256,6 +254,14 @@ class GbsSample(object):
         txt += "\ntime samtools flagstat"
         txt += " ${outDir}/%s.bam" % self.id
         txt += " >& ${outDir}/flagstat_%s.txt" % self.id
+        txt += "\necho \"reads in proper pairs and primary alignments\""
+        txt += "\necho -e \"%s" % self.flowcell
+        txt += "\t%s" % self.lane
+        txt += "\t%s" % self.individual
+        txt += "\t\"$(samtools view -f 0x0002 -F 0x0100 -q 5"
+        txt += " ${outDir}/%s.bam" % self.id
+        txt += " | cut -f1 | sort | uniq | wc -l)"
+        txt += " > ${outDir}/reads-proppaired-primaln-q5_%s.txt" % self.id
         txt += "\ndate"
         bashHandle.write("%s\n" % txt)
         
@@ -454,7 +460,8 @@ class GbsLane(object):
                           iJobGroup)
             
     def gather(self, memJvm, outDir, iJobGroup):
-        cmd = "time samtools merge -f"
+        cmd = "echo \"merge and index\""
+        cmd += "; time samtools merge -f"
         cmd += " %s/%s.bam" % (outDir, self.id)
         lSamples = self.dSamples.keys()
         lSamples.sort()
@@ -567,6 +574,7 @@ class Gbs(object):
     def __init__(self):
         self.verbose = 1
         self.lSteps = []
+        self.forceRerunSteps = False
         self.infoFile = ""
         self.scheduler = "SGE"
         self.queue = "normal.q"
@@ -574,7 +582,6 @@ class Gbs(object):
         self.enzyme = "ApeKI"
         self.jobManager = None
         self.infoCol2idx = {"individual": None,
-                            "generation": None,
                             "species": None,
                             "barcode": None,
                             "seq_center": None,
@@ -632,9 +639,8 @@ class Gbs(object):
         msg += "\t\teach sample should have one and only one row\n"
         msg += "\t\tany two columns should be separated with one tabulation\n"
         msg += "\t\tcolumns can be in any order\n"
-        msg += "\t\t12 columns are compulsory:\n"
+        msg += "\t\t11 columns are compulsory:\n"
         msg += "\t\t individual (e.g. 'Col-0', but no underscore '_')\n"
-        msg += "\t\t generation (empty or 0/1, with 0 for parents)\n"
         msg += "\t\t species (e.g. 'Arabidopsis thaliana')\n"
         msg += "\t\t barcode (e.g. 'ATGG')\n"
         msg += "\t\t seq_center (e.g. 'Broad Institute', 'GenoToul', etc)\n"
@@ -657,6 +663,8 @@ class Gbs(object):
         msg += "      --jvm\tmemory given to the Java Virtual Machine (default=4, in Gb)\n"
         msg += "\t\tused in steps 4, 5 and 6 for Picard and GATK\n"
         msg += "      --known\tpath to a VCF file with known sites (e.g. from dbSNP)\n"
+        msg += "      --force\tforce to re-run step(s)\n"
+        msg += "\t\tthis removes without warning the step directory if it exists\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s --step 1 --info info_gbs.txt\n" % os.path.basename(sys.argv[0])
@@ -689,7 +697,7 @@ class Gbs(object):
                                         ["help", "version", "verbose=",
                                          "proj=", "step=", "info=", "dict=",
                                          "schdlr=", "queue=", "enz=", "adp=",
-                                         "ref=", "jvm=", "known="])
+                                         "ref=", "jvm=", "known=", "force"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -726,6 +734,8 @@ class Gbs(object):
                 self.memJvm = int(a)
             elif o == "--known":
                 self.knownFile = a
+            elif o == "--force":
+                self.forceRerunSteps = True
             else:
                 assert False, "invalid option"
                 
@@ -912,7 +922,6 @@ class Gbs(object):
             iSample.individual = individual
             iSample.flowcell = flowcell
             iSample.lane = laneNum
-            iSample.generation = tokens[self.infoCol2idx["generation"]]
             iSample.species = tokens[self.infoCol2idx["species"]]
             iSample.barcode = tokens[self.infoCol2idx["barcode"]]
             iSample.seqCenter = tokens[self.infoCol2idx["seq_center"]]
@@ -972,13 +981,17 @@ class Gbs(object):
             
     def enterStepDir(self, dirStep):
         if os.path.isdir(dirStep):
-            msg = "directory '%s' already exists" % dirStep
-            warnings.warn(msg, UserWarning)
-            wantRmvDir = Utils.user_input("Do you want to remove the directory '%s'? [y/n] " % dirStep)
-            if wantRmvDir == "y":
+            if self.forceRerunSteps:
                 shutil.rmtree(dirStep)
             else:
-                raise OSError("can't continue")
+                msg = "directory '%s' already exists" % dirStep
+                warnings.warn(msg, UserWarning)
+                msg = "Do you want to remove the directory '%s'? [y/n] " % dirStep
+                wantRmvDir = Utils.user_input(msg)
+                if wantRmvDir == "y":
+                    shutil.rmtree(dirStep)
+                else:
+                    raise OSError("can't continue")
         os.mkdir(dirStep)
         cwd = os.getcwd()
         os.chdir(dirStep)
@@ -991,7 +1004,8 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
         cwd = self.enterStepDir(self.lDirSteps[stepNum - 1])
-        return cwd
+        startTime = time.time()
+        return cwd, startTime
     
     
     def setPathsToInputFiles(self, stepNum):
@@ -1013,11 +1027,15 @@ class Gbs(object):
                 iInd.setPreprocessedBamFiles(self.lDirSteps[4])
                 
                 
-    def endStep(self, stepNum, cwd):
+    def endStep(self, stepNum, cwd, startTime):
         os.chdir(cwd)
         if self.verbose > 0:
-            msg = "step %i is done (see '%s/')" \
+            endTime = time.time()
+            stepDuration = datetime.timedelta(seconds=
+                                              math.floor(endTime - startTime))
+            msg = "step %i is done (%s, see '%s/')" \
                   % (stepNum,
+                     stepDuration,
                      os.path.basename(self.lDirSteps[stepNum - 1]))
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
@@ -1071,11 +1089,11 @@ class Gbs(object):
     
     def step1(self):
         self.setPathsToInputFiles(1)
-        cwd = self.beginStep(1)
+        cwd, startTime = self.beginStep(1)
         self.makeSymlinksToInputFastqFiles()
         self.launchFastqcOnInputFastqFiles()
         self.combineFastqcResults()
-        self.endStep(1, cwd)
+        self.endStep(1, cwd, startTime)
         
         
     def loadAdpFile(self):
@@ -1136,9 +1154,9 @@ class Gbs(object):
             
     def step2(self):
         self.setPathsToInputFiles(2)
-        cwd = self.beginStep(2)
+        cwd, startTime = self.beginStep(2)
         self.demultiplexInputFastqFiles()
-        self.endStep(2, cwd)
+        self.endStep(2, cwd, startTime)
         
         
     def cleanDemultiplexedFiles(self):
@@ -1225,11 +1243,11 @@ class Gbs(object):
     def step3(self):
         self.loadAdpFile()
         self.setPathsToInputFiles(3)
-        cwd = self.beginStep(3)
+        cwd, startTime = self.beginStep(3)
         self.cleanDemultiplexedFiles()
         self.launchFastqcOnCleanFastqFiles()
         self.saveNbReadsFromFastqc()
-        self.endStep(3, cwd)
+        self.endStep(3, cwd, startTime)
         
         
     def alignCleanedReads(self):
@@ -1309,15 +1327,32 @@ class Gbs(object):
             iLane.saveSamtoolsFlagstat(inDir, outHandle)
             
         outHandle.close()
+
+        outFile = "%s/%s_reads-proppaired-primaln-q5.txt" % (self.lDirSteps[3],
+                                                          self.projectId)
+        outHandle = open(outFile, "w")
+        txt = "flowcell"
+        txt += "\tlane"
+        txt += "\tind"
+        txt += "\tnb.pairs.proppaired.primaln.q5"
+        outHandle.write("%s\n" % txt)
+        outHandle.close()
+        cmd = "cat %s/*/reads-proppaired-primaln-q5_*.txt" % self.lDirSteps[3]
+        # cmd += " | awk '{a[$3]+=$4} END{for(x in a){print x,a[x]}}'"
+        # cmd += " | sort -k2,2n"
+        cmd += " >> %s" % outFile
+        cmd += "; gzip %s" % outFile
+        p = subprocess.Popen(cmd, shell=True,
+                             stdout=subprocess.PIPE).communicate()
         
         
     def step4(self):
         self.setPathsToInputFiles(4)
-        cwd = self.beginStep(4)
+        cwd, startTime = self.beginStep(4)
         self.alignCleanedReads()
         self.gatherSamplesPerLane()
         self.saveBasicAlignStats()
-        self.endStep(4, cwd)
+        self.endStep(4, cwd, startTime)
         
         
     def localRealignment(self):
@@ -1377,10 +1412,10 @@ class Gbs(object):
             
     def step5(self):
         self.setPathsToInputFiles(5)
-        cwd = self.beginStep(5)
+        cwd, startTime = self.beginStep(5)
         self.localRealignment()
         self.baseQualityRecalibration()
-        self.endStep(5, cwd)
+        self.endStep(5, cwd, startTime)
         
         
     def variantCallingPerIndividual(self):
@@ -1503,11 +1538,11 @@ class Gbs(object):
             
     def step6(self):
         self.setPathsToInputFiles(6)
-        cwd = self.beginStep(6)
+        cwd, startTime = self.beginStep(6)
         self.variantCallingPerIndividual()
         self.jointGenotyping()
         self.variantRecalibration()
-        self.endStep(6, cwd)
+        self.endStep(6, cwd, startTime)
         
         
     def run(self):
