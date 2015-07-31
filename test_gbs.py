@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.1.3" # http://semver.org/
+progVersion = "0.2.0" # http://semver.org/
 
 
 class TestGbs(object):
@@ -158,31 +158,32 @@ class TestGbs(object):
         return cwd, testDir
         
         
-    def makeInfoFile(self):
+    def makeSamplesFile(self):
         """
         4 individuals: ind1 (mother), ind2 (father), ind3 (child), ind4 (child)
         2 lanes, 6 samples (3 individuals per lane, parents present in both)
+        2 extractions, and thus 2 libraries, for ind1
         """
-        infoFile = "info.txt"
-        lane2info = {}
+        samplesFile = "samples.txt"
+        lane2samples = {}
         
-        infoHandle = open(infoFile, "w")
+        samplesHandle = open(samplesFile, "w")
         
-        lane2info["1"] = {"R1": "%s/init_reads_lane1_R1.fastq.gz" % os.getcwd(),
+        lane2samples["1"] = {"R1": "%s/init_reads_lane1_R1.fastq.gz" % os.getcwd(),
                           "R2": "%s/init_reads_lane1_R2.fastq.gz" % os.getcwd(),
-                          "inds": {"ind1": {"gen":0, "tag":"AAAA"},
-                                   "ind2": {"gen":0, "tag":"GGGG"},
-                                   "ind3": {"gen":1, "tag":"TTTT"}}}
-        lane2info["2"] = {"R1": "%s/init_reads_lane2_R1.fastq.gz" % os.getcwd(),
+                          "inds": {"ind1": {"gen":0, "lib":"ind1-A", "tag":"AAAA"},
+                                   "ind2": {"gen":0, "lib":"ind2", "tag":"GGGG"},
+                                   "ind3": {"gen":1, "lib":"ind3", "tag":"TTTT"}}}
+        lane2samples["2"] = {"R1": "%s/init_reads_lane2_R1.fastq.gz" % os.getcwd(),
                           "R2": "%s/init_reads_lane2_R2.fastq.gz" % os.getcwd(),
-                          "inds": {"ind1": {"gen":0, "tag":"CCCC"},
-                                   "ind2": {"gen":0, "tag":"TTTT"},
-                                   "ind4": {"gen":1, "tag":"AAAA"}}}
+                          "inds": {"ind1": {"gen":0, "lib":"ind1-B", "tag":"CCCC"},
+                                   "ind2": {"gen":0, "lib":"ind2", "tag":"TTTT"},
+                                   "ind4": {"gen":1, "lib":"ind4", "tag":"AAAA"}}}
         
         # header
         txt = "individual"
-        txt += "\tgeneration"
         txt += "\tspecies"
+        txt += "\tlibrary"
         txt += "\tbarcode"
         txt += "\tseq_center"
         txt += "\tseq_platform"
@@ -196,96 +197,96 @@ class TestGbs(object):
         # ind1 in lane 1
         txt += "\n"
         txt += "ind1"
-        txt += "\t%i" % lane2info["1"]["inds"]["ind1"]["gen"]
         txt += "\tTest example"
-        txt += "\t%s" % lane2info["1"]["inds"]["ind1"]["tag"]
+        txt += "\t%s" % lane2samples["1"]["inds"]["ind1"]["lib"]
+        txt += "\t%s" % lane2samples["1"]["inds"]["ind1"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
         txt += "\tF6YMDACDT"
         txt += "\t%i" % 1
         txt += "\t2015-01-15"
-        txt += "\t%s" % lane2info["1"]["R1"]
-        txt += "\t%s" % lane2info["1"]["R2"]
+        txt += "\t%s" % lane2samples["1"]["R1"]
+        txt += "\t%s" % lane2samples["1"]["R2"]
         
         # ind2 in lane 1
         txt += "\n"
         txt += "ind2"
-        txt += "\t%i" % lane2info["1"]["inds"]["ind2"]["gen"]
         txt += "\tTest example"
-        txt += "\t%s" % lane2info["1"]["inds"]["ind2"]["tag"]
+        txt += "\t%s" % lane2samples["1"]["inds"]["ind2"]["lib"]
+        txt += "\t%s" % lane2samples["1"]["inds"]["ind2"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
         txt += "\tF6YMDACDT"
         txt += "\t%s" % 1
         txt += "\t2015-01-15"
-        txt += "\t%s" % lane2info["1"]["R1"]
-        txt += "\t%s" % lane2info["1"]["R2"]
+        txt += "\t%s" % lane2samples["1"]["R1"]
+        txt += "\t%s" % lane2samples["1"]["R2"]
         
         # ind3 in lane 1
         txt += "\n"
         txt += "ind3"
-        txt += "\t%i" % lane2info["1"]["inds"]["ind3"]["gen"]
         txt += "\tTest example"
-        txt += "\t%s" % lane2info["1"]["inds"]["ind3"]["tag"]
+        txt += "\t%s" % lane2samples["1"]["inds"]["ind3"]["lib"]
+        txt += "\t%s" % lane2samples["1"]["inds"]["ind3"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
         txt += "\tF6YMDACDT"
         txt += "\t%s" % 1
         txt += "\t2015-01-15"
-        txt += "\t%s" % lane2info["1"]["R1"]
-        txt += "\t%s" % lane2info["1"]["R2"]
+        txt += "\t%s" % lane2samples["1"]["R1"]
+        txt += "\t%s" % lane2samples["1"]["R2"]
         
         # ind1 in lane 2
         txt += "\n"
         txt += "ind1"
-        txt += "\t%i" % lane2info["2"]["inds"]["ind1"]["gen"]
         txt += "\tTest example"
-        txt += "\t%s" % lane2info["2"]["inds"]["ind1"]["tag"]
+        txt += "\t%s" % lane2samples["2"]["inds"]["ind1"]["lib"]
+        txt += "\t%s" % lane2samples["2"]["inds"]["ind1"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
         txt += "\tF6YMDACDT"
         txt += "\t%i" % 2
         txt += "\t2015-01-15"
-        txt += "\t%s" % lane2info["2"]["R1"]
-        txt += "\t%s" % lane2info["2"]["R2"]
+        txt += "\t%s" % lane2samples["2"]["R1"]
+        txt += "\t%s" % lane2samples["2"]["R2"]
         
         # ind2 in lane 2
         txt += "\n"
         txt += "ind2"
-        txt += "\t%i" % lane2info["2"]["inds"]["ind2"]["gen"]
         txt += "\tTest example"
-        txt += "\t%s" % lane2info["2"]["inds"]["ind2"]["tag"]
+        txt += "\t%s" % lane2samples["2"]["inds"]["ind2"]["lib"]
+        txt += "\t%s" % lane2samples["2"]["inds"]["ind2"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
         txt += "\tF6YMDACDT"
         txt += "\t%i" % 2
         txt += "\t2015-01-15"
-        txt += "\t%s" % lane2info["2"]["R1"]
-        txt += "\t%s" % lane2info["2"]["R2"]
+        txt += "\t%s" % lane2samples["2"]["R1"]
+        txt += "\t%s" % lane2samples["2"]["R2"]
         
         # ind4 in lane 2
         txt += "\n"
         txt += "ind4"
-        txt += "\t%i" % lane2info["2"]["inds"]["ind4"]["gen"]
         txt += "\tTest example"
-        txt += "\t%s" % lane2info["2"]["inds"]["ind4"]["tag"]
+        txt += "\t%s" % lane2samples["2"]["inds"]["ind4"]["lib"]
+        txt += "\t%s" % lane2samples["2"]["inds"]["ind4"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
         txt += "\tF6YMDACDT"
         txt += "\t%i" % 2
         txt += "\t2015-01-15"
-        txt += "\t%s" % lane2info["2"]["R1"]
-        txt += "\t%s" % lane2info["2"]["R2"]
+        txt += "\t%s" % lane2samples["2"]["R1"]
+        txt += "\t%s" % lane2samples["2"]["R2"]
         
-        infoHandle.write("%s\n" % txt)
-        infoHandle.close()
-        return infoFile, lane2info
+        samplesHandle.write("%s\n" % txt)
+        samplesHandle.close()
+        return samplesFile, lane2samples
     
     
     def simulRefGenomeWoMotif(self, nbChrs, lenChr):
@@ -390,22 +391,22 @@ class TestGbs(object):
         return genMother
         
         
-    def simulIndGenomes(self, lane2info, refGen):
+    def simulIndGenomes(self, lane2samples, refGen):
         ind2genome = {}
         
         parents = []
-        for lane in lane2info:
-            for ind in lane2info[lane]["inds"]:
+        for lane in lane2samples:
+            for ind in lane2samples[lane]["inds"]:
                 if ind not in ind2genome and \
-                   lane2info[lane]["inds"][ind]["gen"] == 0:
+                   lane2samples[lane]["inds"][ind]["gen"] == 0:
                     ind2genome[ind] = self.simulParentGenome(refGen)
                     parents.append(ind)
         assert len(parents) == 2
         
-        for lane in lane2info:
-            for ind in lane2info[lane]["inds"]:
+        for lane in lane2samples:
+            for ind in lane2samples[lane]["inds"]:
                 if ind not in ind2genome and \
-                   lane2info[lane]["inds"][ind]["gen"] == 1:
+                   lane2samples[lane]["inds"][ind]["gen"] == 1:
                     ind2genome[ind] \
                         = self.simulChildGenome(ind2genome[parents[0]],
                                                 ind2genome[parents[1]])
@@ -413,14 +414,14 @@ class TestGbs(object):
         return ind2genome
         
         
-    def simulInserts(self, lane2info, lFragCoords):
+    def simulInserts(self, lane2samples, lFragCoords):
         """
         TODO: some fragments could not be sequenced, in all or some individuals
         """
         lane2inserts = {}
-        for lane in lane2info:
+        for lane in lane2samples:
             lane2inserts[lane] = {}
-            for ind in lane2info[lane]["inds"]:
+            for ind in lane2samples[lane]["inds"]:
                 lane2inserts[lane][ind] = lFragCoords
         return lane2inserts
         
@@ -466,21 +467,21 @@ class TestGbs(object):
         return lR1, lR2, readCounter
         
         
-    def simulPairedReadsPerLane(self, lane, info, ind2gen, lInserts, nbReads,
+    def simulPairedReadsPerLane(self, lane, samples, ind2gen, lInserts, nbReads,
                                 lenRead):
         """
         lane -- string
-        info -- dict[ind]{gen:..., tag:...}
+        samples -- dict[ind]{gen:..., tag:...}
         ind2gen -- dict[ind][SeqRecChr1, SeqRecChr2, ...]
         lInserts -- dict{ind}[ ... ]
         """
         lR1 = []
         lR2 = []
         readCounter = 0
-        for ind in info:
+        for ind in samples:
             lSampleR1, lSampleR2, readCounter \
                 = self.simulPairedReadsPerSample(lane,
-                                                 info[ind]["tag"],
+                                                 samples[ind]["tag"],
                                                  ind2gen[ind],
                                                  lInserts[ind],
                                                  nbReads,
@@ -491,18 +492,18 @@ class TestGbs(object):
         return lR1, lR2
         
         
-    def simulReads(self, lane2info, ind2gen, lane2inserts, nbReads, lenRead):
+    def simulReads(self, lane2samples, ind2gen, lane2inserts, nbReads, lenRead):
         """
-        lane2info -- dict[lane]{R1:file, R2:file, samples={ind:{gen, tag}, ...}}
+        lane2samples -- dict[lane]{R1:file, R2:file, samples={ind:{gen, tag}, ...}}
         ind2gen -- dict[ind][SeqRecChr1, SeqRecChr2, ...]
         lane2inserts: dict{lane}{ind}[listChr1[], listChr2[], ...]
         """
         lane2reads = {}
-        for lane in lane2info:
+        for lane in lane2samples:
             lane2reads[lane] = {"R1": [], "R2": []}
             lane2reads[lane]["R1"], lane2reads[lane]["R2"] \
                 = self.simulPairedReadsPerLane(lane,
-                                               lane2info[lane]["inds"],
+                                               lane2samples[lane]["inds"],
                                                ind2gen,
                                                lane2inserts[lane],
                                                nbReads,
@@ -519,36 +520,36 @@ class TestGbs(object):
         return refFile
         
         
-    def saveReads(self, lane2info, lane2reads, paired):
-        for lane in lane2info:
-            fastqHandle = gzip.open(lane2info[lane]["R1"], "w")
+    def saveReads(self, lane2samples, lane2reads, paired):
+        for lane in lane2samples:
+            fastqHandle = gzip.open(lane2samples[lane]["R1"], "w")
             for rec in lane2reads[lane]["R1"]:
                 rec.letter_annotations["phred_quality"] = [40] * len(rec)
                 fastqHandle.write(rec.format("fastq"))
             fastqHandle.close()
             if paired:
-                fastqHandle = gzip.open(lane2info[lane]["R2"], "w")
+                fastqHandle = gzip.open(lane2samples[lane]["R2"], "w")
                 for rec in lane2reads[lane]["R2"]:
                     rec.letter_annotations["phred_quality"] = [40] * len(rec)
                     fastqHandle.write(rec.format("fastq"))
                 fastqHandle.close()
                 
                 
-    def makeInputSequences(self, lane2info, nbChrs=2, lenChr=100000, nbFragsPerChr=50,
+    def makeInputSequences(self, lane2samples, nbChrs=2, lenChr=100000, nbFragsPerChr=50,
                            minFragLen=30, maxFragLen=600, motif="CAGC",
                            nbReads=1000, lenRead=100, paired=True):
         refGen, lFragCoords \
             = self.simulRefGenome(nbChrs, lenChr, nbFragsPerChr, minFragLen,
                                   maxFragLen, motif)
         
-        ind2gen = self.simulIndGenomes(lane2info, refGen)
+        ind2gen = self.simulIndGenomes(lane2samples, refGen)
         
-        lane2inserts = self.simulInserts(lane2info, lFragCoords)
+        lane2inserts = self.simulInserts(lane2samples, lFragCoords)
         
-        lane2reads = self.simulReads(lane2info, ind2gen, lane2inserts, nbReads, lenRead)
+        lane2reads = self.simulReads(lane2samples, ind2gen, lane2inserts, nbReads, lenRead)
         
         refFile = self.saveRefGenome(refGen)
-        self.saveReads(lane2info, lane2reads, paired)
+        self.saveReads(lane2samples, lane2reads, paired)
         return refGen, refFile
     
     
@@ -641,7 +642,7 @@ class TestGbs(object):
         options.append("--step")
         options.append("1")
         
-        infoFile, lane2info = self.makeInfoFile()
+        samplesFile, lane2samples = self.makeSamplesFile()
         nbChrs = 2
         lenChr = 100000
         nbFragsPerChr = 50
@@ -650,7 +651,7 @@ class TestGbs(object):
         motif = "CAGC"
         nbReads = 1000 # for a given sample, over all its chrs
         lenRead = 100
-        refGen, refFile = self.makeInputSequences(lane2info, nbChrs, lenChr,
+        refGen, refFile = self.makeInputSequences(lane2samples, nbChrs, lenChr,
                                                   nbFragsPerChr, minFragLen,
                                                   maxFragLen, motif,
                                                   nbReads, lenRead)
@@ -658,8 +659,8 @@ class TestGbs(object):
         dictFile = self.makeDictFile(refGen, refFile)
         self.makeBwaIndexFiles(refFile)
         self.makeFaIndexFile(refFile)
-        options.append("--info")
-        options.append(infoFile)
+        options.append("--samples")
+        options.append(samplesFile)
         
         return options
         
