@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -233,10 +233,10 @@ fi
 if [ "$1" == "emacs" ]; then
     mkdir -p $1
     cd $1
-    wget --timestamping http://gnu.mirrors.hoobly.com/gnu/emacs/emacs-24.4.tar.gz
-    tar -xzvf emacs-24.4.tar.gz
-    cd emacs-24.4
-    ./configure --prefix=$HOME --with-x-toolkit=no --with-xpm=no --with-jpeg=no --with-gif=no --with-tiff=no
+    wget --timestamping http://gnu.mirrors.hoobly.com/gnu/emacs/emacs-24.5.tar.gz
+    tar -xzvf emacs-24.5.tar.gz
+    cd emacs-24.5
+    ./configure --prefix=$HOME #--with-x-toolkit=no --with-xpm=no --with-jpeg=no --with-gif=no --with-tiff=no
     make
     make install
 fi
@@ -444,13 +444,6 @@ if [ "$1" == "mapmaker" ]; then
     make
     echo "see http://www.unix.com/programming/169884-compiling-old-c-program-linux.html"
     echo "see also http://www.latitudecartography.co.uk/forum/topic.asp?TOPIC_ID=2033"
-fi
-
-if [ "$1" == "markdown-mode" ]; then
-    mkdir -p $1
-    cd $1
-    wget http://jblevins.org/projects/markdown-mode/markdown-mode.el
-    cp markdown-mode.el $HOME/.emacs.d
 fi
 
 if [ "$1" == "ms" ]; then
