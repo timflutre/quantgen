@@ -55,7 +55,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.2.0" # http://semver.org/
+progVersion = "0.2.1" # http://semver.org/
 
 
 class GbsSample(object):
@@ -635,7 +635,8 @@ class GbsInd(object):
         self.realignedIndBamFile = "%s/%s_realn.bam" % (pathToDir, self.id)
         
     def variantCalling(self, memJvm, pathToPrefixRefGenome, knownFile, outDir,
-                       iJobGroup, useBashScript=True):
+                       iJobGroup, saveActiveRegions=False,
+                       saveActivityProfiles=False, useBashScript=True):
         """
         https://www.broadinstitute.org/gatk/guide/tooldocs/org_broadinstitute_gatk_tools_walkers_haplotypecaller_HaplotypeCaller.php
         http://gatkforums.broadinstitute.org/discussion/comment/14337/#Comment_14337
@@ -655,8 +656,10 @@ class GbsInd(object):
         cmd += " --variant_index_parameter 128000"
         if knownFile:
             cmd += " --known %s" % knownFile
-        cmd += " --activeRegionOut %s/%s_active-regions.tab" % (outDir, self.id)
-        cmd += " --activityProfileOut %s/%s_activity-profiles.tab" % (outDir, self.id)
+        if saveActiveRegions:
+            cmd += " --activeRegionOut %s/%s_active-regions.tab" % (outDir, self.id)
+        if saveActivityProfiles:
+            cmd += " --activityProfileOut %s/%s_activity-profiles.tab" % (outDir, self.id)
         cmd += " -o %s/%s.g.vcf.gz" % (outDir, self.id)
         cmd += " --genotyping_mode DISCOVERY"
         cmd += " --heterozygosity 0.001" # 1 het site in 100 bp (across all samples, for humans)
@@ -1653,6 +1656,7 @@ class Gbs(object):
             prevStepDir = "%s/%s" % (iInd.dir, self.lDirSteps[6])
             cmd += " --variant %s/%s.g.vcf.gz" % (prevStepDir, indId)
         cmd += " -o %s/%s_raw.vcf.gz" % (stepDir, self.projectId)
+        cmd += " --heterozygosity 0.001" # 1 het site in 100 bp (across all samples, for humans)
         if self.verbose > 1:
             print(cmd)
         jobName = "stdout_%s" % (iJobGroup.id)
