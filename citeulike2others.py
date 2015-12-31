@@ -35,7 +35,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
-progVersion = "1.1.0" # http://semver.org/
+progVersion = "1.2.0" # http://semver.org/
 
 
 def user_input(msg):
@@ -63,6 +63,7 @@ class Citeulike2Others(object):
         self.bibtexFile = ""
         self.bibtexRefs = None
         self.otherTool = "jabref"
+        self.tag = None
         
         
     def help(self):
@@ -81,9 +82,9 @@ class Citeulike2Others(object):
         msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
         msg += "  -t, --task\ttask(s) to perform (can be '1+2' for instance)\n"
         msg += "\t\t1: save cookies (requires -i, -e)\n"
-        msg += "\t\t2: download JSON file (requires -i, -e)\n"
-        msg += "\t\t3: download Bibtex file (requires -i, -e)\n"
-        msg += "\t\t4: download new files (requires -i, -e, -j, -p)\n"
+        msg += "\t\t2: download JSON file (requires -i, -e; can use -a)\n"
+        msg += "\t\t3: download Bibtex file (requires -i, -e; can use -a)\n"
+        msg += "\t\t4: download new attached files (requires -i, -e, -j, -p)\n"
         msg += "\t\t5: add 'file' field to Bibtex file (requires -j, -p, -b, -o)\n"
         msg += "  -i, --id\tyour CiteULike identifier (default=timflutre)\n"
         msg += "  -e, --email\tyour email (default=timflutre@gmail.com)\n"
@@ -91,6 +92,7 @@ class Citeulike2Others(object):
         msg += "  -p, --path\tpath to the directory with all the files\n"
         msg += "  -b, --bibtex\tpath to the Bibtex file\n"
         msg += "  -o, --other\tother tool (default=jabref/zotero)\n"
+        msg += "  -a, --tag\tspecific tag to retrieve (whole library otherwise)\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s -t 1+2+3\n" % os.path.basename(sys.argv[0])
@@ -120,10 +122,10 @@ class Citeulike2Others(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:j:p:b:o:",
+            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:j:p:b:o:a:",
                                         ["help", "version", "verbose=",
                                          "tasks=", "id=", "email=", "json=",
-                                         "path=", "bibtex=", "out="])
+                                         "path=", "bibtex=", "out=", "tag="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -151,6 +153,8 @@ class Citeulike2Others(object):
                 self.bibtexFile = a
             elif o == "-o" or o == "--other":
                 self.otherTool = a
+            elif o == "-a" or o == "--tag":
+                self.tag = a
             else:
                 assert False, "invalid option"
                 
@@ -240,7 +244,7 @@ class Citeulike2Others(object):
         cmd = "wget"
         cmd += " --header=\"User-Agent: %s" % self.identifier
         cmd += "/%s" % self.email
-        cmd += " downloader/1.0\""
+        cmd += " downloader/%s\"" % progVersion
         cmd += " -O /dev/null"
         cmd += " --quiet"
         cmd += " --keep-session-cookies"
@@ -271,23 +275,28 @@ class Citeulike2Others(object):
         if self.verbose > 0:
             print("cookie file: %s" % self.cookieFile)
             
+        outFile = "citeulike_%s" % self.identifier
+        if self.tag:
+            outFile += "_%s" % self.tag
         fileExt = ""
         if fileFormat == "bibtex":
             fileExt = "bib"
         elif fileFormat == "json":
             fileExt = "json"
-        outFile = "citeulike_%s.%s" % (self.identifier, fileExt)
-            
+        outFile += ".%s" % fileExt
+        
         cmd = "wget"
         cmd += " --header=\"User-Agent: %s" % self.identifier
         cmd += "/%s" % self.email
-        cmd += " downloader/1.0\""
+        cmd += " downloader/%s\"" % progVersion
         cmd += " --load-cookies %s" % self.cookieFile
         cmd += " --quiet"
         cmd += " -O %s" % outFile
         cmd += " http://www.citeulike.org/%s" % fileFormat
         cmd += "/user/%s" % self.identifier
-        
+        if self.tag:
+            cmd += "/tag/%s" % self.tag
+            
         if self.verbose > 1:
             print(cmd)
             
@@ -335,7 +344,7 @@ class Citeulike2Others(object):
                         cmd = "wget"
                         cmd += " --header=\"User-Agent: %s" % self.identifier
                         cmd += "/%s" % self.email
-                        cmd += " downloader/1.0\""
+                        cmd += " downloader/%s\"" % progVersion
                         cmd += " --load-cookies %s" % self.cookieFile
                         cmd += " --quiet"
                         cmd += " -O %s" % p
