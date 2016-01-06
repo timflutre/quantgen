@@ -15,8 +15,7 @@
 # - check that dates in samples file agree with SAM specification
 # - add option to ignore R2 files
 # - add option to give VCF of known indels (for local realign)
-# - turn Job & co into https://docs.python.org/2/tutorial/modules.html#packages
-# - try sgeparse https://pypi.python.org/pypi/sgeparse https://github.com/mindriot101/sgeparse
+# - try sgeparse? https://pypi.python.org/pypi/sgeparse
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -55,7 +54,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.2.1" # http://semver.org/
+progVersion = "0.2.2" # http://semver.org/
 
 
 class GbsSample(object):
@@ -774,7 +773,7 @@ class Gbs(object):
         msg += "\t\tcolumns can be in any order\n"
         msg += "\t\trows starting by '#' are skipped\n"
         msg += "\t\t12 columns are compulsory (but there can be more):\n"
-        msg += "\t\t individual (see details below, e.g. 'Col-0', but no underscore '_')\n"
+        msg += "\t\t individual (see details below, e.g. 'Col-0', but no underscore '_' and space ' ', use dash '-' instead)\n"
         msg += "\t\t species (e.g. 'Arabidopsis thaliana')\n"
         msg += "\t\t library (e.g. can be the same as 'individual')\n"
         msg += "\t\t barcode (e.g. 'ATGG')\n"
@@ -784,8 +783,8 @@ class Gbs(object):
         msg += "\t\t flowcell (e.g. 'C5YMDACXX')\n"
         msg += "\t\t lane (e.g. '3')\n"
         msg += "\t\t date (e.g. '2015-01-15', see SAM format specification)\n"
-        msg += "\t\t fastq_file_R1 (one per lane, gzip-compressed)\n"
-        msg += "\t\t fastq_file_R2 (one per lane, gzip-compressed)\n"
+        msg += "\t\t fastq_file_R1 (full path, one per lane, gzip-compressed)\n"
+        msg += "\t\t fastq_file_R2 (full path, one per lane, gzip-compressed)\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
         msg += "\t\tname: at least 'adpR1' (also 'adpR2' if paired-end)\n"
@@ -1070,7 +1069,11 @@ class Gbs(object):
             # create and fill a "GbsSample" object
             for samplesCol in ["individual", "flowcell", "lane"]:
                 if "_" in tokens[self.samplesCol2idx[samplesCol]]:
-                    msg = "underscore in %s '%s'" \
+                    msg = "underscore in %s '%s', replace by dash '-'" \
+                          % (samplesCol, tokens[self.samplesCol2idx[samplesCol]])
+                    raise ValueError(msg)
+                if " " in tokens[self.samplesCol2idx[samplesCol]]:
+                    msg = "space in %s '%s', replace by dash '-'" \
                           % (samplesCol, tokens[self.samplesCol2idx[samplesCol]])
                     raise ValueError(msg)
             ind = tokens[self.samplesCol2idx["individual"]]
