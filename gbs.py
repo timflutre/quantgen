@@ -54,7 +54,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.2.2" # http://semver.org/
+progVersion = "0.2.3" # http://semver.org/
 
 
 class GbsSample(object):
@@ -99,7 +99,7 @@ class GbsSample(object):
     
     def setDemultiplexedFastqFiles(self, pathToDir):
         # set R1 file:
-        lFilesR1 = glob.glob("%s/*_%s*_R1.fastq.gz" % (pathToDir,
+        lFilesR1 = glob.glob("%s/*_%s_R1.fastq.gz" % (pathToDir,
                                                        self.individual))
         if len(lFilesR1) == 0:
             msg = "no demultiplexed R1 file found for sample '%s' in '%s'" % \
@@ -111,7 +111,7 @@ class GbsSample(object):
             raise ValueError(msg)
         self.dDemultiplexedFastqFiles["R1"] = lFilesR1[0]
         # set R2 file, if necessary:
-        lFilesR2 = glob.glob("%s/*_%s*_R2.fastq.gz" % (pathToDir,
+        lFilesR2 = glob.glob("%s/*_%s_R2.fastq.gz" % (pathToDir,
                                                        self.individual))
         if len(lFilesR2) > 1:
             msg = "%i demultiplexed R2 files found for sample '%s' in '%s'" % \
