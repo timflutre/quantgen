@@ -45,8 +45,8 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC, generic_dna
 from Bio.Data.IUPACData import ambiguous_dna_values
 
-from pyutilstimflutre import Utils, Job, JobGroup, JobManager, Fastqc, \
-    SamtoolsFlagstat
+from pyutilstimflutre import Utils, ProgVersion, Job, JobGroup, JobManager, \
+    Fastqc, SamtoolsFlagstat
 
 if sys.version_info[0] == 2:
     if sys.version_info[1] < 7:
@@ -54,7 +54,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.2.3" # http://semver.org/
+progVersion = "0.3.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -757,14 +757,14 @@ class Gbs(object):
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
         msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.9.0\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
-        msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12 and Samtools v >= 1.1)\n"
-        msg += "\t\t5: local realignment per sample (with GATK v >= 3.3)\n"
-        msg += "\t\t6: local realignment per individual (with GATK v >= 3.3)\n"
-        msg += "\t\t7: variant and genotype calling per individual (with GATK HaplotypeCaller v >= 3.3)\n"
-        msg += "\t\t8: variant and genotype calling jointly across individuals (with GATK GenotypeGVCFs v >= 3.3)\n"
-        # msg += "\t\t9: variant recalibration (with GATK v >= 3.3)\n"
-        # msg += "\t\t10: genotype refinement (with GATK v >= 3.3)\n"
-        # msg += "\t\t11: base quality scores recalibration (with GATK v >= 3.3)\n"
+        msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and )\n"
+        msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
+        msg += "\t\t6: local realignment per individual (with GATK v >= 3.5)\n"
+        msg += "\t\t7: variant and genotype calling per individual (with GATK HaplotypeCaller v >= 3.5)\n"
+        msg += "\t\t8: variant and genotype calling jointly across individuals (with GATK GenotypeGVCFs v >= 3.5)\n"
+        # msg += "\t\t9: variant recalibration (with GATK v >= 3.5)\n"
+        # msg += "\t\t10: genotype refinement (with GATK v >= 3.5)\n"
+        # msg += "\t\t11: base quality scores recalibration (with GATK v >= 3.5)\n"
         msg += "      --samples\tpath to the 'samples' file\n"
         msg += "\t\tthe file should be encoded in ASCII\n"
         msg += "\t\tthe first row should be a header with column names\n"
@@ -794,10 +794,11 @@ class Gbs(object):
         msg += "\t\t'/data/Atha_v2' for '/data/Atha_v2.fa', '/data/Atha_v2.bwt', etc\n"
         msg += "\t\tthese files are produced via 'bwa index ...'\n"
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
+        msg += "\t\tsee Picard 'CreateSequenceDictionary'\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
         msg += "      --jvm\tmemory given to the Java Virtual Machine (default=4, in Gb)\n"
-        msg += "\t\tused in steps 4, 5 and 6 for Picard and GATK\n"
+        msg += "\t\tused in steps 4, 5, 6, 7 and 8 for Picard and GATK\n"
         msg += "      --knowni\tpath to a VCF file with known indels (for local realignment)\n"
         msg += "      --known\tpath to a VCF file with known sites (e.g. from dbSNP)\n"
         msg += "      --force\tforce to re-run step(s)\n"
@@ -1008,14 +1009,30 @@ class Gbs(object):
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
+            obsMajVer, obsMinVer = ProgVersion.getVersionGatk()
+            if not (obsMajVer == 3 and obsMinVer >= 5):
+                msg = "ERROR: 'GATK' is in version %s.%s" % \
+                      (obsMajVer, obsMinVer)
+                msg += " instead of >= 3.5"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
             if self.knownIndelsFile and not os.path.exists(self.knownIndelsFile):
                 msg = "ERROR: can't find file %s" % self.knownIndelsFile
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-        if "6" in self.lSteps:
+        if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps:
             if not Utils.isProgramInPath("GenomeAnalysisTK.jar"):
                 msg = "ERROR: can't find 'GenomeAnalysisTK.jar' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            obsMajVer, obsMinVer = ProgVersion.getVersionGatk()
+            if not (obsMajVer == 3 and obsMinVer >= 5):
+                msg = "ERROR: 'GATK' is in version %s.%s" % \
+                      (obsMajVer, obsMinVer)
+                msg += " instead of >= 3.5"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -1828,7 +1845,7 @@ if __name__ == "__main__":
         msg += "\ncmd-line: %s" % ' '.join(sys.argv)
         msg += "\ncwd: %s" % os.getcwd()
         print(msg); sys.stdout.flush()
-        
+
     i.run()
     
     if i.verbose > 0:
