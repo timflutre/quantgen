@@ -8,7 +8,7 @@
 
 rm(list=ls())
 prog.name <- "estimLd.R"
-prog.version <- "1.0.0" # http://semver.org/
+prog.version <- "1.1.0" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -28,12 +28,15 @@ help <- function(){
   txt <- paste0(txt, "  -h, --help\tdisplay the help and exit\n")
   txt <- paste0(txt, "  -V, --version\toutput version information and exit\n")
   txt <- paste0(txt, "  -v, --verbose\tverbosity level (0/default=1/2/3)\n")
-  txt <- paste0(txt, "      --genos\tpath to the genotype file (can be gzipped)\n")
+  txt <- paste0(txt, "      --genos\tpath to the genotype file encoded as 0/1/2 (can be gzipped)\n")
   txt <- paste0(txt, "      --snps\tpath to the file with SNP coordinates (can be gzipped)\n")
   txt <- paste0(txt, "\t\tno header, 1 row per SNP, 3 columns: snp<tab>pos<tab>chr (as in GEMMA)\n")
   txt <- paste0(txt, "      --out\tpath to the output gzipped file\n")
   txt <- paste0(txt, "      --mmaf\tminimum for the minor allele frequency (default=0.01)\n")
-  txt <- paste0(txt, "      --magr\tmethod to estimate the additive genomic relationships (default=zhou/astle-balding/vanraden1)\n")
+  txt <- paste0(txt, "      --ck\tcorrect LD estimates with kinship\n")
+  txt <- paste0(txt, "      --cs\tcorrect LD estimates with population structure\n")
+  txt <- paste0(txt, "      --magr\tmethod to estimate the additive genomic relationships\n")
+  txt <- paste0(txt, "\t\tdefault=vanraden1/astle-balding/habier/yang/zhou\n")
   txt <- paste0(txt, "      --chr\tonly chromosome to analyze\n")
   txt <- paste0(txt, "      --pop\tonly population to analyze\n")
   txt <- paste0(txt, "      --threads\tnumber of threads (default=1)\n")
@@ -103,6 +106,12 @@ parseCmdLine <- function(params){
       params$min.maf <- as.numeric(args[i+1])
       i <- i + 1
     }
+    else if(args[i] == "--ck"){
+      params$correct.kinship <- TRUE
+    }
+    else if(args[i] == "--cs"){
+      params$correct.structure <- TRUE
+    }
     else if(args[i] == "--magr"){
       params$meth.add.gen.rel <- args[i+1]
       i <- i + 1
@@ -162,7 +171,7 @@ checkParams <- function(params){
     help()
     quit("no", status=1)
   }
-  if(! params$meth.add.gen.rel %in% c("zhou", "astle-balding", "vanraden1")){
+  if(! params$meth.add.gen.rel %in% c("zhou", "astle-balding", "vanraden1", "habier", "yang")){
     write(paste0("ERROR: unknown option --magr", params$meth.add.gen.rel, "\n"),
           stderr())
     help()
@@ -198,12 +207,22 @@ run <- function(params){
   snp.coords <- snp.coords[colnames(X), c("chr", "pos")]
   print(dim(snp.coords))
 
-  A <- estimGenRel(X=X, thresh=0, method=params$meth.add.gen.rel)
+  A <- NULL
+  if(params$correct.kinship){
+    if(params$verbose > 0)
+      write("estimate the additive genomic relationships ...", stdout())
+    A <- estimGenRel(X=X, thresh=0, method=params$meth.add.gen.rel)
+  }
 
-  stopifnot(grepl("_", rownames(X)[1]))
-  pops <- sapply(strsplit(rownames(X), "_"), function(x){x[1]})
-  names(pops) <- rownames(X)
-  print(table(pops))
+  pops <- NULL
+  if(params$correct.structure){
+    if(params$verbose > 0)
+      write("extract the population assignments ...", stdout())
+    stopifnot(grepl("_", rownames(X)[1]))
+    pops <- sapply(strsplit(rownames(X), "_"), function(x){x[1]})
+    names(pops) <- rownames(X)
+    print(table(pops))
+  }
 
   ld <- estimLd(X=X, K=A, pops=pops, snp.coords=snp.coords,
                 only.chr=params$only.chr, only.pop=params$only.pop,
@@ -219,7 +238,9 @@ main <- function(){
                  file.snps=NULL,
                  file.out=NULL,
                  min.maf=0.01,
-                 meth.add.gen.rel="zhou",
+                 correct.kinship=FALSE,
+                 correct.structure=FALSE,
+                 meth.add.gen.rel="vanraden1",
                  only.chr=NULL,
                  only.pop=NULL,
                  nb.threads=1)
