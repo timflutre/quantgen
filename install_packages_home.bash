@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "inphap" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -375,6 +375,13 @@ if [ "$1" == "igv" ]; then
     unzip IGV_2.3.57.zip
     cd IGV_2.3.57/
     cp igv.jar igv.sh $HOME
+fi
+
+if [ "$1" == "inphap" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://it.informatik.uni-tuebingen.de/software/inPhap/inPhap.jar
+    wget http://it.informatik.uni-tuebingen.de/software/inPhap/inPHAP_Example_Files.zip
 fi
 
 if [ "$1" == "insilicut" ]; then
