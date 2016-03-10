@@ -642,7 +642,7 @@ fi
 if [ "$1" == "xclip" ]; then
     mkdir -p $1
     cd $1
-    wget http://sourceforge.net/projects/xclip/files/latest/download
+    wget --no-check-certificate http://sourceforge.net/projects/xclip/files/latest/download
     tar -xzvf xclip-0.12.tar.gz
     cd xclip-0.12
     ./configure --prefix=$HOME
