@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "blup_gen_snp" "bsfg" "carthagene" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "help2man" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "markdown-mode" "ms" "mstrat" "patman" "platypus" "primer3" "polymode" "rar" "repet" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "inphap" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -80,11 +80,43 @@ if [ "$1" == "bedtools" ]; then
     cp bin/* $HOME/bin/
 fi
 
+if [ "$1" == "biobambam" ]; then
+    mkdir -p $1
+    cd $1
+    wget https://github.com/gt1/biobambam2/releases/download/2.0.9-release-20150619154907/biobambam2-2.0.9-release-20150619154907-x86_64-etch-linux-gnu.tar.gz
+    tar -xzvf biobambam2-2.0.9-release-20150619154907-x86_64-etch-linux-gnu.tar.gz
+    cd biobambam2-2.0.9-release-20150619154907-x86_64-etch-linux-gnu/
+    cp bin/bamsormadup \
+       bin/bamcollate2 \
+       bin/bammarkduplicates2 \
+       bin/bamtofastq \
+       $HOME/bin/
+fi
+
+if [ "$1" == "blup_gen_snp" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://snp.toulouse.inra.fr/~alegarra/progs_genom_sel.tar.gz
+    tar -xzvf progs_genom_sel.tar.gz
+    cd progs_genom_sel
+    cp blup_gen blup_snp $HOME/bin
+fi
+
 if [ "$1" == "bsfg" ]; then
     mkdir -p $1
     cd $1
     wget http://www.stat.duke.edu/~sayan/bfgr/BSF-G.zip
     unzip BSF-G.zip
+fi
+
+if [ "$1" == "bwa" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://sourceforge.net/projects/bio-bwa/files/bwa-0.7.12.tar.bz2/download
+    tar -xvf bwa-0.7.12.tar.bz2
+    cd bwa-0.7.12/
+    make
+    cp bwa $HOME/bin
 fi
 
 if [ "$1" == "carthagene" ]; then
@@ -110,13 +142,17 @@ N
 EOF
 fi
 
-if [ "$1" == "blup_gen_snp" ]; then
+if [ "$1" == "cutadapt" ]; then
     mkdir -p $1
     cd $1
-    wget http://snp.toulouse.inra.fr/~alegarra/progs_genom_sel.tar.gz
-    tar -xzvf progs_genom_sel.tar.gz
-    cd progs_genom_sel
-    cp blup_gen blup_snp $HOME/bin
+    # wget --no-check-certificate -O master.zip https://github.com/marcelm/cutadapt/archive/master.zip
+    # unzip master.zip
+    # cd cutadapt-master/
+    wget --no-check-certificate -O cutadapt-1.8.tar.gz https://github.com/marcelm/cutadapt/archive/v1.8.tar.gz
+    tar -xvf cutadapt-1.8.tar.gz
+    cd cutadapt-1.8/
+    python setup.py install --prefix=$HOME
+    echo "be sure to include ${HOME}/lib/... in your PYTHONPATH"
 fi
 
 if [ "$1" == "deindexer" ]; then
@@ -197,10 +233,10 @@ fi
 if [ "$1" == "emacs" ]; then
     mkdir -p $1
     cd $1
-    wget --timestamping http://gnu.mirrors.hoobly.com/gnu/emacs/emacs-24.4.tar.gz
-    tar -xzvf emacs-24.4.tar.gz
-    cd emacs-24.4
-    ./configure --prefix=$HOME --with-x-toolkit=no --with-xpm=no --with-jpeg=no --with-gif=no --with-tiff=no
+    wget --timestamping http://gnu.mirrors.hoobly.com/gnu/emacs/emacs-24.5.tar.gz
+    tar -xzvf emacs-24.5.tar.gz
+    cd emacs-24.5
+    ./configure --prefix=$HOME #--with-x-toolkit=no --with-xpm=no --with-jpeg=no --with-gif=no --with-tiff=no
     make
     make install
 fi
@@ -226,6 +262,16 @@ if [ "$1" == "eqtlbma" ]; then
     make
     # make check
     make install
+fi
+
+if [ "$1" == "ess" ]; then
+    mkdir -p $1
+    cd $1
+    wget -O ess-15.03-1.tgz http://ess.r-project.org/downloads/ess/ess-15.03-1.tgz
+    tar -xzvf ess-15.03-1.tgz
+    cd ess-15.03-1
+    make
+    echo "read the manual to complete the install"
 fi
 
 if [ "$1" == "fastqc" ]; then
@@ -297,12 +343,12 @@ if [ "$1" == "gsl" ]; then
     make install
 fi
 
-if [ "$1" == "latex2html" ]; then
+if [ "$1" == "htslib" ]; then
     mkdir -p $1
     cd $1
-    wget http://mirrors.ctan.org/support/latex2html/latex2html-2012.tgz
-    tar -xzvf latex2html-2012.tgz
-    cd latex2html-2012
+    wget -O htslib-1.2.1.tar.bz2 --no-check-certificate https://github.com/samtools/htslib/releases/download/1.2.1/htslib-1.2.1.tar.bz2
+    tar -xvf htslib-1.2.1.tar.bz2
+    cd htslib-1.2.1/
     ./configure --prefix=$HOME
     make
     make install
@@ -314,6 +360,47 @@ if [ "$1" == "help2man" ]; then
     wget http://mirror.ibcp.fr/pub/gnu/help2man/help2man-1.43.3.tar.gz
     tar -xzvf help2man-1.43.3.tar.gz
     cd help2man-1.43.3
+    ./configure --prefix=$HOME
+    make
+    make install
+fi
+
+if [ "$1" == "igv" ]; then
+    mkdir -p $1
+    cd $1
+    # wget https://github.com/igvteam/igv/archive/v2.3.57.zip
+    # unzip v2.3.57.zip
+    # cd igv-2.3.57/
+    wget http://data.broadinstitute.org/igv/projects/downloads/IGV_2.3.57.zip
+    unzip IGV_2.3.57.zip
+    cd IGV_2.3.57/
+    cp igv.jar igv.sh $HOME
+fi
+
+if [ "$1" == "inphap" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://it.informatik.uni-tuebingen.de/software/inPhap/inPhap.jar
+    wget http://it.informatik.uni-tuebingen.de/software/inPhap/inPHAP_Example_Files.zip
+fi
+
+if [ "$1" == "insilicut" ]; then
+    mkdir -p $1
+    cd $1
+    wget -O insilicut-1.1.2.tar.gz https://github.com/timflutre/insilicut/archive/v1.1.2.tar.gz
+    tar -xzvf insilicut-1.1.2.tar.gz
+    cd insilicut-1.1.2/
+    make
+    # make check
+    make install
+fi
+
+if [ "$1" == "latex2html" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://mirrors.ctan.org/support/latex2html/latex2html-2012.tgz
+    tar -xzvf latex2html-2012.tgz
+    cd latex2html-2012
     ./configure --prefix=$HOME
     make
     make install
@@ -366,13 +453,6 @@ if [ "$1" == "mapmaker" ]; then
     echo "see also http://www.latitudecartography.co.uk/forum/topic.asp?TOPIC_ID=2033"
 fi
 
-if [ "$1" == "markdown-mode" ]; then
-    mkdir -p $1
-    cd $1
-    wget http://jblevins.org/projects/markdown-mode/markdown-mode.el
-    cp markdown-mode.el $HOME/.emacs.d
-fi
-
 if [ "$1" == "ms" ]; then
     mkdir -p $1
     cd $1
@@ -392,6 +472,17 @@ if [ "$1" == "mstrat" ]; then
     gcc -o ether Etherv4.c -lm
 fi
 
+if [ "$1" == "openbugs" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://www.openbugs.net/w/OpenBUGS_3_2_3?action=AttachFile&do=get&target=OpenBUGS-3.2.3.tar.gz
+    tar -xzvf OpenBUGS-3.2.3.tar.gz
+    cd OpenBUGS-3.2.3/
+    ./configure --prefix=$HOME
+    make
+    make install
+fi
+
 if [ "$1" == "patman" ]; then
     mkdir -p $1
     cd $1
@@ -407,8 +498,8 @@ if [ "$1" == "platypus" ]; then
     cd $1
     # need to register: http://www.well.ox.ac.uk/platypus
     wget http://www.well.ox.ac.uk/bioinformatics/Software/Platypus-latest.tgz
-    tar -xzvf Platypus-latest.tgz
-    cd Platypus_0.7.8/
+    tar -xvf Platypus-latest.tgz
+    cd Platypus_0.8.1/
     ./buildPlatypus.sh
     python setup.py install --home=$HOME
     echo -e '#!/usr/bin/env python\n' > tmp
@@ -505,6 +596,17 @@ if [ "$1" == "stacks" ]; then
     make install
 fi
 
+if [ "$1" == "R" ]; then
+    mkdir -p $1
+    cd $1
+    wget http://cran.rstudio.com/src/base/R-3/R-3.2.0.tar.gz
+    tar -xvf R-3.2.0.tar.gz
+    cd R-3.2.0
+    ./configure --prefix=$HOME
+    make
+    make install
+fi
+
 if [ "$1" == "rar" ]; then
     mkdir -p $1
     cd $1
@@ -522,6 +624,15 @@ if [ "$1" == "repet" ]; then
     tar -xzvf REPET_linux-x64-2.2.tar.gz
     cd REPET_linux-x64-2.2
     cp bin/* $HOME/bin
+fi
+
+if [ "$1" == "rpy2" ]; then
+    mkdir -p $1
+    cd $1
+    wget https://pypi.python.org/packages/source/r/rpy2/rpy2-2.6.0.tar.gz#md5=679898fbc832d4f05a5efcf1a7eb1a68
+    tar -xzvf rpy2-2.6.0.tar.gz
+    cd rpy2-2.6.0
+    python setup.py install --user
 fi
 
 if [ "$1" == "tabula" ]; then
