@@ -35,7 +35,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
-progVersion = "1.2.1" # http://semver.org/
+progVersion = "1.3.0" # http://semver.org/
 
 
 def user_input(msg):
@@ -512,6 +512,22 @@ class Citeulike2Others(object):
                 = self.formatFilesForBibtex(entryJson)
             
             
+    def editCommentField(self):
+        """
+        Zotero assumes notes to be in field 'annote'.
+        """
+        if self.verbose > 0:
+            print("edit 'comment' field of Bibtex entries ...")
+            sys.stdout.flush()
+            
+        for ck in self.bibtexRefs.entries:
+            entryBibtex = self.bibtexRefs.entries[ck]
+            if "comment" in entryBibtex.fields.keys():
+                self.bibtexRefs.entries[ck].fields["annote"] \
+                    = entryBibtex.fields["comment"].replace("* ", "\n* ")
+                del self.bibtexRefs.entries[ck].fields["comment"]
+                
+                
     def writeBibtexFile(self):
         if self.verbose > 0:
             print("write new Bibtex file ...")
@@ -530,6 +546,10 @@ class Citeulike2Others(object):
         # bibtexparser.dump(bibtexRefs, newBibtexHandle)
         # newBibtexHandle.close()
         
+        if self.otherTool == "zotero":
+            cmd = "sed -i 's/file = \\\"{/file = {/g' %s" % newBibtexFile
+            os.system(cmd)
+            
         if self.verbose > 0:
             print("library saved in file '%s'" % newBibtexFile)
             
@@ -549,6 +569,8 @@ class Citeulike2Others(object):
             self.loadJsonFile()
             self.loadBibtexFile()
             self.addFileFieldToBibtex()
+            if self.otherTool == "zotero":
+                self.editCommentField()
             self.writeBibtexFile()
             
             
