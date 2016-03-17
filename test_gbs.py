@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Aim: test gbs.py
-# Copyright (C) 2015 Institut National de la Recherche Agronomique
+# Copyright (C) 2015-2016 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
@@ -17,7 +17,7 @@ import os
 import getopt
 import time
 import datetime
-from subprocess import Popen, PIPE
+import subprocess
 import math
 import gzip
 import tempfile
@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.2.0" # http://semver.org/
+progVersion = "0.3.0" # http://semver.org/
 
 
 class TestGbs(object):
@@ -47,6 +47,8 @@ class TestGbs(object):
         self.verbose = 0
         self.pathToProg = ""
         self.testsToRun = ["1"]
+        self.queue = "normal.q"
+        self.lResources = None
         self.clean = True
         
         
@@ -66,10 +68,12 @@ class TestGbs(object):
         msg += "  -v, --verbose\tverbosity level (default=0/1/2/3)\n"
         msg += "  -p, --p2p\tfull path to the program to be tested\n"
         msg += "  -t, --test\tidentifiers of test(s) to run (default=1)\n"
+        msg += "  -q, --queue\tname of the cluster queue (default=normal.q)\n"
+        msg += "  -r, --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s -p ~/src/gbs.py -n\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -p ~/src/gbs.py\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -83,7 +87,7 @@ class TestGbs(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2015 Institut National de la Recherche Agronomique (INRA).\n"
+        msg += "Copyright (C) 2015-2016 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut]."
@@ -95,9 +99,10 @@ class TestGbs(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:p:t:n",
+            opts, args = getopt.getopt( sys.argv[1:], "hVv:p:t:q:r:n",
                                         ["help", "version", "verbose=",
-                                         "p2p=", "test=", "noclean"])
+                                         "p2p=", "test=", "queue=", "resou=",
+                                         "noclean"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -115,6 +120,10 @@ class TestGbs(object):
                  self.pathToProg = a
             elif o == "-t" or o == "--test":
                 self.testsToRun = a.split("-")
+            elif o == "-q" or o == "--queue":
+                self.queue = a
+            elif o == "-r" or o == "--resou":
+                self.lResources = a.split()
             elif o == "-n" or o == "--noclean":
                 self.clean = False
             else:
@@ -169,13 +178,13 @@ class TestGbs(object):
         
         samplesHandle = open(samplesFile, "w")
         
-        lane2samples["1"] = {"R1": "%s/init_reads_lane1_R1.fastq.gz" % os.getcwd(),
-                          "R2": "%s/init_reads_lane1_R2.fastq.gz" % os.getcwd(),
+        lane2samples["1"] = {"R1": "init_reads_lane1_R1.fastq.gz",
+                          "R2": "init_reads_lane1_R2.fastq.gz",
                           "inds": {"ind1": {"gen":0, "lib":"ind1-A", "tag":"AAAA"},
                                    "ind2": {"gen":0, "lib":"ind2", "tag":"GGGG"},
                                    "ind3": {"gen":1, "lib":"ind3", "tag":"TTTT"}}}
-        lane2samples["2"] = {"R1": "%s/init_reads_lane2_R1.fastq.gz" % os.getcwd(),
-                          "R2": "%s/init_reads_lane2_R2.fastq.gz" % os.getcwd(),
+        lane2samples["2"] = {"R1": "init_reads_lane2_R1.fastq.gz",
+                          "R2": "init_reads_lane2_R2.fastq.gz",
                           "inds": {"ind1": {"gen":0, "lib":"ind1-B", "tag":"CCCC"},
                                    "ind2": {"gen":0, "lib":"ind2", "tag":"TTTT"},
                                    "ind4": {"gen":1, "lib":"ind4", "tag":"AAAA"}}}
@@ -591,18 +600,19 @@ class TestGbs(object):
     
     
     def makeBwaIndexFiles(self, refFile):
-        cmd = "bwa index"
-        cmd += " -p %s" % refFile.split(".fa")[0]
-        cmd +=" %s" % refFile
-        cmd += " >& bwa_index.log"
-        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        args = ["bwa", "index", "-p", refFile.split(".fa")[0], refFile]
+        stdoutFilehandle = open("bwa_index.log", "w")
+        subprocess.check_call(args, stdout=stdoutFilehandle,
+                              stderr=subprocess.STDOUT)
+        stdoutFilehandle.close()
         
         
     def makeFaIndexFile(self, refFile):
-        cmd = "samtools faidx"
-        cmd += " %s" % refFile
-        cmd += " >& faidx.log"
-        p = Popen(cmd, shell=True, stdout=PIPE).communicate()
+        args = ["samtools", "faidx", refFile]
+        stdoutFilehandle = open("samtools_faidx.log", "w")
+        subprocess.check_call(args, stdout=stdoutFilehandle,
+                              stderr=subprocess.STDOUT)
+        stdoutFilehandle.close()
         
         
     def launchProg(self, options):
@@ -614,7 +624,8 @@ class TestGbs(object):
                + ["-v", str(self.verbose - 1)]
         if self.verbose > 0:
             print(" ".join(args))
-        msgs = Popen(args, shell=True, stdout=PIPE, stderr=PIPE).communicate()
+        msgs = subprocess.Popen(args, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE).communicate()
         if self.verbose > 1:
             if msgs[0] != "":
                 print("stdout:")
@@ -639,6 +650,10 @@ class TestGbs(object):
         
         options.append("--proj")
         options.append("testGbs")
+        options.append("--queue")
+        options.append(self.queue)
+        options.append("--resou")
+        options.append(" ".join(self.lResources))
         options.append("--step")
         options.append("1")
         
@@ -661,6 +676,8 @@ class TestGbs(object):
         self.makeFaIndexFile(refFile)
         options.append("--samples")
         options.append(samplesFile)
+        options.append("--pird")
+        options.append(os.getcwd())
         
         return options
         
@@ -715,8 +732,10 @@ if __name__ == "__main__":
                                        math.floor(endTime - startTime))
         msg += " (%s" % str(runLength)
         if "linux" in sys.platform:
-            p = Popen(["grep", "VmHWM", "/proc/%s/status" % os.getpid()],
-                      shell=False, stdout=PIPE).communicate()
+            p = subprocess.Popen(["grep", "VmHWM", "/proc/%s/status" % \
+                                  os.getpid()],
+                                 shell=False,
+                                 stdout=subprocess.PIPE).communicate()
             maxMem = p[0].split()[1]
             msg += "; %s kB)" % maxMem
         else:

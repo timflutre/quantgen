@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Aim: download data from CiteULike for usage with Jabref or Zotero
-# Copyright (C) 2014-2015 Timothée Flutre
+# Copyright (C) 2014-2016 Timothée Flutre
 # Persons: Timothée Flutre [cre,aut]
 # License: GPL-3+
 # Versioning: https://github.com/timflutre/quantgen
@@ -35,7 +35,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
-progVersion = "1.2.0" # http://semver.org/
+progVersion = "1.2.1" # http://semver.org/
 
 
 def user_input(msg):
@@ -110,7 +110,7 @@ class Citeulike2Others(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2014-2015 Timothée Flutre.\n"
+        msg += "Copyright (C) 2014-2016 Timothée Flutre.\n"
         msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut]."
@@ -517,7 +517,9 @@ class Citeulike2Others(object):
             print("write new Bibtex file ...")
             sys.stdout.flush()
             
-        newBibtexFile = "%s_for-%s.bib" % (self.bibtexFile, self.otherTool)
+        newBibtexFile = "%s_for-%s.bib" % \
+                        (os.path.splitext(self.bibtexFile)[0],
+                         self.otherTool)
         if os.path.exists(newBibtexFile):
             os.remove(newBibtexFile)
             
