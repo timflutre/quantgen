@@ -267,11 +267,12 @@ fi
 if [ "$1" == "ess" ]; then
     mkdir -p $1
     cd $1
-    wget -O ess-15.03-1.tgz http://ess.r-project.org/downloads/ess/ess-15.03-1.tgz
-    tar -xzvf ess-15.03-1.tgz
-    cd ess-15.03-1
+    wget -O ess-15.09-2.tgz http://ess.r-project.org/downloads/ess/ess-15.09-2.tgz
+    tar -xzvf ess-15.09-2.tgz
+    cd ess-15.09-2
     make
     echo "read the manual to complete the install"
+    echo "http://ess.r-project.org/Manual/ess.html#Installation"
 fi
 
 if [ "$1" == "fastqc" ]; then
