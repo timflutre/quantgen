@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-# Aim: perform the bioinformatics aspects of genotyping-by-sequencing
-# Copyright (C) 2015 Institut National de la Recherche Agronomique
+# Aim: perform the computational aspects of genotyping-by-sequencing
+# Copyright (C) 2015-2016 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
@@ -11,10 +11,11 @@
 # - see where to introduce BQSR
 # - catch exception if step dir already exists, and skip step for the given lane(s)
 # - add option to load pedigree (PED format)
-# - check version of external programs
+# - check version of all external programs
 # - check that dates in samples file agree with SAM specification
 # - add option to ignore R2 files
 # - add option to give VCF of known indels (for local realign)
+# - try drmaa-python? https://github.com/pygridtools/drmaa-python
 # - try sgeparse? https://pypi.python.org/pypi/sgeparse
 
 # to allow code to work with Python 2 and 3
@@ -45,6 +46,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC, generic_dna
 from Bio.Data.IUPACData import ambiguous_dna_values
 
+# should be at least version 0.3.2
 from pyutilstimflutre import Utils, ProgVersion, Job, JobGroup, JobManager, \
     Fastqc, SamtoolsFlagstat
 
@@ -54,7 +56,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.3.0" # http://semver.org/
+progVersion = "0.3.1" # http://semver.org/
 
 
 class GbsSample(object):
@@ -692,12 +694,14 @@ class Gbs(object):
     
     def __init__(self):
         self.verbose = 1
+        self.projectId = None
+        self.scheduler = "SGE"
+        self.queue = "normal.q"
+        self.lResources = None
         self.lSteps = []
         self.forceRerunSteps = False
         self.samplesFile = None
-        self.scheduler = "SGE"
-        self.queue = "normal.q"
-        self.projectId = None
+        self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
         self.jobManager = None
         self.samplesCol2idx = {"individual": None,
@@ -742,7 +746,7 @@ class Gbs(object):
         
         The format complies with help2man (http://www.gnu.org/s/help2man)
         """
-        msg = "`%s' performs the bioinformatics aspects of genotyping-by-sequencing.\n" % os.path.basename(sys.argv[0])
+        msg = "`%s' performs the computational aspects of genotyping-by-sequencing.\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Usage: %s [OPTIONS] ...\n" % os.path.basename(sys.argv[0])
         msg += "\n"
@@ -753,11 +757,12 @@ class Gbs(object):
         msg += "      --proj\tname of the project\n"
         msg += "      --schdlr\tname of the cluster scheduler (default=SGE)\n"
         msg += "      --queue\tname of the cluster queue (default=normal.q)\n"
+        msg += "      --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
         msg += "      --step\tstep(s) to perform (1/2/3/4/..., can be 1-2-...)\n"
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
         msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.9.0\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
-        msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and )\n"
+        msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and Picard)\n"
         msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
         msg += "\t\t6: local realignment per individual (with GATK v >= 3.5)\n"
         msg += "\t\t7: variant and genotype calling per individual (with GATK HaplotypeCaller v >= 3.5)\n"
@@ -766,6 +771,7 @@ class Gbs(object):
         # msg += "\t\t10: genotype refinement (with GATK v >= 3.5)\n"
         # msg += "\t\t11: base quality scores recalibration (with GATK v >= 3.5)\n"
         msg += "      --samples\tpath to the 'samples' file\n"
+        msg += "\t\tcompulsory for all steps\n"
         msg += "\t\tthe file should be encoded in ASCII\n"
         msg += "\t\tthe first row should be a header with column names\n"
         msg += "\t\teach 'sample' (see details below) should have one and only one row\n"
@@ -773,7 +779,7 @@ class Gbs(object):
         msg += "\t\tcolumns can be in any order\n"
         msg += "\t\trows starting by '#' are skipped\n"
         msg += "\t\t12 columns are compulsory (but there can be more):\n"
-        msg += "\t\t individual (see details below, e.g. 'Col-0', but no underscore '_' and space ' ', use dash '-' instead)\n"
+        msg += "\t\t individual (see details below, e.g. 'Col-0', but neither underscore '_' nor space ' ', use dash '-' instead)\n"
         msg += "\t\t species (e.g. 'Arabidopsis thaliana')\n"
         msg += "\t\t library (e.g. can be the same as 'individual')\n"
         msg += "\t\t barcode (e.g. 'ATGG')\n"
@@ -783,17 +789,22 @@ class Gbs(object):
         msg += "\t\t flowcell (e.g. 'C5YMDACXX')\n"
         msg += "\t\t lane (e.g. '3')\n"
         msg += "\t\t date (e.g. '2015-01-15', see SAM format specification)\n"
-        msg += "\t\t fastq_file_R1 (full path, one per lane, gzip-compressed)\n"
-        msg += "\t\t fastq_file_R2 (full path, one per lane, gzip-compressed)\n"
+        msg += "\t\t fastq_file_R1 (filename, one per lane, gzip-compressed)\n"
+        msg += "\t\t fastq_file_R2 (filename, one per lane, gzip-compressed)\n"
+        msg += "      --pird\tpath to the input reads directory\n"
+        msg += "\t\twill be added to the columns 'fastq_file_R*' from the sample file\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
+        msg += "\t\tcompulsory for step 3\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
         msg += "\t\tname: at least 'adpR1' (also 'adpR2' if paired-end)\n"
         msg += "\t\tsequence: from 5' (left) to 3' (right)\n"
         msg += "      --enz\tname of the restriction enzyme (default=ApeKI)\n"
         msg += "      --ref\tpath to the prefix of files for the reference genome\n"
-        msg += "\t\t'/data/Atha_v2' for '/data/Atha_v2.fa', '/data/Atha_v2.bwt', etc\n"
+        msg += "\t\tcompulsory for steps 4, 5, 6, 7, 8\n"
+        msg += "\t\te.g. '/data/Atha_v2' for '/data/Atha_v2.fa', '/data/Atha_v2.bwt', etc\n"
         msg += "\t\tthese files are produced via 'bwa index ...'\n"
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
+        msg += "\t\tcompulsory for step 4\n"
         msg += "\t\tsee Picard 'CreateSequenceDictionary'\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
@@ -833,7 +844,7 @@ class Gbs(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2015 Institut National de la Recherche Agronomique.\n"
+        msg += "Copyright (C) 2015-2016 Institut National de la Recherche Agronomique.\n"
         msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut]."
@@ -850,7 +861,7 @@ class Gbs(object):
                                          "proj=", "step=", "samples=", "dict=",
                                          "schdlr=", "queue=", "enz=", "adp=",
                                          "ref=", "tmpd=", "jvm=", "knowni=",
-                                         "known=", "force"])
+                                         "known=", "force", "pird=", "resou="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -870,10 +881,14 @@ class Gbs(object):
                 self.scheduler = a
             elif o == "--queue":
                 self.queue = a
+            elif o == "--resou":
+                self.lResources = a.split()
             elif o == "--step":
                 self.lSteps = sorted(a.split("-"))
             elif o == "--samples":
                  self.samplesFile = a
+            elif o == "--pird":
+                self.pathToInReadsDir = a
             elif o == "--enz":
                 self.enzyme = a
             elif o == "--adp":
@@ -1104,9 +1119,13 @@ class Gbs(object):
             iSample.seqPlatform = tokens[self.samplesCol2idx["seq_platform"]]
             iSample.seqPlatformModel = tokens[self.samplesCol2idx["seq_platform_model"]]
             iSample.date = tokens[self.samplesCol2idx["date"]]
-            iSample.initFastqFile1 = tokens[self.samplesCol2idx["fastq_file_R1"]]
+            iSample.initFastqFile1 \
+                = "%s/%s" % (self.pathToInReadsDir,
+                             tokens[self.samplesCol2idx["fastq_file_R1"]])
             if tokens[self.samplesCol2idx["fastq_file_R2"]] != "":
-                iSample.initFastqFile2 = tokens[self.samplesCol2idx["fastq_file_R2"]]
+                iSample.initFastqFile2 \
+                    = "%s/%s" % (self.pathToInReadsDir,
+                                 tokens[self.samplesCol2idx["fastq_file_R2"]])
             self.dSamples[iSample.id] = iSample
             
             laneId = "%s_%i" % (flowcell, laneNum)
@@ -1215,7 +1234,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1295,7 +1315,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1330,7 +1351,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1360,7 +1382,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1426,7 +1449,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1455,7 +1479,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1544,7 +1569,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1581,7 +1607,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         lIndIds = self.dInds.keys()
@@ -1622,7 +1649,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         lIndIds = self.dInds.keys()
@@ -1661,7 +1689,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         stepDir = "%s/%s" % (self.allIndsDir, self.lDirSteps[7])
@@ -1708,7 +1737,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         stepDir = "%s/%s" % (self.allIndsDir, self.lDirSteps[8])
@@ -1772,7 +1802,8 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue)
+        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
+                             self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
