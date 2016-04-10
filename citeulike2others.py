@@ -35,7 +35,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
-progVersion = "1.3.0" # http://semver.org/
+progVersion = "1.3.1" # http://semver.org/
 
 
 def user_input(msg):
@@ -528,6 +528,21 @@ class Citeulike2Others(object):
                 del self.bibtexRefs.entries[ck].fields["comment"]
                 
                 
+    def editKeywordsField(self):
+        """
+        Zotero keeps "\" before "_".
+        """
+        if self.verbose > 0:
+            print("edit 'keywords' field of Bibtex entries ...")
+            sys.stdout.flush()
+            
+        for ck in self.bibtexRefs.entries:
+            entryBibtex = self.bibtexRefs.entries[ck]
+            if "keywords" in entryBibtex.fields.keys():
+                self.bibtexRefs.entries[ck].fields["keywords"] \
+                    = entryBibtex.fields["keywords"].replace("\\", "")
+                
+                
     def writeBibtexFile(self):
         if self.verbose > 0:
             print("write new Bibtex file ...")
@@ -570,7 +585,8 @@ class Citeulike2Others(object):
             self.loadBibtexFile()
             self.addFileFieldToBibtex()
             if self.otherTool == "zotero":
-                self.editCommentField()
+                # self.editCommentField()
+                self.editKeywordsField()
             self.writeBibtexFile()
             
             
