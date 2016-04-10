@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.3.0" # http://semver.org/
+progVersion = "0.3.1" # http://semver.org/
 
 
 class TestGbs(object):
@@ -652,8 +652,9 @@ class TestGbs(object):
         options.append("testGbs")
         options.append("--queue")
         options.append(self.queue)
-        options.append("--resou")
-        options.append(" ".join(self.lResources))
+        if self.lResources:
+            options.append("--resou")
+            options.append(" ".join(self.lResources))
         options.append("--step")
         options.append("1")
         
