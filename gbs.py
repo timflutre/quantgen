@@ -8,6 +8,7 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # TODO:
+# - use env var for Java jar (e.g. for Picard)
 # - see where to introduce BQSR
 # - catch exception if step dir already exists, and skip step for the given lane(s)
 # - add option to load pedigree (PED format)
@@ -17,6 +18,7 @@
 # - add option to give VCF of known indels (for local realign)
 # - try drmaa-python? https://github.com/pygridtools/drmaa-python
 # - try sgeparse? https://pypi.python.org/pypi/sgeparse
+# - try logging? https://docs.python.org/2/library/logging.html
 
 # to allow code to work with Python 2 and 3
 from __future__ import print_function   # print is a function in python3
@@ -56,21 +58,21 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.3.1" # http://semver.org/
+progVersion = "0.4.0" # http://semver.org/
 
 
 class GbsSample(object):
     """
-    A GbsSample corresponds to a unique triplet (individual,flowcell,lane),
-    given that the 'individual' is the focus of the analysis.
+    A GbsSample corresponds to a unique triplet (genotype,flowcell,lane),
+    given that the 'genotype' is the focus of the analysis.
     """
     
-    def __init__(self, ind, flowcell, laneNum):
-        self.individual = ind
+    def __init__(self, geno, flowcell, laneNum):
+        self.genotype = geno
         self.flowcell = flowcell
         self.lane = laneNum
-        self.id = "%s_%s_%s" % (self.individual, self.flowcell, self.lane)
-        self.species = ""
+        self.id = "%s_%s_%s" % (self.genotype, self.flowcell, self.lane)
+        self.refGenome = ""
         self.library = ""
         self.barcode = ""
         self.seqCenter = ""
@@ -85,10 +87,10 @@ class GbsSample(object):
         
     def __str__(self):
         txt = "id=%s" % self.id
-        txt += ";individual=%s" % self.individual
+        txt += ";genotype=%s" % self.genotype
         txt += ";flowcell=%s" % self.flowcell
         txt += ";lane=%s" % self.lane
-        txt += ";species=%s" % self.species
+        txt += ";refGenome=%s" % self.refGenome
         txt += ";library=%s" % self.library
         txt += ";barcode=%s" % self.barcode
         txt += ";seqCenter=%s" % self.seqCenter
@@ -102,7 +104,7 @@ class GbsSample(object):
     def setDemultiplexedFastqFiles(self, pathToDir):
         # set R1 file:
         lFilesR1 = glob.glob("%s/*_%s_R1.fastq.gz" % (pathToDir,
-                                                       self.individual))
+                                                      self.genotype))
         if len(lFilesR1) == 0:
             msg = "no demultiplexed R1 file found for sample '%s' in '%s'" % \
                   (self.id, pathToDir)
@@ -114,7 +116,7 @@ class GbsSample(object):
         self.dDemultiplexedFastqFiles["R1"] = lFilesR1[0]
         # set R2 file, if necessary:
         lFilesR2 = glob.glob("%s/*_%s_R2.fastq.gz" % (pathToDir,
-                                                       self.individual))
+                                                       self.genotype))
         if len(lFilesR2) > 1:
             msg = "%i demultiplexed R2 files found for sample '%s' in '%s'" % \
                   (len(lFilesR2), self.id, pathToDir)
@@ -195,7 +197,7 @@ class GbsSample(object):
     def saveNbReadsFromFastqc(self, inDir, outHandle):
         inFile = "%s/%s_clean_R1_fastqc.zip" % (inDir, self.id)
         iFqc = Fastqc(inFile)
-        txt = "%s" % self.individual
+        txt = "%s" % self.genotype
         txt += "\t%s" % self.flowcell
         txt += "\t%s" % self.lane
         txt += "\tR1"
@@ -204,7 +206,7 @@ class GbsSample(object):
         if"R2" in self.dCleanedFastqFiles:
             inFile = "%s/%s_clean_R2_fastqc.zip" % (inDir, self.id)
             iFqc = Fastqc(inFile)
-            txt = "%s" % self.individual
+            txt = "%s" % self.genotype
             txt += "\t%s" % self.flowcell
             txt += "\t%s" % self.lane
             txt += "\tR2"
@@ -235,7 +237,7 @@ class GbsSample(object):
         txt += "\tPL:%s" % self.seqPlatform
         txt += "\tPM:%s" % self.seqPlatformModel
         txt += "\tPU:%s-%s.%s" % (self.flowcell, self.barcode, self.lane)
-        txt += "\tSM:%s" % self.individual # see GATK's FAQ for what a sample is
+        txt += "\tSM:%s" % self.genotype # see GATK's FAQ for what a sample is
         txt += "\'"
         txt += " -M %s" % pathToPrefixRefGenome
         txt += " %s" % self.dCleanedFastqFiles["R1"]
@@ -282,7 +284,7 @@ class GbsSample(object):
         txt += " ${outDir}/%s.bam" % self.id
         txt += " >& ${outDir}/flagstat_%s.txt" % self.id
         txt += "\necho \"reads in proper pairs and primary alignments\""
-        txt += "\necho -e \"%s" % self.individual
+        txt += "\necho -e \"%s" % self.genotype
         txt += "\t%s" % self.flowcell
         txt += "\t%s" % self.lane
         txt += "\t\"$(samtools view -f 0x0002 -F 0x0100 -q 5"
@@ -300,17 +302,18 @@ class GbsSample(object):
                    dir=outDir)
         iJobGroup.insert(iJob)
         
-    def saveSamtoolsFlagstat(self, inDir, outHandle):
+    def setInitialBamFile(self, dirName):
+        self.initialBamFile = "%s/%s/%s.bam" % (self.dir, dirName, self.id)
+        
+    def saveSamtoolsFlagstat(self, outHandle):
+        inDir = os.path.dirname(self.initialBamFile)
         inFile = "%s/flagstat_%s.txt" % (inDir, self.id)
         iSf = SamtoolsFlagstat(inFile)
-        txt = "%s" % self.individual
+        txt = "%s" % self.genotype
         txt += "\t%s" % self.flowcell
         txt += "\t%s" % self.lane
         txt += "\t%s" % iSf.getTxtToWrite()
         outHandle.write("%s\n" % txt)
-        
-    def setInitialBamFile(self, pathToDir):
-        self.initialBamFile = "%s/%s.bam" % (pathToDir, self.id)
         
     def localRealign(self, memJvm, pathToPrefixRefGenome, knownIndelsFile,
                      outDir, iJobGroup, useBashScript=True):
@@ -459,7 +462,7 @@ class GbsLane(object):
         lSamples.sort()
         for sample in lSamples:
             iSample = self.dSamples[sample]
-            fileHandle.write(">%s\n%s\n" % (iSample.individual,
+            fileHandle.write(">%s\n%s\n" % (iSample.genotype,
                                             iSample.barcode))
         fileHandle.close()
         return fileName
@@ -504,15 +507,19 @@ class GbsLane(object):
             iSample = self.dSamples[sampleId]
             iSample.saveNbReadsFromFastqc(inDir, outHandle)
             
-    def align(self, pathToPrefixRefGenome, tmpDir, dictFile, outDir,
+    def align(self, pathToPrefixRefGenome, tmpDir, dictFile, outDirName,
               iJobGroup):
         for sampleId,iSample in self.dSamples.items():
+            outDir = "%s/%s" % (iSample.dir, outDirName)
+            if os.path.isdir(outDir):
+                shutil.rmtree(outDir)
+            os.mkdir(outDir)
             iSample.align(pathToPrefixRefGenome, tmpDir, dictFile, outDir,
                           iJobGroup)
             
-    def setInitialBamFiles(self, pathToDir):
+    def setInitialBamFiles(self, dirName):
         for sampleId,iSample in self.dSamples.items():
-            iSample.setInitialBamFile(pathToDir)
+            iSample.setInitialBamFile(dirName)
             
     def gather(self, memJvm, outDir, iJobGroup):
         cmd = "echo \"merge and index...\""
@@ -530,21 +537,26 @@ class GbsLane(object):
                % (outDir, self.id)
         cmd += " INPUT=%s/%s.bam" % (outDir, self.id)
         cmd += " OUTPUT=%s/insert-sizes_picard_%s.txt" % (outDir, self.id)
+        cmd += "; rm -f %s/%s.bam*" % (outDir, self.id) # to save space
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
         iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
         iJobGroup.insert(iJob)
         
-    def saveSamtoolsFlagstat(self, inDir, outHandle):
+    def saveSamtoolsFlagstat(self, outHandle):
         lSamples = self.dSamples.keys()
         lSamples.sort()
         for sampleId in lSamples:
             iSample = self.dSamples[sampleId]
-            iSample.saveSamtoolsFlagstat(inDir, outHandle)
+            iSample.saveSamtoolsFlagstat(outHandle)
             
     def localRealignSamples(self, memJvm, pathToPrefixRefGenome,
-                            knownIndelsFile, outDir,
+                            knownIndelsFile, outDirName,
                             iJobGroup, useBashScript=True):
         for sampleId,iSample in self.dSamples.items():
+            outDir = "%s/%s" % (iSample.dir, outDirName)
+            if os.path.isdir(outDir):
+                shutil.rmtree(outDir)
+            os.mkdir(outDir)
             iSample.localRealign(memJvm, pathToPrefixRefGenome,
                                  knownIndelsFile, outDir, iJobGroup)
             
@@ -555,32 +567,28 @@ class GbsLane(object):
                                            knownFile, outDir, iJobGroup)
             
             
-class GbsInd(object):
+class GbsGeno(object):
     
-    def __init__(self, ind, flowcell, lane):
-        self.id = ind
-        self.flowcell = flowcell
-        self.lane = lane
+    def __init__(self, geno):
+        self.id = geno
         self.dir = None
         self.dSamples = {}
         self.lRealignedSampleBamFiles = []
-        self.realignedIndBamFile = ""
+        self.realignedGenoBamFile = ""
         
     def insert(self, iSample):
         if iSample.id in self.dSamples:
-            msg = "sample '%s' already in individual '%s'" % (iSample.id, self.id)
+            msg = "sample '%s' already in genotype '%s'" % (iSample.id, self.id)
             raise ValueError(msg)
         self.dSamples[iSample.id] = iSample
         
-    def setRealignedSampleBamFiles(self, allLanesDir, stepDir):
+    def setRealignedSampleBamFiles(self, stepDir):
         lSamples = self.dSamples.keys()
         lSamples.sort()
         for sampleId in lSamples:
             iSample = self.dSamples[sampleId]
-            self.lRealignedSampleBamFiles.append("%s/lane_%s_%s/%s/%s_realn.bam" \
-                                                 % (allLanesDir,
-                                                    iSample.flowcell,
-                                                    iSample.lane,
+            self.lRealignedSampleBamFiles.append("%s/%s/%s_realn.bam" \
+                                                 % (iSample.dir,
                                                     stepDir,
                                                     iSample.id))
             
@@ -632,8 +640,8 @@ class GbsInd(object):
             iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
         iJobGroup.insert(iJob)
         
-    def setRealignedIndividualBamFile(self, pathToDir):
-        self.realignedIndBamFile = "%s/%s_realn.bam" % (pathToDir, self.id)
+    def setRealignedGenotypeBamFile(self, pathToDir):
+        self.realignedGenoBamFile = "%s/%s_realn.bam" % (pathToDir, self.id)
         
     def variantCalling(self, memJvm, pathToPrefixRefGenome, knownFile, outDir,
                        iJobGroup, saveActiveRegions=False,
@@ -645,7 +653,7 @@ class GbsInd(object):
         cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
         cmd += " -T HaplotypeCaller"
         cmd += " -R %s.fa" % pathToPrefixRefGenome
-        cmd += " -I %s" % self.realignedIndBamFile
+        cmd += " -I %s" % self.realignedGenoBamFile
         # listBamsFile = "%s/bams_%s.list" % (outDir, self.id)
         # listBamsHandle = open(listBamsFile, "w")
         # for f in self.lPreprocessedBamFiles:
@@ -694,7 +702,8 @@ class Gbs(object):
     
     def __init__(self):
         self.verbose = 1
-        self.projectId = None
+        self.project1Id = None
+        self.project2Id = None
         self.scheduler = "SGE"
         self.queue = "normal.q"
         self.lResources = None
@@ -704,10 +713,10 @@ class Gbs(object):
         self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
         self.jobManager = None
-        self.samplesCol2idx = {"individual": None,
+        self.samplesCol2idx = {"genotype": None,
                                "flowcell": None,
                                "lane": None,
-                               "species": None,
+                               "ref_genome": None,
                                "library": None,
                                "barcode": None,
                                "seq_center": None,
@@ -718,16 +727,17 @@ class Gbs(object):
                                "fastq_file_R2": None}
         self.dSamples = {}
         self.dLanes = {}
-        self.dInds = {}
-        self.allLanesDir = None # depends on projectId
-        self.allIndsDir = None # depends on projectId
+        self.dGenos = {}
+        self.allLanesDir = None # depends on cwd and project1Id
+        self.allSamplesDir = None # depends on cwd and project2Id
+        self.allGenosDir = None # depends on cwd and project2Id
         self.lDirSteps = ["init-quality",
                           "demultiplex",
                           "clean-reads",
                           "align-reads",
                           "realign-reads-sample",
-                          "realign-reads-ind",
-                          "call-variants-ind",
+                          "realign-reads-geno",
+                          "call-variants-geno",
                           "joint-genotyping",
                           "variant-recalib"]
         self.adpFile = None
@@ -754,7 +764,13 @@ class Gbs(object):
         msg += "  -h, --help\tdisplay the help and exit\n"
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
-        msg += "      --proj\tname of the project\n"
+        msg += "      --proj1\tname of the project used for steps 1 to 4\n"
+        msg += "\t\tmention a reference genome only if all samples belong to\n"
+        msg += "\t\t the same species, and will be mapped to the same ref genome\n"
+        msg += "      --proj2\tname of the project used for steps 4 to 8\n"
+        msg += "\t\tcan be the same as --proj1, or can be different\n"
+        msg +="\t\t notably when samples come from different species\n"
+        msg += "\t\t or if one wants to align reads to different ref genomes\n"
         msg += "      --schdlr\tname of the cluster scheduler (default=SGE)\n"
         msg += "      --queue\tname of the cluster queue (default=normal.q)\n"
         msg += "      --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
@@ -764,14 +780,18 @@ class Gbs(object):
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
         msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and Picard)\n"
         msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
-        msg += "\t\t6: local realignment per individual (with GATK v >= 3.5)\n"
-        msg += "\t\t7: variant and genotype calling per individual (with GATK HaplotypeCaller v >= 3.5)\n"
-        msg += "\t\t8: variant and genotype calling jointly across individuals (with GATK GenotypeGVCFs v >= 3.5)\n"
+        msg += "\t\t6: local realignment per genotype (with GATK v >= 3.5)\n"
+        msg += "\t\t7: variant and genotype calling per genotype (with GATK HaplotypeCaller v >= 3.5)\n"
+        msg += "\t\t8: variant and genotype calling jointly across genotypes (with GATK GenotypeGVCFs v >= 3.5)\n"
         # msg += "\t\t9: variant recalibration (with GATK v >= 3.5)\n"
         # msg += "\t\t10: genotype refinement (with GATK v >= 3.5)\n"
         # msg += "\t\t11: base quality scores recalibration (with GATK v >= 3.5)\n"
         msg += "      --samples\tpath to the 'samples' file\n"
-        msg += "\t\tcompulsory for all steps\n"
+        msg += "\t\tcompulsory for all steps, but can differ between steps\n"
+        msg += "\t\t e.g. if samples come from different species or are aligned\n"
+        msg += "\t\t on different ref genomes, different samples file should\n"
+        msg += "\t\t be used for steps 4-8, representing different subsets of\n"
+        msg += "\t\t the file used for steps 1-3\n"
         msg += "\t\tthe file should be encoded in ASCII\n"
         msg += "\t\tthe first row should be a header with column names\n"
         msg += "\t\teach 'sample' (see details below) should have one and only one row\n"
@@ -779,9 +799,9 @@ class Gbs(object):
         msg += "\t\tcolumns can be in any order\n"
         msg += "\t\trows starting by '#' are skipped\n"
         msg += "\t\t12 columns are compulsory (but there can be more):\n"
-        msg += "\t\t individual (see details below, e.g. 'Col-0', but neither underscore '_' nor space ' ', use dash '-' instead)\n"
-        msg += "\t\t species (e.g. 'Arabidopsis thaliana')\n"
-        msg += "\t\t library (e.g. can be the same as 'individual')\n"
+        msg += "\t\t genotype (see details below, e.g. 'Col-0', but use neither underscore '_' nor space ' ' nor dot '.', use dash '-' instead)\n"
+        msg += "\t\t ref_genome (identifier of the reference genome used for alignment, e.g. 'Atha_v2', but use neither space ' ' nor dot '.'; the full species name, e.g. 'Arabidopsis thaliana', will be present in the file given to --dict)\n"
+        msg += "\t\t library (e.g. can be the same as 'genotype')\n"
         msg += "\t\t barcode (e.g. 'ATGG')\n"
         msg += "\t\t seq_center (e.g. 'Broad Institute', 'GenoToul', etc)\n"
         msg += "\t\t seq_platform (e.g. 'ILLUMINA', see SAM format specification)\n"
@@ -801,11 +821,12 @@ class Gbs(object):
         msg += "      --enz\tname of the restriction enzyme (default=ApeKI)\n"
         msg += "      --ref\tpath to the prefix of files for the reference genome\n"
         msg += "\t\tcompulsory for steps 4, 5, 6, 7, 8\n"
+        msg += "\t\tshould correspond to the 'ref_genome' column in --samples\n"
         msg += "\t\te.g. '/data/Atha_v2' for '/data/Atha_v2.fa', '/data/Atha_v2.bwt', etc\n"
         msg += "\t\tthese files are produced via 'bwa index ...'\n"
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
         msg += "\t\tcompulsory for step 4\n"
-        msg += "\t\tsee Picard 'CreateSequenceDictionary'\n"
+        msg += "\t\tsee 'CreateSequenceDictionary' in the Picard software\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
         msg += "      --jvm\tmemory given to the Java Virtual Machine (default=4, in Gb)\n"
@@ -819,18 +840,18 @@ class Gbs(object):
         msg += "  %s --step 1 --samples samples.txt\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Details:\n"
-        msg += "This program aims at genotyping a set of 'individuals' using data from\n"
+        msg += "This program aims at genotyping a set of 'genotypes' using data from\n"
         msg += "a restriction-assisted DNA sequencing (RAD-seq) experiment, also known\n"
         msg += "as a genotyping-by-sequencing (GBS) experiment.\n"
-        msg += "Here, by 'individual', we mean the entity which is the focus of the\n"
+        msg += "Here, by 'genotype', we mean the entity which is the focus of the\n"
         msg += "study. For instance, it can be a plant variety (or a human being), or\n"
         msg += "the specific clone of a given plant variety (or a specific tumor of a\n"
         msg += "given human being), etc.\n"
-        msg += "Importantly, note that the content of the 'individual' variable will\n"
+        msg += "Importantly, note that the content of the 'genotype' column will\n"
         msg += "be used to set the 'SM' (sample) tag of the 'RG' (read group) header\n"
         msg += "record type of the SAM format (see http://www.htslib.org/). However,\n"
         msg += "internal to this program, the term 'sample' corresponds to the unique\n"
-        msg += "triplet (individual,flowcell,lane).\n"
+        msg += "triplet (genotype,flowcell,lane).\n"
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -858,7 +879,8 @@ class Gbs(object):
         try:
             opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
                                         ["help", "version", "verbose=",
-                                         "proj=", "step=", "samples=", "dict=",
+                                         "proj1=", "proj2=", "step=",
+                                         "samples=", "dict=",
                                          "schdlr=", "queue=", "enz=", "adp=",
                                          "ref=", "tmpd=", "jvm=", "knowni=",
                                          "known=", "force", "pird=", "resou="])
@@ -875,8 +897,10 @@ class Gbs(object):
                 sys.exit(0)
             elif o == "-v" or o == "--verbose":
                 self.verbose = int(a)
-            elif o == "--proj":
-                self.projectId = a
+            elif o == "--proj1":
+                self.project1Id = a
+            elif o == "--proj2":
+                self.project2Id = a
             elif o == "--schdlr":
                 self.scheduler = a
             elif o == "--queue":
@@ -915,25 +939,32 @@ class Gbs(object):
         """
         Check the values of the command-line parameters.
         """
-        if not self.projectId:
-            msg = "ERROR: missing compulsory option --proj"
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        if "_" in self.projectId:
+        if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps \
+           or "4" in self.lSteps:
+            if not self.project1Id:
+                msg = "ERROR: missing compulsory option --proj1"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+        if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
+           or "7" in self.lSteps or "8" in self.lSteps:
+            if not self.project2Id:
+                msg = "ERROR: missing compulsory option --proj2"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+        if self.project1Id and "_" in self.project1Id:
             msg = "ERROR: forbidden underscore '_' in project identifier '%s'" \
-                  % self.projectId
+                  % self.project1Id
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        self.allLanesDir = "%s/%s_all-lanes" % (os.getcwd(),
-                                                self.projectId)
-        if not os.path.exists(self.allLanesDir):
-            os.mkdir(self.allLanesDir)
-        self.allIndsDir = "%s/%s_all-individuals" % (os.getcwd(),
-                                                     self.projectId)
-        if not os.path.exists(self.allIndsDir):
-            os.mkdir(self.allIndsDir)
+        if self.project2Id and "_" in self.project2Id:
+            msg = "ERROR: forbidden underscore '_' in project identifier '%s'" \
+                  % self.project2Id
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
         if not self.samplesFile:
             msg = "ERROR: missing compulsory option --samples"
             sys.stderr.write("%s\n\n" % msg)
@@ -956,7 +987,11 @@ class Gbs(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        self.jobManager = JobManager(self.projectId)
+        if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps:
+            self.jobManager = JobManager(self.project1Id)
+        if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
+           or "7" in self.lSteps or "8" in self.lSteps:
+            self.jobManager = JobManager(self.project2Id)
         if self.lSteps == []:
             msg = "ERROR: missing compulsory option --step"
             sys.stderr.write("%s\n\n" % msg)
@@ -1095,11 +1130,19 @@ class Gbs(object):
             
             
     def loadContentSamplesFile(self, lines):
+        """
+        Fill self.dSamples, self.dLanes and self.dGenos.
+        """
+        refgenome = set()
+        
         for line in lines:
+            if line.startswith("#"):
+                continue
+            
             tokens = line.rstrip("\n").split("\t")
             
             # create and fill a "GbsSample" object
-            for samplesCol in ["individual", "flowcell", "lane"]:
+            for samplesCol in ["genotype", "flowcell", "lane"]:
                 if "_" in tokens[self.samplesCol2idx[samplesCol]]:
                     msg = "underscore in %s '%s', replace by dash '-'" \
                           % (samplesCol, tokens[self.samplesCol2idx[samplesCol]])
@@ -1108,11 +1151,15 @@ class Gbs(object):
                     msg = "space in %s '%s', replace by dash '-'" \
                           % (samplesCol, tokens[self.samplesCol2idx[samplesCol]])
                     raise ValueError(msg)
-            ind = tokens[self.samplesCol2idx["individual"]]
+                if "." in tokens[self.samplesCol2idx[samplesCol]]:
+                    msg = "dot in %s '%s', replace by dash '-'" \
+                          % (samplesCol, tokens[self.samplesCol2idx[samplesCol]])
+                    raise ValueError(msg)
+            geno = tokens[self.samplesCol2idx["genotype"]]
             flowcell = tokens[self.samplesCol2idx["flowcell"]]
             laneNum = int(tokens[self.samplesCol2idx["lane"]])
-            iSample = GbsSample(ind, flowcell, laneNum)
-            iSample.species = tokens[self.samplesCol2idx["species"]]
+            iSample = GbsSample(geno, flowcell, laneNum)
+            iSample.refGenome = tokens[self.samplesCol2idx["ref_genome"]]
             iSample.library = tokens[self.samplesCol2idx["library"]]
             iSample.barcode = tokens[self.samplesCol2idx["barcode"]]
             iSample.seqCenter = tokens[self.samplesCol2idx["seq_center"]]
@@ -1127,17 +1174,27 @@ class Gbs(object):
                     = "%s/%s" % (self.pathToInReadsDir,
                                  tokens[self.samplesCol2idx["fastq_file_R2"]])
             self.dSamples[iSample.id] = iSample
+            refgenome.add(iSample.refGenome)
             
+            # create and fill a "GbsLane" object
             laneId = "%s_%i" % (flowcell, laneNum)
             if laneId not in self.dLanes:
                 self.dLanes[laneId] = GbsLane(laneId, flowcell, laneNum)
             self.dLanes[laneId].insert(iSample)
             
-            if ind not in self.dInds:
-                self.dInds[ind] = GbsInd(ind, flowcell, laneNum)
-            self.dInds[ind].insert(iSample)
+            # create and fill a "GbsGeno" object
+            if geno not in self.dGenos:
+                self.dGenos[geno] = GbsGeno(geno)
+            self.dGenos[geno].insert(iSample)
             
-            
+        if ("4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
+            or "7" in self.lSteps or "8" in self.lSteps) \
+            and len(refgenome) > 1:
+            print(refgenome)
+            msg = "samples file contains more than one reference genome"
+            raise ValueError(msg)
+        
+        
     def loadSamplesFile(self):
         if self.verbose > 0:
             msg = "load samples file '%s'..." % self.samplesFile
@@ -1158,25 +1215,53 @@ class Gbs(object):
         if self.verbose > 0:
             msg = "nb of samples: %i" % len(self.dSamples)
             msg += "\nnb of lanes: %i" % len(self.dLanes)
-            msg += "\nnb of individuals: %i" % len(self.dInds)
+            msg += "\nnb of genotypes: %i" % len(self.dGenos)
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
             
     def setupLaneDirectories(self):
+        """
+        One sub-directory per lane.
+        """
+        self.allLanesDir = "%s/%s_all-lanes" % (os.getcwd(), self.project1Id)
+        if not os.path.exists(self.allLanesDir):
+            os.mkdir(self.allLanesDir)
         for laneId,iLane in self.dLanes.items():
-            dirLane = "%s/lane_%s" % (self.allLanesDir, laneId)
+            dirLane = "%s/%s" % (self.allLanesDir, laneId)
             iLane.dir = dirLane
             if not os.path.exists(dirLane):
                 os.mkdir(dirLane)
                 
                 
-    def setupIndividualDirectories(self):
-        for indId,iInd in self.dInds.items():
-            dirInd = "%s/ind_%s" % (self.allIndsDir, indId)
-            iInd.dir = dirInd
-            if not os.path.exists(dirInd):
-                os.mkdir(dirInd)
+    def setupSampleDirectories(self):
+        """
+        One sub-directory per sample.
+        """
+        self.allSamplesDir = "%s/%s_all-samples" % (os.getcwd(),
+                                                    self.project2Id)
+        if not os.path.exists(self.allSamplesDir):
+            os.mkdir(self.allSamplesDir)
+        for sampleId,iSample in self.dSamples.items():
+            dirSample = "%s/%s" % (self.allSamplesDir, sampleId)
+            iSample.dir = dirSample
+            if not os.path.exists(dirSample):
+                os.mkdir(dirSample)
+                
+                
+    def setupGenotypeDirectories(self):
+        """
+        One sub-directory per genotype.
+        """
+        self.allGenosDir = "%s/%s_all-genotypes" % (os.getcwd(),
+                                                    self.project2Id)
+        if not os.path.exists(self.allGenosDir):
+            os.mkdir(self.allGenosDir)
+        for genoId,iGeno in self.dGenos.items():
+            dirGeno = "%s/%s" % (self.allGenosDir, genoId)
+            iGeno.dir = dirGeno
+            if not os.path.exists(dirGeno):
+                os.mkdir(dirGeno)
                 
                 
     def beginStep(self, stepNum):
@@ -1229,7 +1314,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step1-fastqc" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step1-fastqc" % self.project1Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1310,7 +1395,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step2-demultiplex" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step2-demultiplex" % self.project1Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1346,7 +1431,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step3-clean" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step3-clean" % self.project1Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1377,7 +1462,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step3-fastqc" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step3-fastqc" % self.project1Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1406,13 +1491,13 @@ class Gbs(object):
             sys.stdout.flush()
             
         outFile = "%s/%s_clean-reads-per-sample.txt.gz" % (self.allLanesDir,
-                                                           self.projectId)
+                                                           self.project1Id)
         if os.path.exists(outFile):
             if self.forceRerunSteps:
                 os.remove(outFile)
         outHandle = gzip.open(outFile, "w")
         
-        txt = "ind"
+        txt = "geno"
         txt += "\tflowcell"
         txt += "\tlane"
         txt += "\tmate" # R1 or R2
@@ -1444,7 +1529,7 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step4-align" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step4-align" % self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1454,11 +1539,9 @@ class Gbs(object):
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
-            stepDir = "%s/%s" % (iLane.dir, self.lDirSteps[3])
-            self.makeDir(stepDir)
             iLane.setCleanedFastqFiles("%s/%s" % (iLane.dir, self.lDirSteps[2]))
             iLane.align(self.pathToPrefixRefGenome, self.tmpDir, self.dictFile,
-                        stepDir, iJobGroup)
+                        self.lDirSteps[3], iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait(self.verbose)
@@ -1469,12 +1552,15 @@ class Gbs(object):
             
             
     def gatherSamplesPerLane(self):
+        """
+        merge and index BAM files, and collect insert size metrics
+        """
         if self.verbose > 0:
             msg = "gather samples per lane..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step4-gather" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step4-gather" % self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1484,9 +1570,10 @@ class Gbs(object):
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
-            stepDir = "%s/%s" % (iLane.dir, self.lDirSteps[3])
-            iLane.setInitialBamFiles(stepDir)
-            iLane.gather(self.memJvm, stepDir, iJobGroup)
+            iLane.setInitialBamFiles(self.lDirSteps[3])
+            outDir = "%s/%s" % (self.allSamplesDir, iLane.id)
+            self.makeDir(outDir)
+            iLane.gather(self.memJvm, outDir, iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait(self.verbose)
@@ -1497,19 +1584,22 @@ class Gbs(object):
             
             
     def saveBasicAlignStats(self):
+        """
+        via samtools flagstat per sample
+        """
         if self.verbose > 0:
             msg = "save basic alignment statistics..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        outFile = "%s/%s_basic-align-stats.txt.gz" % (self.allLanesDir,
-                                                      self.projectId)
+        outFile = "%s/%s_basic-align-stats.txt.gz" % \
+                  (self.allSamplesDir, self.project2Id)
         if os.path.exists(outFile):
             if self.forceRerunSteps:
                 os.remove(outFile)
         outHandle = gzip.open(outFile, "w")
         
-        txt = "ind"
+        txt = "geno"
         txt += "\tflowcell"
         txt += "\tlane"
         txt += "\t%s" % SamtoolsFlagstat.header2str()
@@ -1519,13 +1609,12 @@ class Gbs(object):
         lLanes.sort()
         for laneId in lLanes:
             iLane = self.dLanes[laneId]
-            stepDir = "%s/%s" % (iLane.dir, self.lDirSteps[3])
-            iLane.saveSamtoolsFlagstat(stepDir, outHandle)
+            iLane.saveSamtoolsFlagstat(outHandle)
             
         outHandle.close()
         
-        outFile = "%s/%s_reads-proppaired-primaln-q5.txt" % (self.allLanesDir,
-                                                             self.projectId)
+        outFile = "%s/%s_reads-proppaired-primaln-q5.txt" % \
+                  (self.allSamplesDir, self.project2Id)
         if os.path.exists(outFile):
             if self.forceRerunSteps:
                 os.remove(outFile)
@@ -1533,14 +1622,14 @@ class Gbs(object):
             if self.forceRerunSteps:
                 os.remove("%s.gz" % outFile)
         outHandle = open(outFile, "w")
-        txt = "ind"
+        txt = "geno"
         txt += "\tflowcell"
         txt += "\tlane"
         txt += "\tnb.pairs.proppaired.primaln.q5"
         outHandle.write("%s\n" % txt)
         outHandle.close()
-        cmd = "cat %s/lane_*/%s/reads-proppaired-primaln-q5_*.txt" % \
-              (self.allLanesDir, self.lDirSteps[3])
+        cmd = "cat %s/*_*_*/align-reads/reads-proppaired-primaln-q5_*.txt" % \
+              self.allSamplesDir
         # cmd += " | awk '{a[$3]+=$4} END{for(x in a){print x,a[x]}}'"
         # cmd += " | sort -k2,2n"
         cmd += " >> %s" % outFile
@@ -1564,7 +1653,7 @@ class Gbs(object):
             sys.stdout.flush()
             
         groupJobId = self.makeGroupJobId("%s_gbs-step5-realign-samples" %
-                                         self.projectId)
+                                         self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1574,11 +1663,9 @@ class Gbs(object):
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
-            stepDir = "%s/%s" % (iLane.dir, self.lDirSteps[4])
-            self.makeDir(stepDir)
-            iLane.setInitialBamFiles("%s/%s" % (iLane.dir, self.lDirSteps[3]))
+            iLane.setInitialBamFiles(self.lDirSteps[3]) # from previous step
             iLane.localRealignSamples(self.memJvm, self.pathToPrefixRefGenome,
-                                      self.knownIndelsFile, stepDir,
+                                      self.knownIndelsFile, self.lDirSteps[4],
                                       iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
@@ -1595,14 +1682,14 @@ class Gbs(object):
         self.endStep(5, cwd, startTime)
         
         
-    def localRealignmentIndividuals(self):
+    def localRealignmentGenotypes(self):
         if self.verbose > 0:
-            msg = "locally realign reads per individual..."
+            msg = "locally realign reads per genotype..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step6-realign-ind" %
-                                         self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step6-realign-geno" %
+                                         self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1611,40 +1698,40 @@ class Gbs(object):
                              self.lResources)
         self.jobManager.insert(iJobGroup)
         
-        lIndIds = self.dInds.keys()
-        lIndIds.sort()
-        for i,indId in enumerate(lIndIds):
-            iInd = self.dInds[indId]
-            stepDir = "%s/%s" % (iInd.dir, self.lDirSteps[5])
+        lGenoIds = self.dGenos.keys()
+        lGenoIds.sort()
+        for i,genoId in enumerate(lGenoIds):
+            iGeno = self.dGenos[genoId]
+            stepDir = "%s/%s" % (iGeno.dir, self.lDirSteps[5])
             self.makeDir(stepDir)
-            iInd.setRealignedSampleBamFiles(self.allLanesDir,
-                                            self.lDirSteps[4])
-            iInd.localRealign(self.memJvm,
-                              self.pathToPrefixRefGenome,
-                              self.knownIndelsFile, stepDir,
-                              iJobGroup)
+            iGeno.setRealignedSampleBamFiles(self.lDirSteps[4])
+            iGeno.localRealign(self.memJvm,
+                               self.pathToPrefixRefGenome,
+                               self.knownIndelsFile, stepDir,
+                               iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait(self.verbose)
         
         if self.verbose > 0:
-            msg = "all locally realignment individuals jobs finished"
+            msg = "all locally realignment genotypes jobs finished"
             sys.stdout.write("%s\n" % msg)
             
             
     def step6(self):
         cwd, startTime = self.beginStep(6)
-        self.localRealignmentIndividuals()
+        self.localRealignmentGenotypes()
         self.endStep(6, cwd, startTime)
         
         
-    def variantCallingPerIndividual(self):
+    def variantCallingPerGenotype(self):
         if self.verbose > 0:
-            msg = "call variants per individual..."
+            msg = "call variants per genotype..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step7-varcall-ind" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step7-varcall-geno" \
+                                         % self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1653,38 +1740,39 @@ class Gbs(object):
                              self.lResources)
         self.jobManager.insert(iJobGroup)
         
-        lIndIds = self.dInds.keys()
-        lIndIds.sort()
-        for i,indId in enumerate(lIndIds):
-            iInd = self.dInds[indId]
-            stepDir = "%s/%s" % (iInd.dir, self.lDirSteps[6])
+        lGenoIds = self.dGenos.keys()
+        lGenoIds.sort()
+        for i,genoId in enumerate(lGenoIds):
+            iGeno = self.dGenos[genoId]
+            stepDir = "%s/%s" % (iGeno.dir, self.lDirSteps[6])
             self.makeDir(stepDir)
-            iInd.setRealignedIndividualBamFile("%s/%s" % (iInd.dir,
-                                                          self.lDirSteps[5]))
-            iInd.variantCalling(self.memJvm, self.pathToPrefixRefGenome,
-                                self.knownFile, stepDir, iJobGroup)
+            iGeno.setRealignedGenotypeBamFile("%s/%s" % (iGeno.dir,
+                                                         self.lDirSteps[5]))
+            iGeno.variantCalling(self.memJvm, self.pathToPrefixRefGenome,
+                                 self.knownFile, stepDir, iJobGroup)
             
         self.jobManager[iJobGroup.id].submit()
         self.jobManager[iJobGroup.id].wait(self.verbose)
         
         if self.verbose > 0:
-            msg = "all variant calling per ind jobs finished"
+            msg = "all variant calling per geno jobs finished"
             sys.stdout.write("%s\n" % msg)
             
             
     def step7(self):
         cwd, startTime = self.beginStep(7)
-        self.variantCallingPerIndividual()
+        self.variantCallingPerGenotype()
         self.endStep(7, cwd, startTime)
         
         
     def jointGenotyping(self):
         if self.verbose > 0:
-            msg = "combine variant calls across individuals..."
+            msg = "combine variant calls across genotypes..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step8-joincall" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step8-joincall" \
+                                         % self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1693,18 +1781,18 @@ class Gbs(object):
                              self.lResources)
         self.jobManager.insert(iJobGroup)
         
-        stepDir = "%s/%s" % (self.allIndsDir, self.lDirSteps[7])
+        stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[7])
         self.makeDir(stepDir)
         cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd += " -T GenotypeGVCFs"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
-        lIndIds = self.dInds.keys()
-        lIndIds.sort()
-        for i,indId in enumerate(lIndIds):
-            iInd = self.dInds[indId]
-            prevStepDir = "%s/%s" % (iInd.dir, self.lDirSteps[6])
-            cmd += " --variant %s/%s.g.vcf.gz" % (prevStepDir, indId)
-        cmd += " -o %s/%s_raw.vcf.gz" % (stepDir, self.projectId)
+        lGenoIds = self.dGenos.keys()
+        lGenoIds.sort()
+        for i,genoId in enumerate(lGenoIds):
+            iGeno = self.dGenos[genoId]
+            prevStepDir = "%s/%s" % (iGeno.dir, self.lDirSteps[6])
+            cmd += " --variant %s/%s.g.vcf.gz" % (prevStepDir, genoId)
+        cmd += " -o %s/%s_raw.vcf.gz" % (stepDir, self.project2Id)
         cmd += " --heterozygosity 0.001" # 1 het site in 100 bp (across all samples, for humans)
         if self.verbose > 1:
             print(cmd)
@@ -1728,11 +1816,12 @@ class Gbs(object):
         
     def variantRecalibration(self):
         if self.verbose > 0:
-            msg = "recalibrate variant calls across individuals..."
+            msg = "recalibrate variant calls across genotypes..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step9-recalibcall" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step9-recalibcall" \
+                                         % self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1741,29 +1830,29 @@ class Gbs(object):
                              self.lResources)
         self.jobManager.insert(iJobGroup)
         
-        stepDir = "%s/%s" % (self.allIndsDir, self.lDirSteps[8])
+        stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
         self.makeDir(stepDir)
         cmd1 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd1 += " -T VariantRecalibrator"
         cmd1 += " -R %s.fa" % self.pathToPrefixRefGenome
-        prevStepDir = "%s/%s" % (self.allIndsDir, self.lDirSteps[8])
-        cmd1 += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.projectId)
+        prevStepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
+        cmd1 += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
         # cmd1 += " -resource:%s" % TODO
         cmd1 += " -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR -an InbreedingCoeff"
         cmd1 += " -mode BOTH"
-        cmd1 += " -recalFile %s/%s.recal" % (stepDir, self.projectId)
-        cmd1 += " -tranchesFile %s/%s.tranches" % (stepDir, self.projectId)
-        cmd1 += " -rscriptFile %s/plots_%s.R" % (stepDir, self.projectId)
+        cmd1 += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
+        cmd1 += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
+        cmd1 += " -rscriptFile %s/plots_%s.R" % (stepDir, self.project2Id)
         if self.verbose > 1:
             print(cmd1)
         cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd2 += " -T ApplyRecalibration"
         cmd2 += " -R %s.fa" % self.pathToPrefixRefGenome
-        cmd2 += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.projectId)
-        cmd2 += " -tranchesFile %s/%s.tranches" % (stepDir, self.projectId)
-        cmd2 += " -recalFile %s/%s.recal" % (stepDir, self.projectId)
+        cmd2 += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
+        cmd2 += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
+        cmd2 += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
         cmd2 += " -mode BOTH"
-        cmd2 += " -o %s/%s.vcf.gz" % (stepDir, self.projectId)
+        cmd2 += " -o %s/%s.vcf.gz" % (stepDir, self.project2Id)
         if self.verbose > 1:
             print(cmd2)
         cmd = "%s; %s" % (cmd1, cmd2)
@@ -1797,7 +1886,8 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step11-recalib" % self.projectId)
+        groupJobId = self.makeGroupJobId("%s_gbs-step11-recalib" \
+                                         % self.project2Id)
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1827,37 +1917,45 @@ class Gbs(object):
         
     def run(self):
         self.loadSamplesFile()
-        self.setupLaneDirectories()
-        self.setupIndividualDirectories()
         
-        if "1" in self.lSteps:
+        # set up directories
+        if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps \
+           or "4" in self.lSteps:
+            self.setupLaneDirectories()
+        if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps:
+            self.setupSampleDirectories()
+        if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps:
+            self.setupGenotypeDirectories()
+            
+        # execute the step(s)
+        if "1" in self.lSteps: # init read quality
             self.step1()
             
-        if "2" in self.lSteps:
+        if "2" in self.lSteps: # demultiplex reads
             self.step2()
             
-        if "3" in self.lSteps:
+        if "3" in self.lSteps: # clean reads
             self.step3()
             
-        if "4" in self.lSteps:
+        if "4" in self.lSteps: # align per sample
             self.step4()
             
-        if "5" in self.lSteps:
+        if "5" in self.lSteps: # realign per sample
             self.step5()
             
-        if "6" in self.lSteps:
+        if "6" in self.lSteps: # realign per geno
             self.step6()
             
-        if "7" in self.lSteps:
+        if "7" in self.lSteps: # var and geno call per geno
             self.step7()
             
-        if "8" in self.lSteps:
+        if "8" in self.lSteps: # var and geno call jointly
             self.step8()
             
-        if "9" in self.lSteps:
+        if "9" in self.lSteps: # var recalibr
             self.step9()
             
-        if "10" in self.lSteps:
+        if "10" in self.lSteps: # refine geno
             self.step10()
             
             
