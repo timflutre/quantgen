@@ -35,7 +35,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
-progVersion = "1.3.1" # http://semver.org/
+progVersion = "1.3.2" # http://semver.org/
 
 
 def user_input(msg):
@@ -57,6 +57,7 @@ class Citeulike2Others(object):
         self.identifier = "timflutre"
         self.email = "timflutre@gmail.com"
         self.cookieFile = ""
+        self.outFormat = "json"
         self.jsonFile = ""
         self.jsonRefs = None
         self.libDir = ""
@@ -82,12 +83,13 @@ class Citeulike2Others(object):
         msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
         msg += "  -t, --task\ttask(s) to perform (can be '1+2' for instance)\n"
         msg += "\t\t1: save cookies (requires -i, -e)\n"
-        msg += "\t\t2: download JSON file (requires -i, -e; can use -a)\n"
-        msg += "\t\t3: download Bibtex file (requires -i, -e; can use -a)\n"
-        msg += "\t\t4: download new attached files (requires -i, -e, -j, -p)\n"
-        msg += "\t\t5: add 'file' field to Bibtex file (requires -j, -p, -b, -o)\n"
+        msg += "\t\t2: download file with references (requires -i, -e, -f; can use -a)\n"
+        msg += "\t\t3: download new attached files (requires -i, -e, -j, -p)\n"
+        msg += "\t\t4: add 'file' field to Bibtex file (requires -j, -p, -b, -o)\n"
         msg += "  -i, --id\tyour CiteULike identifier (default=timflutre)\n"
         msg += "  -e, --email\tyour email (default=timflutre@gmail.com)\n"
+        msg += "  -f, --fmt\tformat of the file to be downloaded\n"
+        msg += "\t\tdefault=json/bib/ris\n"
         msg += "  -j, --json\tpath to the JSON file\n"
         msg += "  -p, --path\tpath to the directory with all the files\n"
         msg += "  -b, --bibtex\tpath to the Bibtex file\n"
@@ -122,10 +124,11 @@ class Citeulike2Others(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:j:p:b:o:a:",
+            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:f:j:p:b:o:a:",
                                         ["help", "version", "verbose=",
-                                         "tasks=", "id=", "email=", "json=",
-                                         "path=", "bibtex=", "out=", "tag="])
+                                         "tasks=", "id=", "email=", "format=",
+                                         "json=", "path=", "bibtex=", "out=",
+                                         "tag="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -145,6 +148,8 @@ class Citeulike2Others(object):
                 self.identifier = a
             elif o == "-e" or o == "--email":
                 self.email = a
+            elif o == "-f" or o == "--format":
+                self.outFormat = a
             elif o == "-j" or o == "--json":
                 self.jsonFile = a
             elif o == "-p" or o == "--path":
@@ -169,7 +174,7 @@ class Citeulike2Others(object):
             self.help()
             sys.exit(1)
         for task in self.tasks:
-            if task not in ["1","2","3","4","5"]:
+            if task not in ["1","2","3","4","5","6"]:
                 msg = "ERROR: -t %s is not recognized" % task
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
@@ -179,14 +184,19 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if ("2" in self.tasks or "3" in self.tasks) and \
-           (self.identifier == "" or self.email == ""):
-            msg = "ERROR: missing compulsory option(s) -i or -e with -t 2 or -t 3"
+        if "2" in self.tasks and (self.identifier == "" or self.email == "" \
+                                  or self.outFormat == ""):
+            msg = "ERROR: missing compulsory option(s) -i or -e or -f with -t 2"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "4" in self.tasks and self.jsonFile == "":
-            msg = "ERROR: missing compulsory option -j with -t 4"
+        if "2" in self.tasks and self.outFormat not in ["json", "bib", "ris"]:
+            msg = "ERROR: unknown -f %s with -t 2" % self.outFormat
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if "3" in self.tasks and self.jsonFile == "":
+            msg = "ERROR: missing compulsory option -j with -t 3"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -195,8 +205,8 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "4" in self.tasks and self.libDir == "":
-            msg = "ERROR: missing compulsory option -p with -t 4"
+        if "3" in self.tasks and self.libDir == "":
+            msg = "ERROR: missing compulsory option -p with -t 3"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -205,8 +215,8 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "5" in self.tasks and self.bibtexFile == "":
-            msg = "ERROR: missing compulsory option -b with -t 5"
+        if "4" in self.tasks and self.bibtexFile == "":
+            msg = "ERROR: missing compulsory option -b with -t 4"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -215,13 +225,13 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "5" in self.tasks and self.libDir == "":
-            msg = "ERROR: missing compulsory option -p with -t 5"
+        if "4" in self.tasks and self.libDir == "":
+            msg = "ERROR: missing compulsory option -p with -t 3"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "5" in self.tasks and self.otherTool not in ["jabref", "zotero"]:
-            msg = "ERROR: missing compulsory option -o with -t 5"
+        if "4" in self.tasks and self.otherTool not in ["jabref", "zotero"]:
+            msg = "ERROR: missing compulsory option -o with -t 4"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -263,9 +273,9 @@ class Citeulike2Others(object):
             print("CHECK IT! (to see if it's not empty)")
             
             
-    def downloadFile(self, fileFormat):
+    def downloadFile(self):
         if self.verbose > 0:
-            print("download %s file ..." % fileFormat)
+            print("download %s file ..." % self.outFormat)
             sys.stdout.flush()
             
         if not os.path.exists(self.cookieFile):
@@ -278,11 +288,7 @@ class Citeulike2Others(object):
         outFile = "citeulike_%s" % self.identifier
         if self.tag:
             outFile += "_%s" % self.tag
-        fileExt = ""
-        if fileFormat == "bibtex":
-            fileExt = "bib"
-        elif fileFormat == "json":
-            fileExt = "json"
+        fileExt = self.outFormat
         outFile += ".%s" % fileExt
         
         cmd = "wget"
@@ -292,7 +298,7 @@ class Citeulike2Others(object):
         cmd += " --load-cookies %s" % self.cookieFile
         cmd += " --quiet"
         cmd += " -O %s" % outFile
-        cmd += " http://www.citeulike.org/%s" % fileFormat
+        cmd += " http://www.citeulike.org/%s" % self.outFormat
         cmd += "/user/%s" % self.identifier
         if self.tag:
             cmd += "/tag/%s" % self.tag
@@ -573,14 +579,12 @@ class Citeulike2Others(object):
         if "1" in self.tasks:
             self.saveCookies()
         if "2" in self.tasks:
-            self.downloadFile("json")
+            self.downloadFile()
         if "3" in self.tasks:
-            self.downloadFile("bibtex")
-        if "4" in self.tasks:
             self.loadJsonFile()
             self.downloadNewFiles()
             self.rmvOldFiles()
-        if "5" in self.tasks:
+        if "4" in self.tasks:
             self.loadJsonFile()
             self.loadBibtexFile()
             self.addFileFieldToBibtex()
