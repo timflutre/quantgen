@@ -28,6 +28,7 @@ import glob
 from pybtex.database.input import bibtex as bib_i
 from pybtex.database.output import bibtex as bib_o
 # import bibtexparser
+import RISparser # from https://github.com/sacabuche/RISparser
 
 if sys.version_info[0] == 2:
     if sys.version_info[1] < 7:
@@ -35,7 +36,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n" % msg)
         sys.exit(1)
         
-progVersion = "1.3.2" # http://semver.org/
+progVersion = "1.3.3" # http://semver.org/
 
 
 def user_input(msg):
@@ -63,7 +64,9 @@ class Citeulike2Others(object):
         self.libDir = ""
         self.bibtexFile = ""
         self.bibtexRefs = None
-        self.otherTool = "jabref"
+        self.risFile = ""
+        self.risRefs = None
+        self.otherTool = "zotero"
         self.tag = None
         
         
@@ -85,20 +88,27 @@ class Citeulike2Others(object):
         msg += "\t\t1: save cookies (requires -i, -e)\n"
         msg += "\t\t2: download file with references (requires -i, -e, -f; can use -a)\n"
         msg += "\t\t3: download new attached files (requires -i, -e, -j, -p)\n"
-        msg += "\t\t4: add 'file' field to Bibtex file (requires -j, -p, -b, -o)\n"
+        msg += "\t\t4: adapt the reference file for another tool (requires -j, -p, -b/-r, -o)\n"
+        msg += "\t\tadd link(s) to file(s)\n"
+        msg += "\t\te.g. rename 'comment' into 'annote' in Bibtex for Zotero\n"
+        msg += "\t\tor turn note formatting into HTML in RIS for Zotero\n"
         msg += "  -i, --id\tyour CiteULike identifier (default=timflutre)\n"
         msg += "  -e, --email\tyour email (default=timflutre@gmail.com)\n"
         msg += "  -f, --fmt\tformat of the file to be downloaded\n"
-        msg += "\t\tdefault=json/bib/ris\n"
+        msg += "\t\tdefault=json/bibtex/ris\n"
         msg += "  -j, --json\tpath to the JSON file\n"
         msg += "  -p, --path\tpath to the directory with all the files\n"
         msg += "  -b, --bibtex\tpath to the Bibtex file\n"
-        msg += "  -o, --other\tother tool (default=jabref/zotero)\n"
-        msg += "  -a, --tag\tspecific tag to retrieve (whole library otherwise)\n"
+        msg += "  -r, --ris\tpath to the RIS file\n"
+        msg += "  -o, --other\tother tool (default=zotero/jabref)\n"
+        msg += "  -a, --tag\tspecific CiteULike tag to retrieve (whole library otherwise)\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s -t 1+2+3\n" % os.path.basename(sys.argv[0])
-        msg += "  %s -t 4+5 -j refs.json -p ~/work/biblio -b refs.bib\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -t 1\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -t 2 -f json\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -t 3 -j refs.json -p ~/work/biblio\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -t 2 -f bibtex\n" % os.path.basename(sys.argv[0])
+        msg += "  %s -t 4 -j refs.json -p ~/work/biblio -b refs.bib\n" % os.path.basename(sys.argv[0])
         msg += "\n"
         msg += "Report bugs to <timflutre@gmail.com>."
         print(msg); sys.stdout.flush()
@@ -124,11 +134,12 @@ class Citeulike2Others(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:t:i:e:f:j:p:b:o:a:",
-                                        ["help", "version", "verbose=",
-                                         "tasks=", "id=", "email=", "format=",
-                                         "json=", "path=", "bibtex=", "out=",
-                                         "tag="])
+            opts, args = getopt.getopt(sys.argv[1:],
+                                       "hVv:t:i:e:f:j:p:b:r:o:a:",
+                                       ["help", "version", "verbose=",
+                                        "tasks=", "id=", "email=", "format=",
+                                        "json=", "path=", "bibtex=", "ris=",
+                                        "out=", "tag="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -156,6 +167,8 @@ class Citeulike2Others(object):
                 self.libDir = a
             elif o == "-b" or o == "--bibtex":
                 self.bibtexFile = a
+            elif o == "-r" or o == "--ris":
+                self.risFile = a
             elif o == "-o" or o == "--other":
                 self.otherTool = a
             elif o == "-a" or o == "--tag":
@@ -190,7 +203,7 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "2" in self.tasks and self.outFormat not in ["json", "bib", "ris"]:
+        if "2" in self.tasks and self.outFormat not in ["json", "bibtex", "ris"]:
             msg = "ERROR: unknown -f %s with -t 2" % self.outFormat
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -215,13 +228,18 @@ class Citeulike2Others(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "4" in self.tasks and self.bibtexFile == "":
-            msg = "ERROR: missing compulsory option -b with -t 4"
+        if "4" in self.tasks and self.bibtexFile == "" and self.risFile == "":
+            msg = "ERROR: missing compulsory option -b or -r with -t 4"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
         if self.bibtexFile != "" and not os.path.exists(self.bibtexFile):
             msg = "ERROR: can't find file %s" % self.bibtexFile
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.risFile != "" and not os.path.exists(self.risFile):
+            msg = "ERROR: can't find file %s" % self.risFile
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -288,7 +306,10 @@ class Citeulike2Others(object):
         outFile = "citeulike_%s" % self.identifier
         if self.tag:
             outFile += "_%s" % self.tag
-        fileExt = self.outFormat
+        if self.outFormat == "bibtex":
+            fileExt = "bib"
+        else:
+            fileExt = self.outFormat
         outFile += ".%s" % fileExt
         
         cmd = "wget"
@@ -413,10 +434,34 @@ class Citeulike2Others(object):
                 print("Bibtex file: %i entries" % len(self.bibtexRefs.entries))
                 
                 
-    def getSharedCitationKey(self, entryJson):
+    def loadRisFile(self):
+        if self.risRefs == None:
+            if self.verbose > 0:
+                print("load RIS file ...")
+                sys.stdout.flush()
+                
+            tmp = None
+            with open(self.risFile, "r") as risHandle:
+                tmp = list(RISparser.readris(risHandle))
+                
+            self.risRefs = {}
+            for i in range(len(tmp)):
+                entry = tmp[i]
+                if "id" not in entry:
+                    msg = "ERROR: no 'id' field in the entry #%i of %s" \
+                          % (i, self.risFile)
+                    sys.stderr.write("%s\n" % msg)
+                    sys.exit(1)
+                self.risRefs[entry["id"]] = entry
+                
+            if self.verbose > 0:
+                print("RIS file: %i entries" % len(self.risRefs))
+                
+                
+    def getSharedCitationKey(self, entryJson, nonJsonEntries):
         """
         Among possibly several citation keys in the JSON entry, return the one
-        which is alsos in the Bibtex file.
+        which is alsos in the non-JSON file (Bibtex or RIS).
         """
         ck = None
         
@@ -428,11 +473,11 @@ class Citeulike2Others(object):
             
         ck_idx = 0
         while ck_idx < len(entryJson["citation_keys"]):
-            if entryJson["citation_keys"][ck_idx] in self.bibtexRefs.entries:
+            if entryJson["citation_keys"][ck_idx] in nonJsonEntries:
                 break
             ck_idx += 1
         if ck_idx >= len(entryJson["citation_keys"]):
-            msg = "ERROR: can't find entry in Bibtex file for '%s'" % \
+            msg = "ERROR: can't find entry in non-JSON file for '%s'" % \
                   entryJson["title"]
             sys.stderr.write("%s\n" % msg)
             sys.exit(1)
@@ -513,9 +558,43 @@ class Citeulike2Others(object):
             if "userfiles" not in entryJson or \
                len(entryJson["userfiles"]) == 0:
                 continue
-            ck = self.getSharedCitationKey(entryJson)
+            ck = self.getSharedCitationKey(entryJson, self.bibtexRefs.entries)
             self.bibtexRefs.entries[ck].fields["file"] \
                 = self.formatFilesForBibtex(entryJson)
+            
+            
+    def formatFilesForRis(self, entryJson):
+        out = []
+        
+        fMain = None
+        if len(entryJson["userfiles"]) > 1:
+            fMain, fMainExt = self.getMainPdf(entryJson)
+            if fMain != None:
+                out.append("%s/%s" % (self.libDir, fMain["name"]))
+                
+        for f in entryJson["userfiles"]:
+            if fMain != None and f["name"] == fMain["name"]:
+                continue
+            out.append("%s/%s" % (self.libDir, f["name"]))
+            
+        return out
+    
+    
+    def addFileFieldToRis(self):
+        """
+        To each RIS entry, add a field 'L1' if the Json entry has any.
+        """
+        if self.verbose > 0:
+            print("add 'L1' field to RIS entries ...")
+            sys.stdout.flush()
+            
+        for entryJson in self.jsonRefs:
+            if "userfiles" not in entryJson or \
+               len(entryJson["userfiles"]) == 0:
+                continue
+            ck = self.getSharedCitationKey(entryJson, self.risRefs)
+            self.risRefs[ck]["L1"] \
+                = self.formatFilesForRis(entryJson)
             
             
     def editCommentField(self):
@@ -575,25 +654,54 @@ class Citeulike2Others(object):
             print("library saved in file '%s'" % newBibtexFile)
             
             
+    def writeRisFile(self):
+        if self.verbose > 0:
+            print("write new RIS file ...")
+            sys.stdout.flush()
+            
+        newRisFile = "%s_for-%s.ris" % \
+                        (os.path.splitext(self.risFile)[0],
+                         self.otherTool)
+        if os.path.exists(newRisFile):
+            os.remove(newRisFile)
+            
+        newRisHandle = open(newRisFile, "w")
+        for entryRis in self.risRefs:
+            continue # TODO
+        newRisHandle.close()
+        
+        if self.verbose > 0:
+            print("library saved in file '%s'" % newRisFile)
+            
+            
     def run(self):
         if "1" in self.tasks:
             self.saveCookies()
+            
         if "2" in self.tasks:
             self.downloadFile()
+            
         if "3" in self.tasks:
             self.loadJsonFile()
             self.downloadNewFiles()
             self.rmvOldFiles()
+            
         if "4" in self.tasks:
             self.loadJsonFile()
-            self.loadBibtexFile()
-            self.addFileFieldToBibtex()
-            if self.otherTool == "zotero":
-                # self.editCommentField()
-                self.editKeywordsField()
-            self.writeBibtexFile()
-            
-            
+            if self.bibtexFile != "":
+                self.loadBibtexFile()
+                self.addFileFieldToBibtex()
+                if self.otherTool == "zotero":
+                    self.editKeywordsField()
+                self.writeBibtexFile()
+            elif self.risFile != "":
+                self.loadRisFile()
+                self.addFileFieldToRis()
+                # if self.otherTool == "zotero":
+                #     self.editNoteField()
+                self.writeRisFile()
+                
+                
 if __name__ == "__main__":
     i = Citeulike2Others()
     
