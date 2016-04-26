@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.0" # http://semver.org/
+progVersion = "0.4.1" # http://semver.org/
 
 
 class GbsSample(object):
@@ -738,12 +738,13 @@ class Gbs(object):
                           "realign-reads-sample",
                           "realign-reads-geno",
                           "call-variants-geno",
-                          "joint-genotyping",
+                          "joint-genotyping", # to be completed by jointGenoId
                           "variant-recalib"]
         self.adpFile = None
         self.adapters = {}
         self.pathToPrefixRefGenome = None
         self.dictFile = None
+        self.jointGenoId = None
         self.tmpDir = "."
         self.memJvm = 4 # in Gb
         self.knownIndelsFile = None
@@ -813,6 +814,8 @@ class Gbs(object):
         msg += "\t\t fastq_file_R2 (filename, one per lane, gzip-compressed)\n"
         msg += "      --pird\tpath to the input reads directory\n"
         msg += "\t\twill be added to the columns 'fastq_file_R*' from the sample file\n"
+        msg += "\t\tused at steps 1 and 2\n"
+        msg += "\t\tif not set, input read files should be in current directory\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
         msg += "\t\tcompulsory for step 3\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
@@ -827,6 +830,9 @@ class Gbs(object):
         msg += "      --dict\tpath to the 'dict' file (SAM header with @SQ tags)\n"
         msg += "\t\tcompulsory for step 4\n"
         msg += "\t\tsee 'CreateSequenceDictionary' in the Picard software\n"
+        msg += "      --jgid\tcohort identifier to use for joint genotyping\n"
+        msg += "\t\tcompulsory for step 8\n"
+        msg += "\t\tuseful to launch several, different cohorts in parallel\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
         msg += "      --jvm\tmemory given to the Java Virtual Machine (default=4, in Gb)\n"
@@ -882,8 +888,9 @@ class Gbs(object):
                                          "proj1=", "proj2=", "step=",
                                          "samples=", "dict=",
                                          "schdlr=", "queue=", "enz=", "adp=",
-                                         "ref=", "tmpd=", "jvm=", "knowni=",
-                                         "known=", "force", "pird=", "resou="])
+                                         "ref=", "jgid=", "tmpd=", "jvm=",
+                                         "knowni=", "known=", "force", "pird=",
+                                         "resou="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -921,6 +928,8 @@ class Gbs(object):
                 self.pathToPrefixRefGenome = a
             elif o == "--dict":
                  self.dictFile = a
+            elif o == "--jgid":
+                 self.jointGenoId = a
             elif o == "--tmpd":
                 self.tmpDir = a
             elif o == "--jvm":
@@ -1106,6 +1115,12 @@ class Gbs(object):
             if os.path.dirname(self.pathToPrefixRefGenome) == "":
                 self.pathToPrefixRefGenome = "%s/%s" % (os.getcwd(),
                                                         self.pathToPrefixRefGenome)
+        if "8" in self.lSteps:
+            if not self.jointGenoId:
+                msg = "ERROR: missing compulsory option --jgid"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
                 
                 
     def loadHeaderSamplesFile(self, line):
@@ -1285,12 +1300,21 @@ class Gbs(object):
             else:
                 msg = "directory '%s' already exists" % dirName
                 warnings.warn(msg, UserWarning)
-                msg = "Do you want to remove it? [y/n] "
-                wantRmvDir = Utils.user_input(msg)
-                if wantRmvDir == "y":
-                    shutil.rmtree(dirName)
-                else:
-                    raise OSError("can't continue")
+                
+                # http://stackoverflow.com/a/24862213/597069
+                try:
+                    if os.getpgrp() == os.tcgetpgrp(sys.stdout.fileno()):
+                        msg = "Do you want to remove it? [y/n] "
+                        wantRmvDir = Utils.user_input(msg)
+                        if wantRmvDir == "y":
+                            shutil.rmtree(dirName)
+                        else:
+                            raise OSError("can't continue")
+                    else: # running in background
+                        raise OSError("use --force, or remove it yourself and re-launch me.")
+                except OSError:
+                    raise OSError("use --force, or remove it yourself and re-launch me.")
+                    
         os.mkdir(dirName)
         
         
@@ -1771,8 +1795,9 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step8-joincall" \
-                                         % self.project2Id)
+        groupJobId = self.makeGroupJobId("%s_%s_gbs-step8-joincall" \
+                                         % (self.project2Id,
+                                            self.jointGenoId))
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1781,8 +1806,14 @@ class Gbs(object):
                              self.lResources)
         self.jobManager.insert(iJobGroup)
         
-        stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[7])
+        stepDir = "%s/%s_%s" % (self.allGenosDir, self.lDirSteps[7],
+                                self.jointGenoId)
         self.makeDir(stepDir)
+        if self.verbose > 0:
+            msg = "results will be in '%s'" % stepDir
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
         cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
         cmd += " -T GenotypeGVCFs"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
@@ -1792,7 +1823,8 @@ class Gbs(object):
             iGeno = self.dGenos[genoId]
             prevStepDir = "%s/%s" % (iGeno.dir, self.lDirSteps[6])
             cmd += " --variant %s/%s.g.vcf.gz" % (prevStepDir, genoId)
-        cmd += " -o %s/%s_raw.vcf.gz" % (stepDir, self.project2Id)
+        cmd += " -o %s/%s_%s_raw.vcf.gz" % (stepDir, self.project2Id,
+                                            self.jointGenoId)
         cmd += " --heterozygosity 0.001" # 1 het site in 100 bp (across all samples, for humans)
         if self.verbose > 1:
             print(cmd)
