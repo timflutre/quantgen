@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 # Aim: download data from CiteULike for usage with Jabref or Zotero
@@ -8,11 +8,7 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # http://wiki.citeulike.org/index.php/Importing_and_Exporting
-
-# to allow code to work with Python 2 and 3
-from __future__ import print_function   # print is a function in python3
-from __future__ import unicode_literals # avoid adding "u" to each string
-from __future__ import division # avoid writing float(x) when dividing by x
+# https://www.zotero.org/support/dev/data_formats
 
 import sys
 import os
@@ -30,13 +26,12 @@ from pybtex.database.output import bibtex as bib_o
 # import bibtexparser
 import RISparser # from https://github.com/sacabuche/RISparser
 
-if sys.version_info[0] == 2:
-    if sys.version_info[1] < 7:
-        msg = "ERROR: Python should be in version 2.7 or higher"
-        sys.stderr.write("%s\n" % msg)
-        sys.exit(1)
-        
-progVersion = "1.3.3" # http://semver.org/
+if sys.version_info[0] != 3:
+    msg = "ERROR: Python should be in version 3.0 or higher"
+    sys.stderr.write("%s\n" % msg)
+    sys.exit(1)
+    
+progVersion = "1.4.0" # http://semver.org/
 
 
 def user_input(msg):
@@ -440,9 +435,13 @@ class Citeulike2Others(object):
                 print("load RIS file ...")
                 sys.stdout.flush()
                 
+            mapping = RISparser.TAG_KEY_MAPPING
+            mapping["L3"] = "citeulike-article-id"
+            
             tmp = None
-            with open(self.risFile, "r") as risHandle:
-                tmp = list(RISparser.readris(risHandle))
+            with open(self.risFile, "rU") as risHandle:
+                tmp = list(RISparser.readris(file_=risHandle,
+                                             mapping=mapping))
                 
             self.risRefs = {}
             for i in range(len(tmp)):
@@ -593,24 +592,8 @@ class Citeulike2Others(object):
                len(entryJson["userfiles"]) == 0:
                 continue
             ck = self.getSharedCitationKey(entryJson, self.risRefs)
-            self.risRefs[ck]["L1"] \
+            self.risRefs[ck]["file_attachments1"] \
                 = self.formatFilesForRis(entryJson)
-            
-            
-    def editCommentField(self):
-        """
-        Zotero assumes notes to be in field 'annote'.
-        """
-        if self.verbose > 0:
-            print("edit 'comment' field of Bibtex entries ...")
-            sys.stdout.flush()
-            
-        for ck in self.bibtexRefs.entries:
-            entryBibtex = self.bibtexRefs.entries[ck]
-            if "comment" in entryBibtex.fields.keys():
-                self.bibtexRefs.entries[ck].fields["annote"] \
-                    = entryBibtex.fields["comment"].replace("* ", "\n* ")
-                del self.bibtexRefs.entries[ck].fields["comment"]
                 
                 
     def editKeywordsField(self):
@@ -654,11 +637,40 @@ class Citeulike2Others(object):
             print("library saved in file '%s'" % newBibtexFile)
             
             
+    def editNotesRis(self):
+        """
+        Zotero handles notes in HTML format in N1 field.
+        """
+        if self.verbose > 0:
+            print("edit 'N1' field of RIS entries ...")
+            sys.stdout.flush()
+            
+        for ck in self.risRefs.keys():
+            if "notes" in self.risRefs[ck].keys():
+                initLines = self.risRefs[ck]["notes"]
+                self.risRefs[ck]["notes"] = "<p><ul>"
+                for initLine in initLines:
+                    initLine = initLine.replace("* ", "")
+                    # TODO: replace HTML links
+                    newLine = "<li>%s</li>" % initLine
+                    self.risRefs[ck]["notes"] += "\n%s" % newLine
+                self.risRefs[ck]["notes"] += "\n</ul></p>"
+                
+                
+    def invertTagKeyMapping(self, risTag2risparserKey):
+        risparserKey2risTag = {}
+        for risTag, risparserKey in risTag2risparserKey.items():
+            risparserKey2risTag[risparserKey] = risTag
+        return risparserKey2risTag
+    
+    
     def writeRisFile(self):
         if self.verbose > 0:
             print("write new RIS file ...")
             sys.stdout.flush()
             
+        risparserKey2risTag = self.invertTagKeyMapping(RISparser.TAG_KEY_MAPPING)
+        
         newRisFile = "%s_for-%s.ris" % \
                         (os.path.splitext(self.risFile)[0],
                          self.otherTool)
@@ -666,8 +678,25 @@ class Citeulike2Others(object):
             os.remove(newRisFile)
             
         newRisHandle = open(newRisFile, "w")
-        for entryRis in self.risRefs:
-            continue # TODO
+        for ck in self.risRefs.keys():
+            entryRis = self.risRefs[ck]
+            txt = "TY  - %s" % entryRis["type_of_reference"]
+            newRisHandle.write("%s\n" % txt)
+            for risparserKey in entryRis:
+                if risparserKey == "type_of_reference":
+                    continue
+                if isinstance(entryRis[risparserKey], list):
+                    txt = "%s  - %s" % (risparserKey2risTag[risparserKey],
+                                        entryRis[risparserKey][0])
+                    if len(entryRis[risparserKey]) > 1:
+                        for x in entryRis[risparserKey][1:]:
+                            txt += "\n%s  - %s" \
+                                   % (risparserKey2risTag[risparserKey], x)
+                else:
+                    txt = "%s  - %s" % (risparserKey2risTag[risparserKey],
+                                       entryRis[risparserKey])
+                newRisHandle.write("%s\n" % txt)
+            newRisHandle.write("ER  - \n\n")
         newRisHandle.close()
         
         if self.verbose > 0:
@@ -697,8 +726,8 @@ class Citeulike2Others(object):
             elif self.risFile != "":
                 self.loadRisFile()
                 self.addFileFieldToRis()
-                # if self.otherTool == "zotero":
-                #     self.editNoteField()
+                if self.otherTool == "zotero":
+                    self.editNotesRis()
                 self.writeRisFile()
                 
                 
