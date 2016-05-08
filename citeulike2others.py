@@ -21,6 +21,7 @@ import gzip
 import getpass
 import json
 import glob
+import re
 from pybtex.database.input import bibtex as bib_i
 from pybtex.database.output import bibtex as bib_o
 # import bibtexparser
@@ -645,16 +646,31 @@ class Citeulike2Others(object):
             print("edit 'N1' field of RIS entries ...")
             sys.stdout.flush()
             
+        # https://regex101.com/#python
+        # re.sub: http://stackoverflow.com/a/490616/597069
+        # RE for URL: http://stackoverflow.com/a/163684/597069
+        patternUrl = r"'([\w\s&]*)':([-A-Za-z0-9+&@#/%?=~_|!:,.;]*)?"
+        replUrl = lambda m: "<a href=\"%s\">%s</a>" % (m.group(2), m.group(1))
+        patternHead = r"\s([\w\s\-+&@#/%?=~_|!:,.;]*)\s"
+        patternHead1 = r"^==%s==$" % patternHead
+        replHead1 = lambda m: "<h1>%s</h1>" % m.group(1)
+        patternHead2 = r"^===%s===$" % patternHead
+        replHead2 = lambda m: "<h2>%s</h2>" % m.group(1)
+        patternLi = r"\*\s([\w\s\-+&@#/%?=~_|!:,.;()—“”]*)"
+        replLi = lambda m: "<li>%s</li>" % m.group(1)
+        
         for ck in self.risRefs.keys():
             if "notes" in self.risRefs[ck].keys():
                 initLines = self.risRefs[ck]["notes"]
-                self.risRefs[ck]["notes"] = "<p><ul>"
+                self.risRefs[ck]["notes"] = "<p>"
                 for initLine in initLines:
-                    initLine = initLine.replace("* ", "")
-                    # TODO: replace HTML links
-                    newLine = "<li>%s</li>" % initLine
+                    newLine = initLine
+                    newLine = re.sub(patternLi, replLi, newLine)
+                    newLine = re.sub(patternUrl, replUrl, newLine)
+                    newLine = re.sub(patternHead1, replHead1, newLine)
+                    newLine = re.sub(patternHead2, replHead2, newLine)
                     self.risRefs[ck]["notes"] += "\n%s" % newLine
-                self.risRefs[ck]["notes"] += "\n</ul></p>"
+                self.risRefs[ck]["notes"] += "\n</p>"
                 
                 
     def invertTagKeyMapping(self, risTag2risparserKey):
