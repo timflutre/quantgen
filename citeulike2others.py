@@ -122,7 +122,7 @@ class Citeulike2Others(object):
         msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut]."
-        print(msg.encode("utf8")); sys.stdout.flush()
+        print(msg); sys.stdout.flush()
         
         
     def setAttributesFromCmdLine(self):
