@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.1" # http://semver.org/
+progVersion = "0.4.2" # http://semver.org/
 
 
 class GbsSample(object):
@@ -710,6 +710,7 @@ class Gbs(object):
         self.lSteps = []
         self.forceRerunSteps = False
         self.samplesFile = None
+        self.fclnToKeep = None
         self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
         self.jobManager = None
@@ -812,6 +813,9 @@ class Gbs(object):
         msg += "\t\t date (e.g. '2015-01-15', see SAM format specification)\n"
         msg += "\t\t fastq_file_R1 (filename, one per lane, gzip-compressed)\n"
         msg += "\t\t fastq_file_R2 (filename, one per lane, gzip-compressed)\n"
+        msg += "      --fcln\tidentifier of a flowcell and lane number\n"
+        msg += "\t\tformat as <flowcell>_<lane-number>, e.g. 'C5YMDACXX_1'\n"
+        msg += "\t\tif set, only the samples from this lane will be analyzed\n"
         msg += "      --pird\tpath to the input reads directory\n"
         msg += "\t\twill be added to the columns 'fastq_file_R*' from the sample file\n"
         msg += "\t\tused at steps 1 and 2\n"
@@ -886,7 +890,7 @@ class Gbs(object):
             opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
                                         ["help", "version", "verbose=",
                                          "proj1=", "proj2=", "step=",
-                                         "samples=", "dict=",
+                                         "samples=", "fcln=", "dict=",
                                          "schdlr=", "queue=", "enz=", "adp=",
                                          "ref=", "jgid=", "tmpd=", "jvm=",
                                          "knowni=", "known=", "force", "pird=",
@@ -918,6 +922,8 @@ class Gbs(object):
                 self.lSteps = sorted(a.split("-"))
             elif o == "--samples":
                  self.samplesFile = a
+            elif o == "--fcln":
+                self.fclnToKeep = a
             elif o == "--pird":
                 self.pathToInReadsDir = a
             elif o == "--enz":
@@ -1173,6 +1179,9 @@ class Gbs(object):
             geno = tokens[self.samplesCol2idx["genotype"]]
             flowcell = tokens[self.samplesCol2idx["flowcell"]]
             laneNum = int(tokens[self.samplesCol2idx["lane"]])
+            if self.fclnToKeep is not None and \
+               "%s_%i" % (flowcell, laneNum) != self.fclnToKeep:
+                continue
             iSample = GbsSample(geno, flowcell, laneNum)
             iSample.refGenome = tokens[self.samplesCol2idx["ref_genome"]]
             iSample.library = tokens[self.samplesCol2idx["library"]]
