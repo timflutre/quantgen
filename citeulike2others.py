@@ -32,7 +32,7 @@ if sys.version_info[0] != 3:
     sys.stderr.write("%s\n" % msg)
     sys.exit(1)
     
-progVersion = "1.4.0" # http://semver.org/
+progVersion = "1.4.1" # http://semver.org/
 
 
 def user_input(msg):
@@ -452,6 +452,11 @@ class Citeulike2Others(object):
                           % (i, self.risFile)
                     sys.stderr.write("%s\n" % msg)
                     sys.exit(1)
+                if entry["id"] in self.risRefs:
+                    msg = "ERROR: entry #%i of %s has duplicated id" \
+                          % (i, self.risFile)
+                    sys.stderr.write("%s\n" % msg)
+                    sys.exit(1)
                 self.risRefs[entry["id"]] = entry
                 
             if self.verbose > 0:
@@ -649,6 +654,8 @@ class Citeulike2Others(object):
         # https://regex101.com/#python
         # re.sub: http://stackoverflow.com/a/490616/597069
         # RE for URL: http://stackoverflow.com/a/163684/597069
+        patternLi = r"\*\s([\w\s\-+&@#/%?=~_|!:,.;()—“”'<>]*)"
+        replLi = lambda m: "<li>%s</li>" % m.group(1)
         patternUrl = r"'([\w\s&]*)':([-A-Za-z0-9+&@#/%?=~_|!:,.;]*)?"
         replUrl = lambda m: "<a href=\"%s\">%s</a>" % (m.group(2), m.group(1))
         patternHead = r"\s([\w\s\-+&@#/%?=~_|!:,.;]*)\s"
@@ -656,8 +663,6 @@ class Citeulike2Others(object):
         replHead1 = lambda m: "<h1>%s</h1>" % m.group(1)
         patternHead2 = r"^===%s===$" % patternHead
         replHead2 = lambda m: "<h2>%s</h2>" % m.group(1)
-        patternLi = r"\*\s([\w\s\-+&@#/%?=~_|!:,.;()—“”]*)"
-        replLi = lambda m: "<li>%s</li>" % m.group(1)
         
         for ck in self.risRefs.keys():
             if "notes" in self.risRefs[ck].keys():
@@ -680,6 +685,11 @@ class Citeulike2Others(object):
         return risparserKey2risTag
     
     
+    def getSortedKeysFromRis(self, risRefs):
+        sortedKeys = sorted(risRefs.keys(), key=lambda ck: risRefs[ck]["id"].lower())
+        return sortedKeys
+    
+    
     def writeRisFile(self):
         if self.verbose > 0:
             print("write new RIS file ...")
@@ -694,7 +704,8 @@ class Citeulike2Others(object):
             os.remove(newRisFile)
             
         newRisHandle = open(newRisFile, "w")
-        for ck in self.risRefs.keys():
+        sortedKeys = self.getSortedKeysFromRis(self.risRefs)
+        for ck in sortedKeys:
             entryRis = self.risRefs[ck]
             txt = "TY  - %s" % entryRis["type_of_reference"]
             newRisHandle.write("%s\n" % txt)
