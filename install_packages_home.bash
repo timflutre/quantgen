@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Aim: download and install packages in my home
-# Copyright (C) 2014-2015 Institut National de la Recherche Agronomique
+# Copyright (C) 2014-2016 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Author: Timothée Flutre
 # Versioning: https://github.com/timflutre/quantgen
@@ -600,9 +600,9 @@ fi
 if [ "$1" == "R" ]; then
     mkdir -p $1
     cd $1
-    wget http://cran.rstudio.com/src/base/R-3/R-3.2.0.tar.gz
-    tar -xvf R-3.2.0.tar.gz
-    cd R-3.2.0
+    wget http://cran.rstudio.com/src/base/R-3/R-3.3.0.tar.gz
+    tar -xvf R-3.3.0.tar.gz
+    cd R-3.3.0
     ./configure --prefix=$HOME
     make
     make install
