@@ -48,7 +48,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC, generic_dna
 from Bio.Data.IUPACData import ambiguous_dna_values
 
-# should be at least version 0.3.2
+# should be at least version 0.3.4
 from pyutilstimflutre import Utils, ProgVersion, Job, JobGroup, JobManager, \
     Fastqc, SamtoolsFlagstat
 
@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.2" # http://semver.org/
+progVersion = "0.4.3" # http://semver.org/
 
 
 class GbsSample(object):
@@ -713,7 +713,7 @@ class Gbs(object):
         self.fclnToKeep = None
         self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
-        self.jobManager = None
+        self.jobManager = None # instantiated in checkAttributes()
         self.samplesCol2idx = {"genotype": None,
                                "flowcell": None,
                                "lane": None,
@@ -817,15 +817,17 @@ class Gbs(object):
         msg += "\t\tformat as <flowcell>_<lane-number>, e.g. 'C5YMDACXX_1'\n"
         msg += "\t\tif set, only the samples from this lane will be analyzed\n"
         msg += "      --pird\tpath to the input reads directory\n"
+        msg += "\t\tcompulsory for steps 1 and 2\n"
         msg += "\t\twill be added to the columns 'fastq_file_R*' from the sample file\n"
-        msg += "\t\tused at steps 1 and 2\n"
         msg += "\t\tif not set, input read files should be in current directory\n"
+        msg += "      --enz\tname of the restriction enzyme\n"
+        msg += "\t\tcompulsory for step 2\n"
+        msg += "\t\tdefault=ApeKI\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
         msg += "\t\tcompulsory for step 3\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
         msg += "\t\tname: at least 'adpR1' (also 'adpR2' if paired-end)\n"
         msg += "\t\tsequence: from 5' (left) to 3' (right)\n"
-        msg += "      --enz\tname of the restriction enzyme (default=ApeKI)\n"
         msg += "      --ref\tpath to the prefix of files for the reference genome\n"
         msg += "\t\tcompulsory for steps 4, 5, 6, 7, 8\n"
         msg += "\t\tshould correspond to the 'ref_genome' column in --samples\n"
@@ -1003,10 +1005,10 @@ class Gbs(object):
             self.help()
             sys.exit(1)
         if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps:
-            self.jobManager = JobManager(self.project1Id)
+            self.jobManager = JobManager(self.scheduler, self.project1Id)
         if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
            or "7" in self.lSteps or "8" in self.lSteps:
-            self.jobManager = JobManager(self.project2Id)
+            self.jobManager = JobManager(self.scheduler, self.project2Id)
         if self.lSteps == []:
             msg = "ERROR: missing compulsory option --step"
             sys.stderr.write("%s\n\n" % msg)
@@ -1352,8 +1354,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1363,14 +1364,10 @@ class Gbs(object):
             iLane.makeInitFastqFileSymlinks()
             iLane.initQc(stepDir, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all quality jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def combineFastqcResults(self):
         # TODO
         # if self.verbose > 0:
@@ -1433,8 +1430,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1444,14 +1440,10 @@ class Gbs(object):
             iLane.makeInitFastqFileSymlinks()
             iLane.demultiplex(stepDir, self.enzyme, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all demultiplexing jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step2(self):
         cwd, startTime = self.beginStep(2)
         self.demultiplexInputFastqFiles()
@@ -1469,8 +1461,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1481,14 +1472,10 @@ class Gbs(object):
             iLane.clean(self.adapters["adpR1"], self.adapters["adpR2"],
                         stepDir, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all cleaning jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def launchFastqcOnCleanFastqFiles(self):
         if self.verbose > 0:
             msg = "assess quality per sample..."
@@ -1500,8 +1487,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1509,14 +1495,10 @@ class Gbs(object):
             iLane.setCleanedFastqFiles(stepDir)
             iLane.cleanQc(stepDir, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all quality jobs finished"
-            sys.stdout.write("%s\n" % msg)
-
-
+        
     def saveNbReadsFromFastqc(self):
         if self.verbose > 0:
             msg = "save nb of clean reads per sample..."
@@ -1567,8 +1549,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1576,14 +1557,10 @@ class Gbs(object):
             iLane.align(self.pathToPrefixRefGenome, self.tmpDir, self.dictFile,
                         self.lDirSteps[3], iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all mapping jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def gatherSamplesPerLane(self):
         """
         merge and index BAM files, and collect insert size metrics
@@ -1598,8 +1575,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1608,14 +1584,10 @@ class Gbs(object):
             self.makeDir(outDir)
             iLane.gather(self.memJvm, outDir, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all gathering jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def saveBasicAlignStats(self):
         """
         via samtools flagstat per sample
@@ -1691,8 +1663,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1701,14 +1672,10 @@ class Gbs(object):
                                       self.knownIndelsFile, self.lDirSteps[4],
                                       iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all locally realignment samples jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step5(self):
         cwd, startTime = self.beginStep(5)
         self.localRealignmentSamples()
@@ -1727,8 +1694,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         lGenoIds = self.dGenos.keys()
@@ -1743,14 +1709,10 @@ class Gbs(object):
                                self.knownIndelsFile, stepDir,
                                iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all locally realignment genotypes jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step6(self):
         cwd, startTime = self.beginStep(6)
         self.localRealignmentGenotypes()
@@ -1769,8 +1731,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         lGenoIds = self.dGenos.keys()
@@ -1784,14 +1745,10 @@ class Gbs(object):
             iGeno.variantCalling(self.memJvm, self.pathToPrefixRefGenome,
                                  self.knownFile, stepDir, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all variant calling per geno jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step7(self):
         cwd, startTime = self.beginStep(7)
         self.variantCallingPerGenotype()
@@ -1811,8 +1768,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         stepDir = "%s/%s_%s" % (self.allGenosDir, self.lDirSteps[7],
@@ -1841,14 +1797,10 @@ class Gbs(object):
         iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=stepDir)
         iJobGroup.insert(iJob)
         
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "joint calling job finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step8(self):
         cwd, startTime = self.beginStep(8)
         self.jointGenotyping()
@@ -1867,8 +1819,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
@@ -1901,14 +1852,10 @@ class Gbs(object):
         iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=stepDir)
         iJobGroup.insert(iJob)
         
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "variant recalibration job finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step9(self):
         cwd, startTime = self.beginStep(9)
         self.variantRecalibration()
@@ -1933,8 +1880,7 @@ class Gbs(object):
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.scheduler, self.queue,
-                             self.lResources)
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
@@ -1942,14 +1888,10 @@ class Gbs(object):
             iLane.baseQualityRecalibrate(self.memJvm, self.pathToPrefixRefGenome,
                                          self.knownFile, outDir, iJobGroup)
             
-        self.jobManager[iJobGroup.id].submit()
-        self.jobManager[iJobGroup.id].wait(self.verbose)
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.verbose)
         
-        if self.verbose > 0:
-            msg = "all recalibration jobs finished"
-            sys.stdout.write("%s\n" % msg)
-            
-            
+        
     def step11(self):
         cwd, startTime = self.beginStep(11)
         self.baseQualityRecalibration()
