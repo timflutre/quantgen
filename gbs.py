@@ -124,7 +124,7 @@ class GbsSample(object):
         if len(lFilesR2) == 1:
             self.dDemultiplexedFastqFiles["R2"] = lFilesR2[0]
             
-    def clean(self, adpR1, adpR2, outDir, iJobGroup, useBashScript=True):
+    def clean(self, adpR1, adpR2, outDir, iJobGroup):
         """
         https://cutadapt.readthedocs.org/en/stable/
         """
@@ -145,21 +145,9 @@ class GbsSample(object):
             cmd += " %s" % self.dDemultiplexedFastqFiles["R2"]
         # print(cmd) # debug
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = None
-        if useBashScript:
-            bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
-            bashHandle = open(bashFile, "w")
-            txt = "#!/usr/bin/env bash"
-            txt += "\ndate"
-            txt += "\n%s" % cmd
-            txt += "\ndate"
-            bashHandle.write("%s\n" % txt)
-            bashHandle.close()
-            os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, bashFile=bashFile,
-                       dir=outDir)
-        else:
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
     def setCleanedFastqFiles(self, pathToDir):
@@ -191,7 +179,10 @@ class GbsSample(object):
             cmd = "time fastqc -o %s %s" % (outDir,
                                             self.dCleanedFastqFiles[Ri])
             jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+            bashFile = "%s/job_%s_%s_%s.bash" % (outDir, iJobGroup.id,
+                                                 self.id, Ri)
+            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                       bashFile=bashFile, dir=outDir)
             iJobGroup.insert(iJob)
             
     def saveNbReadsFromFastqc(self, inDir, outHandle):
@@ -220,86 +211,73 @@ class GbsSample(object):
         https://www.broadinstitute.org/gatk/guide/best-practices
         Need to give bashFile to Job to keep <tab> in -R given to BWA
         """
-        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
-        bashHandle = open(bashFile, "w")
-        txt = "#!/usr/bin/env bash"
-        txt += "\ndate"
-        txt += "\noutDir=\"%s\"" % outDir
-        txt += "\n\necho \"align, fixmate and sort...\""
-        bashHandle.write("%s\n" % txt)
+        cmd = "outDir=\"%s\"" % outDir
         
-        txt = "bwa mem"
-        txt += " -R \'@RG"
-        txt += "\tID:%s" % self.id
-        txt += "\tCN:%s" % self.seqCenter
-        txt += "\tDT:%s" % self.date
-        txt += "\tLB:%s" % self.library
-        txt += "\tPL:%s" % self.seqPlatform
-        txt += "\tPM:%s" % self.seqPlatformModel
-        txt += "\tPU:%s-%s.%s" % (self.flowcell, self.barcode, self.lane)
-        txt += "\tSM:%s" % self.genotype # see GATK's FAQ for what a sample is
-        txt += "\'"
-        txt += " -M %s" % pathToPrefixRefGenome
-        txt += " %s" % self.dCleanedFastqFiles["R1"]
+        cmd += "\n\necho \"align, fixmate and sort...\""
+        cmd += "\nbwa mem"
+        cmd += " -R \'@RG"
+        cmd += "\tID:%s" % self.id
+        cmd += "\tCN:%s" % self.seqCenter
+        cmd += "\tDT:%s" % self.date
+        cmd += "\tLB:%s" % self.library
+        cmd += "\tPL:%s" % self.seqPlatform
+        cmd += "\tPM:%s" % self.seqPlatformModel
+        cmd += "\tPU:%s-%s.%s" % (self.flowcell, self.barcode, self.lane)
+        cmd += "\tSM:%s" % self.genotype # see GATK's FAQ for what a sample is
+        cmd += "\'"
+        cmd += " -M %s" % pathToPrefixRefGenome
+        cmd += " %s" % self.dCleanedFastqFiles["R1"]
         if "R2" in self.dCleanedFastqFiles:
-            txt += " %s" % self.dCleanedFastqFiles["R2"]
-        bashHandle.write("%s" % txt.encode('unicode-escape'))
-        
+            cmd += " %s" % self.dCleanedFastqFiles["R2"]
+            
         tmpBamFile = "tmp_%s.bam" % self.id
-        txt = " | samtools fixmate"
-        txt += " -O bam"
-        txt += " -" # stdin
-        txt += " -" # stdout
-        txt += " | samtools sort"
-        txt += " -o ${outDir}/%s" % tmpBamFile
-        txt += " -O bam"
-        txt += " -T %s/tmp%s_%s" % (tmpDir, Utils.uniq_alphanum(5), self.id)
-        txt += " -" # stdin
-        bashHandle.write("%s\n" % txt)
+        cmd += " | samtools fixmate"
+        cmd += " -O bam"
+        cmd += " -" # stdin
+        cmd += " -" # stdout
+        cmd += " | samtools sort"
+        cmd += " -o ${outDir}/%s" % tmpBamFile
+        cmd += " -O bam"
+        cmd += " -T %s/tmp%s_%s" % (tmpDir, Utils.uniq_alphanum(5), self.id)
+        cmd += " -" # stdin
         
         # update the header with @SQ from dictFile
         tmpHeaderFile = "tmp_%s_header.sam" % self.id
-        txt = "\necho \"update header...\""
-        txt += "\ncat"
-        txt += " <(samtools view -H ${outDir}/tmp_%s.bam" % self.id
-        txt += " | grep -v '@SQ')"
-        txt += " <(grep '@SQ' %s)" % dictFile
-        txt += " > ${outDir}/%s" % tmpHeaderFile
-        txt += "\ntime samtools reheader"
-        txt += " ${outDir}/%s" % tmpHeaderFile
-        txt += " ${outDir}/%s" % tmpBamFile
-        txt += " > ${outDir}/%s.bam" % self.id
-        txt += "\nrm ${outDir}/%s ${outDir}/%s" % (tmpBamFile, tmpHeaderFile)
-        bashHandle.write("%s\n" % txt)
+        cmd += "\n\necho \"update header...\""
+        cmd += "\ncat"
+        cmd += " <(samtools view -H ${outDir}/tmp_%s.bam" % self.id
+        cmd += " | grep -v '@SQ')"
+        cmd += " <(grep '@SQ' %s)" % dictFile
+        cmd += " > ${outDir}/%s" % tmpHeaderFile
+        cmd += "\ntime samtools reheader"
+        cmd += " ${outDir}/%s" % tmpHeaderFile
+        cmd += " ${outDir}/%s" % tmpBamFile
+        cmd += " > ${outDir}/%s.bam" % self.id
+        cmd += "\nrm ${outDir}/%s ${outDir}/%s" % (tmpBamFile, tmpHeaderFile)
         
         # index
-        txt = "\necho \"index\""
-        txt += "\nsamtools index"
-        txt += " ${outDir}/%s.bam" % self.id
-        bashHandle.write("%s\n" % txt)
+        cmd += "\n\necho \"index\""
+        cmd += "\nsamtools index"
+        cmd += " ${outDir}/%s.bam" % self.id
         
         # basic stats
-        txt = "\necho \"flagstat\""
-        txt += "\ntime samtools flagstat"
-        txt += " ${outDir}/%s.bam" % self.id
-        txt += " >& ${outDir}/flagstat_%s.txt" % self.id
-        txt += "\necho \"reads in proper pairs and primary alignments\""
-        txt += "\necho -e \"%s" % self.genotype
-        txt += "\t%s" % self.flowcell
-        txt += "\t%s" % self.lane
-        txt += "\t\"$(samtools view -f 0x0002 -F 0x0100 -q 5"
-        txt += " ${outDir}/%s.bam" % self.id
-        txt += " | cut -f1 | sort | uniq | wc -l)"
-        txt += " > ${outDir}/reads-proppaired-primaln-q5_%s.txt" % self.id
-        txt += "\ndate"
-        bashHandle.write("%s\n" % txt)
-        
-        bashHandle.close()
-        os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
+        cmd += "\n\necho \"flagstat\""
+        cmd += "\ntime samtools flagstat"
+        cmd += " ${outDir}/%s.bam" % self.id
+        cmd += " >& ${outDir}/flagstat_%s.txt" % self.id
+        cmd += "\necho \"reads in proper pairs and primary alignments\""
+        cmd += "\necho -e \"%s" % self.genotype
+        cmd += "\t%s" % self.flowcell
+        cmd += "\t%s" % self.lane
+        cmd += "\t\"$(samtools view -f 0x0002 -F 0x0100 -q 5"
+        cmd += " ${outDir}/%s.bam" % self.id
+        cmd += " | cut -f1 | sort | uniq | wc -l)"
+        cmd += " > ${outDir}/reads-proppaired-primaln-q5_%s.txt" % self.id
         
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(groupId=iJobGroup.id, name=jobName, bashFile=bashFile,
-                   dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
     def setInitialBamFile(self, dirName):
@@ -316,76 +294,49 @@ class GbsSample(object):
         outHandle.write("%s\n" % txt)
         
     def localRealign(self, memJvm, pathToPrefixRefGenome, knownIndelsFile,
-                     outDir, iJobGroup, useBashScript=True):
-        cmd1 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
-        cmd1 += " -T RealignerTargetCreator"
-        cmd1 += " -R %s.fa" % pathToPrefixRefGenome
-        cmd1 += " -I %s" % self.initialBamFile
+                     outDir, iJobGroup):
+        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd += " -T RealignerTargetCreator"
+        cmd += " -R %s.fa" % pathToPrefixRefGenome
+        cmd += " -I %s" % self.initialBamFile
         if knownIndelsFile:
-            cmd1 += " --known %s" % knownIndelsFile
-        cmd1 += " -o %s/%s.intervals" % (outDir, self.id)
-        cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
-        cmd2 += " -T IndelRealigner"
-        cmd2 += " -R %s.fa" % pathToPrefixRefGenome
-        cmd2 += " -I %s" % self.initialBamFile
+            cmd += " --known %s" % knownIndelsFile
+        cmd += " -o %s/%s.intervals" % (outDir, self.id)
+        cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd += " -T IndelRealigner"
+        cmd += " -R %s.fa" % pathToPrefixRefGenome
+        cmd += " -I %s" % self.initialBamFile
         if knownIndelsFile:
-            cmd2 += " --known %s" % knownIndelsFile
-        cmd2 += " -targetIntervals %s/%s.intervals" % (outDir, self.id)
-        cmd2 += " -o %s/%s_realn.bam" % (outDir, self.id)
+            cmd += " --known %s" % knownIndelsFile
+        cmd += " -targetIntervals %s/%s.intervals" % (outDir, self.id)
+        cmd += " -o %s/%s_realn.bam" % (outDir, self.id)
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = None
-        if useBashScript:
-            bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
-            bashHandle = open(bashFile, "w")
-            txt = "#!/usr/bin/env bash"
-            txt += "\ndate"
-            txt += "\n%s" % cmd1
-            txt += "\n%s" % cmd2
-            txt += "\ndate"
-            bashHandle.write("%s\n" % txt)
-            bashHandle.close()
-            os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, bashFile=bashFile,
-                       dir=outDir)
-        else:
-            cmd = "%s; %s" % (cmd1, cmd2)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
     def baseQualityRecalibrate(self, memJvm, pathToPrefixRefGenome, knownFile,
-                               outDir, iJobGroup, useBashScript=True):
-        cmd1 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
-        cmd1 += " -T BaseRecalibrator"
-        cmd1 += " -R %s.fa" % pathToPrefixRefGenome
-        cmd1 += " -I %s/%s_realn.bam" % (outDir, self.id)
+                               outDir, iJobGroup):
+        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd += " -T BaseRecalibrator"
+        cmd += " -R %s.fa" % pathToPrefixRefGenome
+        cmd += " -I %s/%s_realn.bam" % (outDir, self.id)
         if knownFile != "":
-            cmd1 += " --known %s" % knownFile
+            cmd += " --known %s" % knownFile
         else:
-            cmd1 += " --run_without_dbsnp_potentially_ruining_quality"
-        cmd1 += " -o %s/%s_recal.table" % (outDir, self.id)
-        cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
-        cmd2 += " -T PrintReads"
-        cmd2 += " -R %s.fa" % pathToPrefixRefGenome
-        cmd2 += " -I %s/%s_realn.bam" % (outDir, self.id)
-        cmd2 += " --BQSR %s/%s_recal.table" % (outDir, self.id)
-        cmd2 += " -o %s/%s_recal.bam" % (outDir, self.id)
+            cmd += " --run_without_dbsnp_potentially_ruining_quality"
+        cmd += " -o %s/%s_recal.table" % (outDir, self.id)
+        cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd += " -T PrintReads"
+        cmd += " -R %s.fa" % pathToPrefixRefGenome
+        cmd += " -I %s/%s_realn.bam" % (outDir, self.id)
+        cmd += " --BQSR %s/%s_recal.table" % (outDir, self.id)
+        cmd += " -o %s/%s_recal.bam" % (outDir, self.id)
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = None
-        if useBashScript:
-            bashFile = "job_%s_%s.bash" % (iJobGroup.id, self.id)
-            bashHandle = open(bashFile, "w")
-            txt = "#!/usr/bin/env bash"
-            txt += "\ndate"
-            txt += "\n%s" % cmd1
-            txt += "\n%s" % cmd2
-            txt += "\ndate"
-            bashHandle.write("%s\n" % txt)
-            bashHandle.close()
-            os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
-            iJob = Job(iJobGroup.id, jobName, bashFile=bashFile)
-        else:
-            cmd = "%s; %s" % (cmd1, cmd2)
-            iJob = Job(iJobGroup.id, jobName, cmd)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
         
@@ -452,7 +403,10 @@ class GbsLane(object):
         for Ri,lFiles in self.dInitFastqFiles.items():
             cmd = "time fastqc -o %s %s" % (outDir, lFiles[1])
             jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+            bashFile = "%s/job_%s_%s_%s.bash" % (outDir, iJobGroup.id,
+                                                 self.id, Ri)
+            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                       bashFile=bashFile, dir=outDir)
             iJobGroup.insert(iJob)
             
     def saveBarcodeFile(self, outDir, format="fasta"):
@@ -481,7 +435,9 @@ class GbsLane(object):
         cmd += " --re %s" % enzyme
         cmd += " --chim 1"
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
     def setDemultiplexedFastqFiles(self, pathToDir):
@@ -539,7 +495,9 @@ class GbsLane(object):
         cmd += " OUTPUT=%s/insert-sizes_picard_%s.txt" % (outDir, self.id)
         cmd += "; rm -f %s/%s.bam*" % (outDir, self.id) # to save space
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
     def saveSamtoolsFlagstat(self, outHandle):
@@ -551,7 +509,7 @@ class GbsLane(object):
             
     def localRealignSamples(self, memJvm, pathToPrefixRefGenome,
                             knownIndelsFile, outDirName,
-                            iJobGroup, useBashScript=True):
+                            iJobGroup):
         for sampleId,iSample in self.dSamples.items():
             outDir = "%s/%s" % (iSample.dir, outDirName)
             if os.path.isdir(outDir):
@@ -593,51 +551,36 @@ class GbsGeno(object):
                                                     iSample.id))
             
     def localRealign(self, memJvm, pathToPrefixRefGenome, knownIndelsFile,
-                     outDir, iJobGroup, useBashScript=True):
-        cmd1 = ""
-        cmd2 = ""
+                     outDir, iJobGroup):
+        cmd = ""
         if len(self.lRealignedSampleBamFiles) == 1:
             pathWoExt = os.path.splitext(self.lRealignedSampleBamFiles[0])[0]
-            cmd1 = "ln -s %s.bam" % pathWoExt
-            cmd1 += " %s/%s_realn.bam" % (outDir, self.id)
-            cmd2 = "ln -s %s.bai" % pathWoExt
-            cmd2 += " %s/%s_realn.bai" % (outDir, self.id)
+            cmd += "ln -s %s.bam" % pathWoExt
+            cmd += " %s/%s_realn.bam" % (outDir, self.id)
+            cmd += "\nln -s %s.bai" % pathWoExt
+            cmd += " %s/%s_realn.bai" % (outDir, self.id)
         else:
-            cmd1 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
-            cmd1 += " -T RealignerTargetCreator"
-            cmd1 += " -R %s.fa" % pathToPrefixRefGenome
+            cmd += "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+            cmd += " -T RealignerTargetCreator"
+            cmd += " -R %s.fa" % pathToPrefixRefGenome
             for i in range(len(self.lRealignedSampleBamFiles)):
-                cmd1 += " -I %s" % self.lRealignedSampleBamFiles[i]
+                cmd += " -I %s" % self.lRealignedSampleBamFiles[i]
             if knownIndelsFile:
-                cmd1 += " --known %s" % knownIndelsFile
-            cmd1 += " -o %s/%s.intervals" % (outDir, self.id)
-            cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
-            cmd2 += " -T IndelRealigner"
-            cmd2 += " -R %s.fa" % pathToPrefixRefGenome
+                cmd += " --known %s" % knownIndelsFile
+            cmd += " -o %s/%s.intervals" % (outDir, self.id)
+            cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+            cmd += " -T IndelRealigner"
+            cmd += " -R %s.fa" % pathToPrefixRefGenome
             for i in range(len(self.lRealignedSampleBamFiles)):
-                cmd2 += " -I %s" % self.lRealignedSampleBamFiles[i]
+                cmd += " -I %s" % self.lRealignedSampleBamFiles[i]
             if knownIndelsFile:
-                cmd2 += " --known %s" % knownIndelsFile
-            cmd2 += " -targetIntervals %s/%s.intervals" % (outDir, self.id)
-            cmd2 += " -o %s/%s_realn.bam" % (outDir, self.id)
+                cmd += " --known %s" % knownIndelsFile
+            cmd += " -targetIntervals %s/%s.intervals" % (outDir, self.id)
+            cmd += " -o %s/%s_realn.bam" % (outDir, self.id)
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = None
-        if useBashScript:
-            bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
-            bashHandle = open(bashFile, "w")
-            txt = "#!/usr/bin/env bash"
-            txt += "\ndate"
-            txt += "\n%s" % cmd1
-            txt += "\n%s" % cmd2
-            txt += "\ndate"
-            bashHandle.write("%s\n" % txt)
-            bashHandle.close()
-            os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, bashFile=bashFile,
-                       dir=outDir)
-        else:
-            cmd = "%s; %s" % (cmd1, cmd2)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
     def setRealignedGenotypeBamFile(self, pathToDir):
@@ -645,7 +588,7 @@ class GbsGeno(object):
         
     def variantCalling(self, memJvm, pathToPrefixRefGenome, knownFile, outDir,
                        iJobGroup, saveActiveRegions=False,
-                       saveActivityProfiles=False, useBashScript=True):
+                       saveActivityProfiles=False):
         """
         https://www.broadinstitute.org/gatk/guide/tooldocs/org_broadinstitute_gatk_tools_walkers_haplotypecaller_HaplotypeCaller.php
         http://gatkforums.broadinstitute.org/discussion/comment/14337/#Comment_14337
@@ -679,22 +622,9 @@ class GbsGeno(object):
         # cmd += " --input_prior " # to be used for bi-parental crosses?
         cmd += " --maxNumHaplotypesInPopulation 128"  # change? no, see link above
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
-        iJob = None
-        if useBashScript:
-            bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
-            bashHandle = open(bashFile, "w")
-            txt = "#!/usr/bin/env bash"
-            txt += "\ndate"
-            txt += "\n%s" % cmd
-            txt += "\ndate"
-            bashHandle.write("%s\n" % txt)
-            bashHandle.close()
-            os.chmod(bashFile, stat.S_IREAD | stat.S_IEXEC)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, bashFile=bashFile,
-                       dir=outDir)
-        else:
-            cmd = "%s; %s" % (cmd1, cmd2)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=outDir)
+        bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
         
@@ -1794,7 +1724,9 @@ class Gbs(object):
         if self.verbose > 1:
             print(cmd)
         jobName = "stdout_%s" % (iJobGroup.id)
-        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=stepDir)
+        bashFile = "%s/job_%s_%s.bash" % (stepDir, iJobGroup.id, "jointcalling")
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=stepDir)
         iJobGroup.insert(iJob)
         
         self.jobManager.submit(iJobGroup.id)
@@ -1824,32 +1756,33 @@ class Gbs(object):
         
         stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
         self.makeDir(stepDir)
-        cmd1 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
-        cmd1 += " -T VariantRecalibrator"
-        cmd1 += " -R %s.fa" % self.pathToPrefixRefGenome
+        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
+        cmd += " -T VariantRecalibrator"
+        cmd += " -R %s.fa" % self.pathToPrefixRefGenome
         prevStepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
-        cmd1 += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
+        cmd += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
         # cmd1 += " -resource:%s" % TODO
-        cmd1 += " -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR -an InbreedingCoeff"
-        cmd1 += " -mode BOTH"
-        cmd1 += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
-        cmd1 += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
-        cmd1 += " -rscriptFile %s/plots_%s.R" % (stepDir, self.project2Id)
+        cmd += " -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR -an InbreedingCoeff"
+        cmd += " -mode BOTH"
+        cmd += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
+        cmd += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
+        cmd += " -rscriptFile %s/plots_%s.R" % (stepDir, self.project2Id)
         if self.verbose > 1:
             print(cmd1)
-        cmd2 = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
-        cmd2 += " -T ApplyRecalibration"
-        cmd2 += " -R %s.fa" % self.pathToPrefixRefGenome
-        cmd2 += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
-        cmd2 += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
-        cmd2 += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
-        cmd2 += " -mode BOTH"
-        cmd2 += " -o %s/%s.vcf.gz" % (stepDir, self.project2Id)
+        cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
+        cmd += " -T ApplyRecalibration"
+        cmd += " -R %s.fa" % self.pathToPrefixRefGenome
+        cmd += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
+        cmd += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
+        cmd += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
+        cmd += " -mode BOTH"
+        cmd += " -o %s/%s.vcf.gz" % (stepDir, self.project2Id)
         if self.verbose > 1:
             print(cmd2)
-        cmd = "%s; %s" % (cmd1, cmd2)
         jobName = "stdout_%s" % (iJobGroup.id)
-        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd, dir=stepDir)
+        bashFile = "%s/job_%s_%s.bash" % (stepDir, iJobGroup.id, "varrecalib")
+        iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                   bashFile=bashFile, dir=stepDir)
         iJobGroup.insert(iJob)
         
         self.jobManager.submit(iJobGroup.id)
