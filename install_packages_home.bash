@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bmagwa" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastphase" "fastqc" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "inphap" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bmagwa" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastphase" "fastqc" "fcgene" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "inphap" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -301,6 +301,15 @@ if [ "$1" == "fastqc" ]; then
     cd FastQC
     chmod +x fastqc
     echo "add "$(pwd)" to your PATH"
+fi
+
+if [ "$1" == "fcgene" ]; then
+    mkdir -p $1
+    cd $1
+    wget -O fcgene-1.0.7.tar.gz https://sourceforge.net/projects/fcgene/files/fcgene-1.0.7.tar.gz/download
+    tar -xzvf fcgene-1.0.7.tar.gz
+    cd fcgene-1.0.7
+    cp fcgene_static $HOME/bin/fcgene
 fi
 
 if [ "$1" == "forqs" ]; then
