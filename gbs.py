@@ -48,7 +48,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC, generic_dna
 from Bio.Data.IUPACData import ambiguous_dna_values
 
-# should be at least version 0.3.4
+# should at least be version 0.4.0
 from pyutilstimflutre import Utils, ProgVersion, Job, JobGroup, JobManager, \
     Fastqc, SamtoolsFlagstat
 
@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.3" # http://semver.org/
+progVersion = "0.4.4" # http://semver.org/
 
 
 class GbsSample(object):
@@ -216,14 +216,14 @@ class GbsSample(object):
         cmd += "\n\necho \"align, fixmate and sort...\""
         cmd += "\nbwa mem"
         cmd += " -R \'@RG"
-        cmd += "\tID:%s" % self.id
-        cmd += "\tCN:%s" % self.seqCenter
-        cmd += "\tDT:%s" % self.date
-        cmd += "\tLB:%s" % self.library
-        cmd += "\tPL:%s" % self.seqPlatform
-        cmd += "\tPM:%s" % self.seqPlatformModel
-        cmd += "\tPU:%s-%s.%s" % (self.flowcell, self.barcode, self.lane)
-        cmd += "\tSM:%s" % self.genotype # see GATK's FAQ for what a sample is
+        cmd += "\\tID:%s" % self.id
+        cmd += "\\tCN:%s" % self.seqCenter
+        cmd += "\\tDT:%s" % self.date
+        cmd += "\\tLB:%s" % self.library
+        cmd += "\\tPL:%s" % self.seqPlatform
+        cmd += "\\tPM:%s" % self.seqPlatformModel
+        cmd += "\\tPU:%s-%s.%s" % (self.flowcell, self.barcode, self.lane)
+        cmd += "\\tSM:%s" % self.genotype # see GATK's FAQ for what a sample is
         cmd += "\'"
         cmd += " -M %s" % pathToPrefixRefGenome
         cmd += " %s" % self.dCleanedFastqFiles["R1"]
@@ -479,21 +479,24 @@ class GbsLane(object):
             
     def gather(self, memJvm, outDir, iJobGroup):
         cmd = "echo \"merge and index...\""
-        cmd += "; time samtools merge -f"
+        cmd += "\ntime samtools merge -f"
         cmd += " %s/%s.bam" % (outDir, self.id)
         lSamples = self.dSamples.keys()
         lSamples.sort()
         for sampleId in lSamples:
             cmd += " %s" % self.dSamples[sampleId].initialBamFile
-        cmd += "; samtools index"
+        cmd += "\nsamtools index"
         cmd += " %s/%s.bam" % (outDir, self.id)
-        cmd += "; java -Xmx%ig -jar `which picard.jar`" % memJvm
+        cmd += "\n\necho \"insert sizes...\""
+        cmd += "\njava -Xmx%ig -jar `which picard.jar`" % memJvm
         cmd += " CollectInsertSizeMetrics"
         cmd += " HISTOGRAM_FILE=%s/hist_insert-sizes_picard_%s.pdf" \
                % (outDir, self.id)
         cmd += " INPUT=%s/%s.bam" % (outDir, self.id)
         cmd += " OUTPUT=%s/insert-sizes_picard_%s.txt" % (outDir, self.id)
-        cmd += "; rm -f %s/%s.bam*" % (outDir, self.id) # to save space
+        cmd += " VALIDATION_STRINGENCY=%s" % "STRICT" #LENIENT"
+        cmd += "\n\necho \"clean...\""
+        cmd += "\nrm -f %s/%s.bam*" % (outDir, self.id) # to save space
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
         bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
         iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
@@ -934,11 +937,6 @@ class Gbs(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps:
-            self.jobManager = JobManager(self.scheduler, self.project1Id)
-        if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
-           or "7" in self.lSteps or "8" in self.lSteps:
-            self.jobManager = JobManager(self.scheduler, self.project2Id)
         if self.lSteps == []:
             msg = "ERROR: missing compulsory option --step"
             sys.stderr.write("%s\n\n" % msg)
@@ -1843,6 +1841,13 @@ class Gbs(object):
         if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps:
             self.setupGenotypeDirectories()
             
+        # set up job manager
+        if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps:
+            self.jobManager = JobManager(self.scheduler, self.project1Id)
+        if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
+           or "7" in self.lSteps or "8" in self.lSteps:
+            self.jobManager = JobManager(self.scheduler, self.project2Id)
+            
         # execute the step(s)
         if "1" in self.lSteps: # init read quality
             self.step1()
@@ -1874,7 +1879,9 @@ class Gbs(object):
         if "10" in self.lSteps: # refine geno
             self.step10()
             
-            
+        self.jobManager.close()
+        
+        
 if __name__ == "__main__":
     i = Gbs()
     
