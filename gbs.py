@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.4" # http://semver.org/
+progVersion = "0.5.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -421,7 +421,7 @@ class GbsLane(object):
         fileHandle.close()
         return fileName
         
-    def demultiplex(self, outDir, enzyme, iJobGroup):
+    def demultiplex(self, outDir, enzyme, nbSubstitutionsAllowed, iJobGroup):
         if len(self.dInitFastqFiles) < 2:
             msg = "can't demultiplex (yet) lane '%s' if single-end" % self.id
             raise ValueError(msg)
@@ -432,6 +432,7 @@ class GbsLane(object):
         cmd += " --it %s" % self.saveBarcodeFile(outDir, "fasta")
         cmd += " --ofqp %s/%s" % (outDir, self.id)
         cmd += " --met %s" % "4c"
+        cmd += " --subst %i" % nbSubstitutionsAllowed
         cmd += " --re %s" % enzyme
         cmd += " --chim 1"
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
@@ -646,6 +647,7 @@ class Gbs(object):
         self.fclnToKeep = None
         self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
+        self.nbSubstsAllowedDemult = 1
         self.jobManager = None # instantiated in checkAttributes()
         self.samplesCol2idx = {"genotype": None,
                                "flowcell": None,
@@ -711,7 +713,7 @@ class Gbs(object):
         msg += "      --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
         msg += "      --step\tstep(s) to perform (1/2/3/4/..., can be 1-2-...)\n"
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
-        msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.9.0\n"
+        msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.10.0\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
         msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and Picard)\n"
         msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
@@ -756,6 +758,9 @@ class Gbs(object):
         msg += "      --enz\tname of the restriction enzyme\n"
         msg += "\t\tcompulsory for step 2\n"
         msg += "\t\tdefault=ApeKI\n"
+        msg += "      --number of substitutions allowed during demultiplexing\n"
+        msg += "\t\tcompulsory for step 2\n"
+        msg += "\t\tdefault=1\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
         msg += "\t\tcompulsory for step 3\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
@@ -826,10 +831,10 @@ class Gbs(object):
                                         ["help", "version", "verbose=",
                                          "proj1=", "proj2=", "step=",
                                          "samples=", "fcln=", "dict=",
-                                         "schdlr=", "queue=", "enz=", "adp=",
-                                         "ref=", "jgid=", "tmpd=", "jvm=",
-                                         "knowni=", "known=", "force", "pird=",
-                                         "resou="])
+                                         "schdlr=", "queue=", "enz=", "subst=",
+                                         "adp=", "ref=", "jgid=", "tmpd=",
+                                         "jvm=", "knowni=", "known=", "force",
+                                         "pird=", "resou="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -863,6 +868,8 @@ class Gbs(object):
                 self.pathToInReadsDir = a
             elif o == "--enz":
                 self.enzyme = a
+            elif o == "--subst":
+                self.nbSubstsAllowedDemult = int(a)
             elif o == "--adp":
                 self.adpFile = a
             elif o == "--ref":
@@ -1366,7 +1373,8 @@ class Gbs(object):
             self.makeDir(stepDir)
             iLane.setInitFastqFiles()
             iLane.makeInitFastqFileSymlinks()
-            iLane.demultiplex(stepDir, self.enzyme, iJobGroup)
+            iLane.demultiplex(stepDir, self.enzyme, self.nbSubstsAllowedDemult,
+                              iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
         self.jobManager.wait(iJobGroup.id, self.verbose)
