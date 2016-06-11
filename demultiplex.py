@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Aim: demultiplex samples in fastq files
-# Copyright (C) 2014-2015 Institut National de la Recherche Agronomique
+# Copyright (C) 2014-2016 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut], Laurène Gay [ctb], Nicolas Rode [ctb]
 # Versioning: https://github.com/timflutre/quantgen
@@ -13,7 +13,7 @@
 # http://news.open-bio.org/news/2009/09/biopython-fast-fastq/ by Peter Cock
 
 # TODO:
-# try fuzzy matching with https://pypi.python.org/pypi/regex
+# speed-up reg exp via groups? http://www.regular-expressions.info/brackets.html
 # try https://github.com/faircloth-lab/splitaake/blob/master/bin/splitaake_reads_many_gz.py
 # try https://humgenprojects.lumc.nl/svn/fastools/trunk/fastools/demultiplex.py
 # try https://github.com/pelinakan/UBD
@@ -35,6 +35,11 @@ import math
 import gzip
 import re
 import itertools
+try:
+    import regex
+    regexIsImported = True
+except ImportError:
+    regexIsImported = False
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -42,8 +47,6 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC
 from Bio import Restriction
 from Bio.Data.IUPACData import ambiguous_dna_values
-from Bio import pairwise2
-from Bio import Align
 from Bio.SeqIO.QualityIO import FastqGeneralIterator
 
 if sys.version_info[0] == 2:
@@ -52,7 +55,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.9.0" # http://semver.org/
+progVersion = "1.10.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -64,7 +67,7 @@ class Demultiplex(object):
         self.inFqFile2 = ""
         self.tagFile = ""
         self.outPrefix = ""
-        self.method = "4a"
+        self.method = ""
         self.dist = 20
         self.restrictEnzyme = None
         self.findChimeras = "1"
@@ -77,6 +80,7 @@ class Demultiplex(object):
         self.regexpRemainMotif = "" # remaining motif (as uncompiled regexp)
         self.patterns = {} # keys are individuals and values are tag+motif (as compiled regexp)
         self.dInd2NbAssigned = {}
+        self.nbSubstitutionsAllowed = 0 # requires module "regex"
         
         
     def help(self):
@@ -104,12 +108,13 @@ class Demultiplex(object):
         msg += "\t\tcan be in 2 formats (automatically detected)\n"
         msg += "\t\t fasta: put sample names in the fasta headers\n"
         msg += "\t\t table: 2 columns, header line should be 'id\\ttag'\n"
-        msg += "      --ofqp\tprefix for the output fastq files (2 per ind, 1 for unassigned, 1 for chimeras)\n"
-        msg += "\t\tthe suffix will be based on \".fastq.gz\" (not \".fq\" because of FastQC)\n"
+        msg += "      --ofqp\tprefix for the output fastq files\n"
+        msg += "\t\t2 per ind, 1 for unassigned, 1 for chimeras\n"
+        msg += "\t\tsuffix will be \".fastq.gz\" (not \".fq\" because of FastQC)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "\t\tthis prefix will also be used for a gzipped text file\n"
         msg += "\t\t counting assigned read pairs per individual\n"
-        msg += "      --met\tmethod to assign pairs of reads to individuals via tags (default=4a)\n"
+        msg += "      --met\tmethod to assign pairs of reads to individuals via tags\n"
         msg += "\t\tonly forward strand is considered\n"
         msg += "\t\t1: assign pair if both reads start with the tag\n"
         msg += "\t\t2: assign pair if at least one read starts with the tag\n"
@@ -123,10 +128,15 @@ class Demultiplex(object):
         msg += "\t\t    remaining cut site in its first N bases (see --dist and --re)\n"
         msg += "\t\t    PCR chimeras (R1 tag is different than R2 tag) are detected\n"
         msg += "\t\t    and saved in distinct files than the unassigned\n"
-        msg += "      --dist\tdistance from the read start to search for the tag (in bp, default=20)\n"
+        msg += "      --subst\tnumber of substitutions allowed\n"
+        msg += "\t\tdefault=1\n"
+        msg += "\t\tif > 0, the 'regex' module is required\n"
+        msg += "      --dist\tdistance from the read start to search for the tag (in bp)\n"
+        msg += "\t\tdefault=20\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
-        msg += "      --chim\tsearch if full restriction site found in R1 and/or R2 (default=\"1\", see --re)\n"
-        msg += "\t\t0: don't search (but some chimeras may still be detected if --met 4d)\n"
+        msg += "      --chim\tsearch if full restriction site found in R1 and/or R2\n"
+        msg += "\t\tdefault=1, see --re\n"
+        msg += "\t\t0: don't search (some chimeras may still be detected if --met 4d)\n"
         msg += "\t\t1: if chimera, count as such, try to assign, and save in same files as others\n"
         msg += "\t\t2: if chimera, don't even try to assign and save in distinct files\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
@@ -146,7 +156,7 @@ class Demultiplex(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2014-2015 Institut National de la Recherche Agronomique (INRA).\n"
+        msg += "Copyright (C) 2014-2016 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut], Laurène Gay [ctb], Nicolas Rode [ctb]."
@@ -161,8 +171,8 @@ class Demultiplex(object):
             opts, args = getopt.getopt(sys.argv[1:], "hVv:",
                                        ["help", "version", "verbose=",
                                         "idir=", "ifq1=", "ifq2=", "it=",
-                                        "ofqp=", "met=", "re=", "chim=",
-                                        "dist=", "nci"])
+                                        "ofqp=", "met=", "subst=", "re=",
+                                        "chim=", "dist=", "nci"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -188,6 +198,8 @@ class Demultiplex(object):
                  self.outPrefix = a
             elif o == "--met":
                 self.method = a
+            elif o == "--subst":
+                self.nbSubstitutionsAllowed = int(a)
             elif o == "--dist":
                 self.dist = int(a)
             elif o == "--re":
@@ -274,6 +286,11 @@ class Demultiplex(object):
             sys.exit(1)
         if self.dist < 0:
             self.dist = 0
+        if self.nbSubstitutionsAllowed > 0 and not regexIsImported:
+            msg = "ERROR: --subst > 0 but module 'regex' can't be imported"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
             
             
     def findTagFileFormat(self):
@@ -357,7 +374,7 @@ class Demultiplex(object):
                     self.regexpCutMotif += "[" + ambiguous_dna_values[nt] + "]" # eg. [AT] for W
             if self.verbose > 0:
                 print("regexp of full motif: %s" % self.regexpCutMotif)
-
+                
             self.regexpCompilCutMotif = re.compile(self.regexpCutMotif)
             
             
@@ -384,12 +401,29 @@ class Demultiplex(object):
         for quicker searches.
         """
         if self.verbose > 0:
-            print("compile patterns..."); sys.stdout.flush()
+            msg = "compile patterns"
+            msg += " (method %s" % self.method
+            msg += ", %i substitution" % self.nbSubstitutionsAllowed
+            if self.nbSubstitutionsAllowed > 1:
+                msg += "s"
+            msg += " allowed)..."
+            print(msg); sys.stdout.flush()
+            
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            self.patterns[tagId] = re.compile(tag + self.regexpRemainMotif)
-            
-            
+            pattern = ""
+            if self.method in ["1", "2", "3", "4a"]:
+                pattern += "^"
+            pattern += self.tags[tagId]
+            if self.method in ["4c", "4d"]:
+                pattern += self.regexpRemainMotif
+            if self.nbSubstitutionsAllowed > 0:
+                self.patterns[tagId] \
+                    = regex.compile("(%s){s<=%i}" % (pattern,
+                                                     self.nbSubstitutionsAllowed))
+            else:
+                self.patterns[tagId] = re.compile(pattern)
+                
+                
     def checkDist(self):
         """
         Check that length of tag (+ remaining motif) <= self.dist.
@@ -401,8 +435,41 @@ class Demultiplex(object):
                                                                     tagId)
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
-
-
+                
+                
+    def compareTagsPairwise(self):
+        """
+        Raise an exception if two tags are indistinguishable when allowing substitutions.
+        """
+        if self.nbSubstitutionsAllowed > 0:
+            if self.verbose > 0:
+                print("check that searched patterns are distinguishable...")
+                sys.stdout.flush()
+                
+            lTagIds = self.tags.keys()
+            lTagIds.sort()
+            
+            for i in range(0, len(lTagIds) - 1):
+                for j in range(i + 1, len(lTagIds)):
+                    seq = self.tags[lTagIds[j]]
+                    if self.method in ["4c", "4d"]:
+                        seq += self.regexpRemainMotif
+                    tmpRe = self.patterns[lTagIds[i]].search(seq)
+                    if tmpRe:
+                        msg = "with %i allowed substitution" % \
+                              self.nbSubstitutionsAllowed
+                        if self.nbSubstitutionsAllowed > 1:
+                            msg += "s"
+                        msg += ", tag %s" % self.tags[lTagIds[i]]
+                        msg += " corresponding to %s" % lTagIds[i]
+                        msg += " is indistinguishable from tag %s" % self.tags[lTagIds[j]]
+                        msg += " corresponding to %s" % lTagIds[j]
+                        msg += "\npattern: %s" % self.patterns[lTagIds[i]].pattern
+                        msg += "\nstring: %s" % seq
+                        msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
+                        raise ValueError(msg)
+                    
+                    
     def identifyChimeras(self, read1_seq, read2_seq):
         chimera = False
         if self.regexpCompilCutMotif.search(read1_seq) != None \
@@ -413,53 +480,58 @@ class Demultiplex(object):
         
     def identifyIndividual_1(self, read1_seq, read2_seq):
         """
-        Assign pair if both reads start with the tag.
+        If both reads start with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and "idx" as the position at which both reads should be saved.
         """
         assigned = False
         ind = None
         idx = 0
+        
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            if read1_seq.startswith(tag) \
-               and read2_seq.startswith(tag):
+            
+            if self.patterns[tagId].search(read1_seq) \
+               and self.patterns[tagId].search(read2_seq):
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx = len(tag)
+                    idx = len(self.tags[tagId])
                 break
-        return assigned, tagId, idx, idx
-        
-        
+            
+        return assigned, ind, idx, idx
+    
+    
     def identifyIndividual_2(self, read1_seq, read2_seq):
         """
-        Assign pair if at least one read starts with the tag. !!!!! IdX1=0 or IdX2=0 if the tag is only found in the alternative read
+        If at least one read starts with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and idx1 and/or idx2 as the position(s) at which the read(s) should be saved. Note that "idx1 != 0 and idx2 = 0", or "idx1 = 0 and idx2 != 0", if the tag is found in only one of the reads.
         """
         assigned = False
         ind = None
         idx1 = 0
         idx2 = 0
+        
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            if read1_seq.startswith(tag):
+            
+            if self.patterns[tagId].search(read1_seq):
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx1 = len(tag)
-                    if read2_seq.startswith(tag):
-                        idx2 = len(tag)
+                    idx1 = len(self.tags[tagId])
+                    if self.patterns[tagId].search(read2_seq):
+                        idx2 = len(self.tags[tagId])
                 break
-            if read2_seq.startswith(tag):
+            
+            if self.patterns[tagId].search(read2_seq):
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx2 = len(tag)
+                    idx2 = len(self.tags[tagId])
                 break
+            
         return assigned, ind, idx1, idx2
-        
-        
+    
+    
     def identifyIndividual_3(self, read1_seq, read2_seq):
         """
-        Same as 2 but count if one or both reads start with the tag.
+        Same as identifyIndividual_2(), but count if one or both reads start with the tag.
         """
         assigned = False
         ind = None
@@ -467,67 +539,73 @@ class Demultiplex(object):
         idx2 = 0
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
+        
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            if read1_seq.startswith(tag):
+            
+            if self.patterns[tagId].search(read1_seq):
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx1 = len(tag)
-                if read2_seq.startswith(tag):
+                    idx1 = len(self.tags[tagId])
+                if self.patterns[tagId].search(read2_seq):
                     if self.clipIdx:
-                        idx2 = len(tag)
+                        idx2 = len(self.tags[tagId])
                     nbAssignedPairsTwoTags += 1
                 else:
                     nbAssignedPairsOneTag += 1
                 break
-            if read2_seq.startswith(tag):
+            
+            if self.patterns[tagId].search(read2_seq):
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx2 = len(tag)
+                    idx2 = len(self.tags[tagId])
                 nbAssignedPairsOneTag += 1
                 break
+            
         return assigned, ind, idx1, idx2, nbAssignedPairsTwoTags, \
             nbAssignedPairsOneTag
-        
-        
+    
+    
     def identifyIndividual_4a(self, read1_seq):
         """
-        Assign pair if first read starts with the tag (ignore second read).
+        If the first read starts with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and idx1 as the position at which the first read should be saved. Note that the second read is ignored, thus idx2 = 0.
         """
         assigned = False
         ind = None
         idx1 = 0
+        
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            if read1_seq.startswith(tag):
+            
+            if self.patterns[tagId].search(read1_seq):
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx1 = len(tag)
+                    idx1 = len(self.tags[tagId])
                 break
-        return assigned, tagId, idx1, 0
-        
-        
+            
+        return assigned, ind, idx1, 0
+    
+    
     def identifyIndividual_4b(self, read1_seq):
         """
-        Assign pair if first read has tag in its first N bases (ignore second
-        read, use self.dist).
+        If the first read has a tag in its first N bases (specified via self.dist), return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and idx1 as the position at which the first read should be saved. Note that the second read is ignored, thus idx2 = 0.
         """
         assigned = False
         ind = None
         idx1 = 0
+        
         for tagId in self.tags:
-            tag = self.tags[tagId]
-            tmpIdx = read1_seq[:self.dist].find(tag)
-            if tmpIdx != -1:
+            
+            tmpRe = self.patterns[tagId].search(read1_seq[:self.dist])
+            if tmpRe != None:
                 assigned = True
                 ind = tagId
                 if self.clipIdx:
-                    idx1 = tmpIdx + len(tag)
+                    idx1 = tmpRe.end()
                 break
-        return assigned, tagId, idx1, 0
+            
+        return assigned, ind, idx1, 0
         
         
     def identifyIndividual_4c(self, read1_seq):
@@ -538,7 +616,9 @@ class Demultiplex(object):
         assigned = False
         ind = None
         idx1 = 0
+        
         for tagId in self.patterns:
+            
             tmpRe = self.patterns[tagId].search(read1_seq[:self.dist])
             if tmpRe != None:
                 assigned = True
@@ -546,9 +626,10 @@ class Demultiplex(object):
                 if self.clipIdx:
                     idx1 = tmpRe.end() - self.lenRemainMotif
                 break
-        return assigned, tagId, idx1, 0
-        
-        
+            
+        return assigned, ind, idx1, 0
+    
+    
     def identifyIndividual_4d(self, read1_seq, read2_seq):
         """
         Assign pair if first and/or second read has tag and remaining cut site in its first
@@ -608,7 +689,8 @@ class Demultiplex(object):
         if not self.clipIdx:
             idx1 = idx2 = 0
             
-        return assigned, tagId, idx1, idx2, AssignedPairsTwoTags, AssignedPairsOneTag, chimera
+        return assigned, ind, idx1, idx2, AssignedPairsTwoTags, \
+            AssignedPairsOneTag, chimera
     
     
     def saveStatsPerInd(self):
@@ -805,11 +887,14 @@ class Demultiplex(object):
             
     def run(self):
         self.loadTags()
+        
         if self.method in ["4c","4d"] or self.findChimeras != "0":
             self.retrieveRestrictionEnzyme()
             self.prepareRemainingMotif()
-            self.compilePatterns()
+        self.compilePatterns()
         self.checkDist()
+        self.compareTagsPairwise()
+        
         self.demultiplexPairedReads()
         
         
