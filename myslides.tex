@@ -54,6 +54,15 @@
   \end{frame}
 }
 
+\AtBeginSubsection[]
+{
+  \begin{frame}
+    \frametitle{Outline}
+    \addtocounter{framenumber}{-1}
+    \tableofcontents[currentsubsection,hideothersubsections,sectionstyle=show/shaded,subsectionstyle=show/shaded]
+  \end{frame}
+}
+
 % -----------------------------------------------------------------------------
 
 \title[Short title]{Long title}
@@ -77,7 +86,10 @@
 \begin{frame}
   \frametitle{I.1.}
   \begin{itemize}
-  \item 
+  \item aaa
+  \item \textbf{aaa}
+  \item \alert{aaa}
+  \item \emph{aaa}
   \end{itemize}
   \note{On this slide, I will talk about X.}
 \end{frame}
@@ -89,6 +101,25 @@
   \begin{center}
     % \includegraphics[width=0.95\textwidth,height=0.90\textheight,keepaspectratio=true]{myplot}%
   \end{center}
+\end{frame}
+
+\begin{frame}
+  \frametitle{II.2.}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      Figure:
+      \begin{center}
+        % \includegraphics[width=0.9\textwidth,height=0.7\textheight,keepaspectratio=true]{}%
+      \end{center}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \begin{itemize}
+      \item aaa
+      \item bbb
+      \item \dots
+      \end{itemize}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 % After your last numbered slide
@@ -103,3 +134,8 @@
 \setcounter{framenumber}{\value{finalframe}}
 
 \end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:
