@@ -55,7 +55,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.10.0" # http://semver.org/
+progVersion = "1.11.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -81,6 +81,7 @@ class Demultiplex(object):
         self.patterns = {} # keys are individuals and values are tag+motif (as compiled regexp)
         self.dInd2NbAssigned = {}
         self.nbSubstitutionsAllowed = 0 # requires module "regex"
+        self.enforceSubst = "lenient"
         
         
     def help(self):
@@ -131,6 +132,10 @@ class Demultiplex(object):
         msg += "      --subst\tnumber of substitutions allowed\n"
         msg += "\t\tdefault=1\n"
         msg += "\t\tif > 0, the 'regex' module is required\n"
+        msg += "      --ensubst\tenforce the nb of substitutions allowed\n"
+        msg += "\t\tdefault=lenient/strict\n"
+        msg += "\t\tstart from the value given via '--subst'\n"
+        msg += "\t\tuntil all tags are distinguishable\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp)\n"
         msg += "\t\tdefault=20\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
@@ -171,8 +176,8 @@ class Demultiplex(object):
             opts, args = getopt.getopt(sys.argv[1:], "hVv:",
                                        ["help", "version", "verbose=",
                                         "idir=", "ifq1=", "ifq2=", "it=",
-                                        "ofqp=", "met=", "subst=", "re=",
-                                        "chim=", "dist=", "nci"])
+                                        "ofqp=", "met=", "subst=", "ensubst=",
+                                        "re=", "chim=", "dist=", "nci"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -200,6 +205,8 @@ class Demultiplex(object):
                 self.method = a
             elif o == "--subst":
                 self.nbSubstitutionsAllowed = int(a)
+            elif o == "--ensubst":
+                self.enforceSubst = a
             elif o == "--dist":
                 self.dist = int(a)
             elif o == "--re":
@@ -288,6 +295,11 @@ class Demultiplex(object):
             self.dist = 0
         if self.nbSubstitutionsAllowed > 0 and not regexIsImported:
             msg = "ERROR: --subst > 0 but module 'regex' can't be imported"
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.enforceSubst not in ["lenient", "strict"]:
+            msg = "ERROR: --ensubst %s is unknown" % self.enforceSubst
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -395,10 +407,29 @@ class Demultiplex(object):
             print("regexp of remaining motif: %s" % self.regexpRemainMotif)
             
             
+    def checkDist(self):
+        """
+        Check that length of tag (+ remaining motif) <= self.dist.
+        """
+        if self.verbose > 0:
+            msg = "check that '--dist' is compatible with pattern lengths..."
+            print(msg); sys.stdout.flush()
+            
+        for tagId in self.tags:
+            pattern = self.tags[tagId]
+            if self.method in ["4c", "4d"]:
+                pattern += self.regexpRemainMotif
+            if self.dist > 0 and len(pattern) > self.dist:
+                msg = "ERROR: --dist %i is too short for tag %s" % (self.dist,
+                                                                    tagId)
+                msg += "\nbecause the whole pattern is %s" % pattern
+                sys.stderr.write("%s\n" % msg)
+                sys.exit(1)
+                
+                
     def compilePatterns(self):
         """
-        Compile patterns (each tag + remaining right of cut site as regexp) 
-        for quicker searches.
+        Compile patterns, that is each tag + remaining right of cut site (depending on self.method) as regular expression for quicker searches.
         """
         if self.verbose > 0:
             msg = "compile patterns"
@@ -424,52 +455,68 @@ class Demultiplex(object):
                 self.patterns[tagId] = re.compile(pattern)
                 
                 
-    def checkDist(self):
+    def comparePatterns(self):
         """
-        Check that length of tag (+ remaining motif) <= self.dist.
+        Raise an exception if two patterns are indistinguishable when allowing substitutions.
         """
-        for tagId in self.tags:
-            tag = self.tags[tagId]
-            if self.dist > 0 and len(tag) + self.lenRemainMotif > self.dist:
-                msg = "ERROR: --dist %i is too short for tag %s" % (self.dist,
-                                                                    tagId)
-                sys.stderr.write("%s\n" % msg)
-                sys.exit(1)
-                
-                
-    def compareTagsPairwise(self):
-        """
-        Raise an exception if two tags are indistinguishable when allowing substitutions.
-        """
-        if self.nbSubstitutionsAllowed > 0:
-            if self.verbose > 0:
-                print("check that searched patterns are distinguishable...")
-                sys.stdout.flush()
-                
-            lTagIds = self.tags.keys()
-            lTagIds.sort()
+        if self.verbose > 0:
+            print("check that searched patterns are distinguishable...")
+            sys.stdout.flush()
             
-            for i in range(0, len(lTagIds) - 1):
-                for j in range(i + 1, len(lTagIds)):
-                    seq = self.tags[lTagIds[j]]
-                    if self.method in ["4c", "4d"]:
-                        seq += self.regexpRemainMotif
-                    tmpRe = self.patterns[lTagIds[i]].search(seq)
-                    if tmpRe:
-                        msg = "with %i allowed substitution" % \
-                              self.nbSubstitutionsAllowed
-                        if self.nbSubstitutionsAllowed > 1:
-                            msg += "s"
-                        msg += ", tag %s" % self.tags[lTagIds[i]]
-                        msg += " corresponding to %s" % lTagIds[i]
-                        msg += " is indistinguishable from tag %s" % self.tags[lTagIds[j]]
-                        msg += " corresponding to %s" % lTagIds[j]
-                        msg += "\npattern: %s" % self.patterns[lTagIds[i]].pattern
-                        msg += "\nstring: %s" % seq
-                        msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
-                        raise ValueError(msg)
-                    
-                    
+        lTagIds = self.tags.keys()
+        lTagIds.sort()
+        
+        for i in range(0, len(lTagIds) - 1):
+            for j in range(i + 1, len(lTagIds)):
+                seq = self.tags[lTagIds[j]]
+                if self.method in ["4c", "4d"]:
+                    seq += self.regexpRemainMotif
+                tmpRe = self.patterns[lTagIds[i]].search(seq)
+                if tmpRe:
+                    msg = "with %i allowed substitution" % \
+                          self.nbSubstitutionsAllowed
+                    if self.nbSubstitutionsAllowed > 1:
+                        msg += "s"
+                    msg += ", tag %s" % self.tags[lTagIds[i]]
+                    msg += " corresponding to %s" % lTagIds[i]
+                    msg += " is indistinguishable from tag %s" % self.tags[lTagIds[j]]
+                    msg += " corresponding to %s" % lTagIds[j]
+                    msg += "\npattern: %s" % self.patterns[lTagIds[i]].pattern
+                    msg += "\nstring: %s" % seq
+                    msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
+                    raise ValueError(msg)
+                
+                
+    def flexCompileComparePatterns(self):
+        """
+        Run compilePatterns() and comparePatterns() by decreasing the number of substitutions allowed, until it doesn't raise any exception, if possible.
+        """
+        for nbSubsts in range(self.nbSubstitutionsAllowed, -1, -1):
+            self.nbSubstitutionsAllowed = nbSubsts
+            
+            try:
+                self.compilePatterns()
+                self.comparePatterns()
+            except Exception as e:
+                if self.verbose > 0:
+                    msg = "indistinguishable patterns with %i substitution%s allowed" % \
+                          (self.nbSubstitutionsAllowed,
+                           "s" if self.nbSubstitutionsAllowed > 1 else "")
+                    print(msg); sys.stdout.flush()
+                if nbSubsts > 0:
+                    continue
+                else:
+                    msg = "some tags are indistinguishable even when no substitution is allowed"
+                    e.args += (msg,)
+                    raise e
+                
+            if self.verbose > 0:
+                msg = "nb of substitutions allowed: %i" % self.nbSubstitutionsAllowed
+                print(msg); sys.stdout.flush()
+                
+            break
+        
+        
     def identifyChimeras(self, read1_seq, read2_seq):
         chimera = False
         if self.regexpCompilCutMotif.search(read1_seq) != None \
@@ -718,7 +765,8 @@ class Demultiplex(object):
         Read the data files, launch the identifying method, writes the output.
         """
         if self.verbose > 0:
-            msg = "demultiplex paired-end reads (method=%s)..." % self.method
+            msg = "demultiplex paired-end reads (method=%s, subst=%i)..." % \
+                  (self.method, self.nbSubstitutionsAllowed)
             print(msg); sys.stdout.flush()
             
         if self.inFqFile1.endswith(".gz"):
@@ -891,10 +939,15 @@ class Demultiplex(object):
         if self.method in ["4c","4d"] or self.findChimeras != "0":
             self.retrieveRestrictionEnzyme()
             self.prepareRemainingMotif()
-        self.compilePatterns()
+            
         self.checkDist()
-        self.compareTagsPairwise()
         
+        if self.enforceSubst == "lenient":
+            self.flexCompileComparePatterns()
+        elif self.enforceSubst == "strict":
+            self.compilePatterns()
+            self.comparePatterns()
+            
         self.demultiplexPairedReads()
         
         
