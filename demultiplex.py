@@ -59,7 +59,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.12.0" # http://semver.org/
+progVersion = "1.12.1" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -446,6 +446,8 @@ class Demultiplex(object):
         >>> i.prepareRemainingMotif()
         >>> i.regexpRemainMotif
         u'C[AT]GC'
+        >>> i.lenRemainMotif
+        4
         """
         if self.verbose > 0:
             print("prepare remaining motif..."); sys.stdout.flush()
@@ -565,6 +567,91 @@ class Demultiplex(object):
                                                   flags=re.IGNORECASE)
                 
                 
+    def makeSeqsToCompareTwoTags(self, tag2):
+        """
+        Return a list of DNA sequence(s) as string(s) to which "patseq" should be matched against.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.method = "1"
+        >>> i.makeSeqsToCompareTwoTags("AAA")
+        [u'AAA']
+        >>> i.method = "4c"
+        >>> i.regexpRemainMotif = "CAGC"
+        >>> i.makeSeqsToCompareTwoTags("AAA")
+        [u'AAACAGC']
+        >>> i.regexpRemainMotif = "C[AT]GC"
+        >>> i.lenRemainMotif = 4
+        >>> i.makeSeqsToCompareTwoTags("AAA")
+        [u'AAACAGC', u'AAACTGC']
+        """
+        seqs = []
+        if self.method not in ["4c", "4d"]:
+            seqs.append(tag2)
+        else:
+            if re.search("^[ATGCN]+$", self.regexpRemainMotif) is not None:
+                seqs.append(tag2 + self.regexpRemainMotif)
+            elif re.search("^[ATGCN\[\]]+$", self.regexpRemainMotif) is not None:
+                idx1 = self.regexpRemainMotif.find("[")
+                idx2 = self.regexpRemainMotif.find("]")
+                nbSeqs = idx2 - (idx1 + 1)
+                for idxSeq in range(nbSeqs):
+                    seqs.append(tag2)
+                    idxNt = 0
+                    while True:
+                        if idxNt >= len(self.regexpRemainMotif):
+                            break
+                        if idxNt < idx1 or idxNt > idx2:
+                            seqs[idxSeq] += self.regexpRemainMotif[idxNt]
+                        elif idxNt > idx1 and idxNt < idx2:
+                            seqs[idxSeq] += self.regexpRemainMotif[idxNt+idxSeq]
+                            idxNt = idx2
+                        idxNt += 1
+            else:
+                msg = "self.regexpRemainMotif %s contains other symbols" % \
+                      self.regexpRemainMotif
+                msg += "\nthan only A, T, G, C, [, and ]"
+                raise ValueError(msg)
+        return seqs
+    
+    
+    def comparePatternsTwoTags(self, tagId1, tagId2, seqs):
+        """
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'TTAC', u'ind2': u'TTAGCTT'}
+        >>> i.method = u'4c'
+        >>> i.nbSubstitutionsAllowed = 2
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.prepareRemainingMotif()
+        >>> i.compilePatterns()
+        >>> seqs = [u'TTAGCTTCAGC', u'TTAGCTTCTGC']
+        >>> i.comparePatternsTwoTags(u'ind1', u'ind2', seqs)
+        Traceback (most recent call last):
+        ValueError: with 2 allowed substitutions, tag TTAC corresponding to ind1
+        is indistinguishable from tag TTAGCTT corresponding to ind2
+        pattern: (TTACC[AT]GC){s<=2}
+        string: TTAGCTTCAGC
+        start-end: 0-8
+        """
+        for seq in seqs:
+            tmpRe = self.patterns[tagId1].search(seq)
+            if tmpRe:
+                msg = "with %i allowed substitution" % \
+                      self.nbSubstitutionsAllowed
+                if self.nbSubstitutionsAllowed > 1:
+                    msg += "s"
+                    msg += ", tag %s" % self.tags[tagId1]
+                    msg += " corresponding to %s" % tagId1
+                    msg += "\nis indistinguishable from tag %s" % self.tags[tagId2]
+                    msg += " corresponding to %s" % tagId2
+                    msg += "\npattern: %s" % self.patterns[tagId1].pattern
+                    msg += "\nstring: %s" % seq
+                    msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
+                    raise ValueError(msg)
+                
+                
     def comparePatterns(self):
         """
         Raise an exception if two patterns of the same length are indistinguishable when allowing substitutions.
@@ -583,7 +670,7 @@ class Demultiplex(object):
         ValueError: with 2 allowed substitutions, tag TTAC corresponding to ind1
         is indistinguishable from tag TTAGCTT corresponding to ind2
         pattern: (TTACC[AT]GC){s<=2}
-        string: TTAGCTTC[AT]GC
+        string: TTAGCTTCAGC
         start-end: 0-8
         """
         if self.nbSubstitutionsAllowed > 0:
@@ -601,27 +688,15 @@ class Demultiplex(object):
                     if j == i:
                         continue
                     
-                    seq = self.tags[lTagIds[j]]
+                    lenSeq = len(self.tags[lTagIds[j]])
                     if self.method in ["4c", "4d"]:
-                        seq += self.regexpRemainMotif
-                        
-                    if len(patseq) > len(seq):
+                        lenSeq += self.lenRemainMotif
+                    if len(patseq) > lenSeq:
                         continue
                     
-                    tmpRe = self.patterns[lTagIds[i]].search(seq)
-                    if tmpRe:
-                        msg = "with %i allowed substitution" % \
-                              self.nbSubstitutionsAllowed
-                        if self.nbSubstitutionsAllowed > 1:
-                            msg += "s"
-                        msg += ", tag %s" % self.tags[lTagIds[i]]
-                        msg += " corresponding to %s" % lTagIds[i]
-                        msg += "\nis indistinguishable from tag %s" % self.tags[lTagIds[j]]
-                        msg += " corresponding to %s" % lTagIds[j]
-                        msg += "\npattern: %s" % self.patterns[lTagIds[i]].pattern
-                        msg += "\nstring: %s" % seq
-                        msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
-                        raise ValueError(msg)
+                    seqs = self.makeSeqsToCompareTwoTags(self.tags[lTagIds[j]])
+                    
+                    self.comparePatternsTwoTags(lTagIds[i], lTagIds[j], seqs)
                     
                     
     def flexCompileComparePatterns(self):
