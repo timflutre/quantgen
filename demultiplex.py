@@ -12,6 +12,10 @@
 # http://bcb.io/2009/08/09/trimming-adaptors-from-short-read-sequences/ by Brad Chapman
 # http://news.open-bio.org/news/2009/09/biopython-fast-fastq/ by Peter Cock
 
+# Tests:
+# $ python -m doctest demultiplex.py
+# $ ./test_demultiplex.py -p ~/src/quantgen/demultiplex.py
+
 # TODO:
 # speed-up reg exp via groups? http://www.regular-expressions.info/brackets.html
 # try https://github.com/faircloth-lab/splitaake/blob/master/bin/splitaake_reads_many_gz.py
@@ -40,7 +44,7 @@ try:
     regexIsImported = True
 except ImportError:
     regexIsImported = False
-
+    
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -55,10 +59,13 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.11.0" # http://semver.org/
+progVersion = "1.12.0" # http://semver.org/
 
 
 class Demultiplex(object):
+    """
+    Class performing demultiplexing.
+    """
     
     def __init__(self):
         self.verbose = 1
@@ -82,6 +89,7 @@ class Demultiplex(object):
         self.dInd2NbAssigned = {}
         self.nbSubstitutionsAllowed = 0 # requires module "regex"
         self.enforceSubst = "lenient"
+        self.onlyComparePatterns = False
         
         
     def help(self):
@@ -98,25 +106,32 @@ class Demultiplex(object):
         msg += "  -h, --help\tdisplay the help and exit\n"
         msg += "  -V, --version\toutput version information and exit\n"
         msg += "  -v, --verbose\tverbosity level (0/default=1/2/3)\n"
-        msg += "      --idir\tpath to the input directory with the fastq files (default=.)\n"
+        msg += "      --idir\tpath to the input directory with the fastq files\n"
+        msg += "\t\tdefault=. (current directory)\n"
+        msg += "\t\toptional with --compp\n"
         msg += "      --ifq1\tpath to the first input fastq file\n"
         msg += "\t\tcan be compressed with gzip\n"
+        msg += "\t\toptional with --compp\n"
         msg += "      --ifq2\tpath to the second input fastq file\n"
         msg += "\t\tcan be compressed with gzip\n"
         msg += "\t\terror raised if reads not in same order as --ifq1\n"
+        msg += "\t\toptional with --compp\n"
         msg += "      --it\tpath to the tag file\n"
         msg += "\t\tonly A, T, G and C (no ambiguous nucleotide allowed)\n"
         msg += "\t\tcan be in 2 formats (automatically detected)\n"
         msg += "\t\t fasta: put sample names in the fasta headers\n"
         msg += "\t\t table: 2 columns, header line should be 'id\\ttag'\n"
+        msg += "\t\talways compulsory\n"
         msg += "      --ofqp\tprefix for the output fastq files\n"
         msg += "\t\t2 per ind, 1 for unassigned, 1 for chimeras\n"
         msg += "\t\tsuffix will be \".fastq.gz\" (not \".fq\" because of FastQC)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "\t\tthis prefix will also be used for a gzipped text file\n"
         msg += "\t\t counting assigned read pairs per individual\n"
+        msg += "\t\toptional with --compp\n"
         msg += "      --met\tmethod to assign pairs of reads to individuals via tags\n"
         msg += "\t\tonly forward strand is considered\n"
+        msg += "\t\talways compulsory\n"
         msg += "\t\t1: assign pair if both reads start with the tag\n"
         msg += "\t\t2: assign pair if at least one read starts with the tag\n"
         msg += "\t\t3: same as 2 but count if one or both reads start with the tag\n"
@@ -145,6 +160,8 @@ class Demultiplex(object):
         msg += "\t\t1: if chimera, count as such, try to assign, and save in same files as others\n"
         msg += "\t\t2: if chimera, don't even try to assign and save in distinct files\n"
         msg += "      --nci\tdo not clip the tag when saving the assigned reads\n"
+        msg += "      --compp\tonly compare patterns to be searched\n"
+        msg += "\t\tuseful to choose how to set '--subst'\n"
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --met 3\n" % os.path.basename(sys.argv[0])
@@ -177,7 +194,8 @@ class Demultiplex(object):
                                        ["help", "version", "verbose=",
                                         "idir=", "ifq1=", "ifq2=", "it=",
                                         "ofqp=", "met=", "subst=", "ensubst=",
-                                        "re=", "chim=", "dist=", "nci"])
+                                        "re=", "chim=", "dist=", "nci",
+                                        "compp"])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -220,6 +238,8 @@ class Demultiplex(object):
                 self.findChimeras = a
             elif o == "--nci":
                 self.clipIdx = False
+            elif o == "--compp":
+                self.onlyComparePatterns = True
             else:
                 assert False, "invalid option"
                 
@@ -228,34 +248,34 @@ class Demultiplex(object):
         """
         Check the values of the command-line parameters.
         """
-        if self.inDir == "":
+        if not self.onlyComparePatterns and self.inDir == "":
             msg = "ERROR: missing compulsory option --idir"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if not os.path.exists(self.inDir):
+        if not self.onlyComparePatterns and not os.path.exists(self.inDir):
             msg = "ERROR: can't find dir %s" % self.inDir
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.inFqFile1 == "":
+        if not self.onlyComparePatterns and self.inFqFile1 == "":
             msg = "ERROR: missing compulsory option --ifq1"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
         self.inFqFile1 = "%s/%s" % (self.inDir, self.inFqFile1)
-        if not os.path.exists(self.inFqFile1):
+        if not self.onlyComparePatterns and not os.path.exists(self.inFqFile1):
             msg = "ERROR: can't find file %s" % self.inFqFile1
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.inFqFile2 == "":
+        if not self.onlyComparePatterns and self.inFqFile2 == "":
             msg = "ERROR: missing compulsory option --ifq2"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
         self.inFqFile2 = "%s/%s" % (self.inDir, self.inFqFile2)
-        if not os.path.exists(self.inFqFile2):
+        if not self.onlyComparePatterns and not os.path.exists(self.inFqFile2):
             msg = "ERROR: can't find file %s" % self.inFqFile2
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -270,7 +290,7 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.outPrefix == "":
+        if not self.onlyComparePatterns and self.outPrefix == "":
             msg = "ERROR: missing compulsory option --ofqp"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
@@ -305,14 +325,18 @@ class Demultiplex(object):
             sys.exit(1)
             
             
-    def findTagFileFormat(self):
+    def findTagFileFormatFromLine(self, line):
         """
-        Look for a '>' in the tag file and decide to return a 'fasta' or 'table' file format.
+        >>> i = Demultiplex()
+        >>> line = "id\ttag"
+        >>> i.findTagFileFormatFromLine(line)
+        u'table'
+        >>> line = ">ind001"
+        >>> i.findTagFileFormatFromLine(line)
+        u'fasta'
         """
-        tagFileFormat = "table"
-        tagHandle = open(self.tagFile)
-        line = tagHandle.readline()
-        tagHandle.close()
+        tagFileFormat = None
+        
         tokens = line.split()
         if line[0] == ">":
             tagFileFormat = "fasta"
@@ -328,8 +352,20 @@ class Demultiplex(object):
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
         return tagFileFormat
-        
-        
+    
+    
+    def findTagFileFormat(self):
+        """
+        Look for a '>' in the tag file and decide to return a 'fasta' or 'table' file format.
+        """
+        tagFileFormat = "table"
+        tagHandle = open(self.tagFile)
+        line = tagHandle.readline()
+        tagHandle.close()
+        tagFileFormat = self.findTagFileFormatFromLine(line)
+        return tagFileFormat
+    
+    
     def loadTags(self):
         tagFileFormat = self.findTagFileFormat()
         if self.verbose > 0:
@@ -369,10 +405,20 @@ class Demultiplex(object):
             
             
     def retrieveRestrictionEnzyme(self):
+        """
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.cutMotif
+        u'G^CWG_C'
+        >>> i.regexpCutMotif
+        u'GC[AT]GC'
+        """
         if self.verbose > 0:
             print("retrieve restriction enzyme from Biopython...")
             
-        self.cutMotif = self.restrictEnzyme.elucidate()
+        self.cutMotif = u"%s" % self.restrictEnzyme.elucidate()
         if self.verbose > 0:
             print("enzyme %s: motif=%s" % (self.restrictEnzyme, self.cutMotif))
             
@@ -387,10 +433,20 @@ class Demultiplex(object):
             if self.verbose > 0:
                 print("regexp of full motif: %s" % self.regexpCutMotif)
                 
-            self.regexpCompilCutMotif = re.compile(self.regexpCutMotif)
+            self.regexpCompilCutMotif = re.compile(self.regexpCutMotif,
+                                                   flags=re.IGNORECASE)
             
             
     def prepareRemainingMotif(self):
+        """
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.prepareRemainingMotif()
+        >>> i.regexpRemainMotif
+        u'C[AT]GC'
+        """
         if self.verbose > 0:
             print("prepare remaining motif..."); sys.stdout.flush()
             
@@ -410,6 +466,20 @@ class Demultiplex(object):
     def checkDist(self):
         """
         Check that length of tag (+ remaining motif) <= self.dist.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.dist = 4
+        >>> i.checkDist()
+        >>> i.method = u'4c'
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.prepareRemainingMotif()
+        >>> i.checkDist()
+        Traceback (most recent call last):
+        ValueError: --dist 4 is too short for tag ind1
+        because the whole pattern is AAAC[AT]GC
         """
         if self.verbose > 0:
             msg = "check that '--dist' is compatible with pattern lengths..."
@@ -420,16 +490,54 @@ class Demultiplex(object):
             if self.method in ["4c", "4d"]:
                 pattern += self.regexpRemainMotif
             if self.dist > 0 and len(pattern) > self.dist:
-                msg = "ERROR: --dist %i is too short for tag %s" % (self.dist,
+                msg = "--dist %i is too short for tag %s" % (self.dist,
                                                                     tagId)
                 msg += "\nbecause the whole pattern is %s" % pattern
-                sys.stderr.write("%s\n" % msg)
-                sys.exit(1)
-                
-                
+                raise ValueError(msg)
+            
+            
     def compilePatterns(self):
         """
         Compile patterns, that is each tag + remaining right of cut site (depending on self.method) as regular expression for quicker searches.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA'}
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.prepareRemainingMotif()
+        >>> i.method = u'1'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'^AAA'
+        >>> i.method = u'2'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'^AAA'
+        >>> i.method = u'3'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'^AAA'
+        >>> i.method = u'4a'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'^AAA'
+        >>> i.method = u'4b'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'AAA'
+        >>> i.method = u'4c'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'AAAC[AT]GC'
+        >>> i.method = u'4d'
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'AAAC[AT]GC'
+        >>> i.nbSubstitutionsAllowed = 1
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'(AAAC[AT]GC){s<=1}'
         """
         if self.verbose > 0:
             msg = "compile patterns"
@@ -450,43 +558,72 @@ class Demultiplex(object):
             if self.nbSubstitutionsAllowed > 0:
                 self.patterns[tagId] \
                     = regex.compile("(%s){s<=%i}" % (pattern,
-                                                     self.nbSubstitutionsAllowed))
+                                                     self.nbSubstitutionsAllowed),
+                                    flags=regex.IGNORECASE)
             else:
-                self.patterns[tagId] = re.compile(pattern)
+                self.patterns[tagId] = re.compile(pattern,
+                                                  flags=re.IGNORECASE)
                 
                 
     def comparePatterns(self):
         """
-        Raise an exception if two patterns are indistinguishable when allowing substitutions.
-        """
-        if self.verbose > 0:
-            print("check that searched patterns are distinguishable...")
-            sys.stdout.flush()
-            
-        lTagIds = self.tags.keys()
-        lTagIds.sort()
+        Raise an exception if two patterns of the same length are indistinguishable when allowing substitutions.
         
-        for i in range(0, len(lTagIds) - 1):
-            for j in range(i + 1, len(lTagIds)):
-                seq = self.tags[lTagIds[j]]
-                if self.method in ["4c", "4d"]:
-                    seq += self.regexpRemainMotif
-                tmpRe = self.patterns[lTagIds[i]].search(seq)
-                if tmpRe:
-                    msg = "with %i allowed substitution" % \
-                          self.nbSubstitutionsAllowed
-                    if self.nbSubstitutionsAllowed > 1:
-                        msg += "s"
-                    msg += ", tag %s" % self.tags[lTagIds[i]]
-                    msg += " corresponding to %s" % lTagIds[i]
-                    msg += " is indistinguishable from tag %s" % self.tags[lTagIds[j]]
-                    msg += " corresponding to %s" % lTagIds[j]
-                    msg += "\npattern: %s" % self.patterns[lTagIds[i]].pattern
-                    msg += "\nstring: %s" % seq
-                    msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
-                    raise ValueError(msg)
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'TTAC', u'ind2': u'TTAGCTT'}
+        >>> i.method = u'4c'
+        >>> i.nbSubstitutionsAllowed = 2
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.prepareRemainingMotif()
+        >>> i.compilePatterns()
+        >>> i.comparePatterns()
+        Traceback (most recent call last):
+        ValueError: with 2 allowed substitutions, tag TTAC corresponding to ind1
+        is indistinguishable from tag TTAGCTT corresponding to ind2
+        pattern: (TTACC[AT]GC){s<=2}
+        string: TTAGCTTC[AT]GC
+        start-end: 0-8
+        """
+        if self.nbSubstitutionsAllowed > 0:
+            if self.verbose > 0:
+                print("check that searched patterns are distinguishable...")
+                sys.stdout.flush()
                 
+            lTagIds = self.tags.keys()
+            lTagIds.sort()
+            
+            for i in range(0, len(lTagIds)):
+                patseq = self.patterns[lTagIds[i]].pattern.split(")")[0].replace("(","")
                 
+                for j in range(0, len(lTagIds)):
+                    if j == i:
+                        continue
+                    
+                    seq = self.tags[lTagIds[j]]
+                    if self.method in ["4c", "4d"]:
+                        seq += self.regexpRemainMotif
+                        
+                    if len(patseq) > len(seq):
+                        continue
+                    
+                    tmpRe = self.patterns[lTagIds[i]].search(seq)
+                    if tmpRe:
+                        msg = "with %i allowed substitution" % \
+                              self.nbSubstitutionsAllowed
+                        if self.nbSubstitutionsAllowed > 1:
+                            msg += "s"
+                        msg += ", tag %s" % self.tags[lTagIds[i]]
+                        msg += " corresponding to %s" % lTagIds[i]
+                        msg += "\nis indistinguishable from tag %s" % self.tags[lTagIds[j]]
+                        msg += " corresponding to %s" % lTagIds[j]
+                        msg += "\npattern: %s" % self.patterns[lTagIds[i]].pattern
+                        msg += "\nstring: %s" % seq
+                        msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
+                        raise ValueError(msg)
+                    
+                    
     def flexCompileComparePatterns(self):
         """
         Run compilePatterns() and comparePatterns() by decreasing the number of substitutions allowed, until it doesn't raise any exception, if possible.
@@ -498,11 +635,7 @@ class Demultiplex(object):
                 self.compilePatterns()
                 self.comparePatterns()
             except Exception as e:
-                if self.verbose > 0:
-                    msg = "indistinguishable patterns with %i substitution%s allowed" % \
-                          (self.nbSubstitutionsAllowed,
-                           "s" if self.nbSubstitutionsAllowed > 1 else "")
-                    print(msg); sys.stdout.flush()
+                print(e.args[0])
                 if nbSubsts > 0:
                     continue
                 else:
@@ -528,6 +661,20 @@ class Demultiplex(object):
     def identifyIndividual_1(self, read1_seq, read2_seq):
         """
         If both reads start with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and "idx" as the position at which both reads should be saved.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.method = u'1'
+        >>> i.compilePatterns()
+        >>> i.clipIdx = False
+        >>> i.identifyIndividual_1(u'AAANNNNN', u'AAANNNNN')
+        (True, u'ind1', 0, 0)
+        >>> i.identifyIndividual_1(u'AAANNNNN', u'NNNNNNNN')
+        (False, None, 0, 0)
+        >>> i.clipIdx = True
+        >>> i.identifyIndividual_1(u'AAANNNNN', u'AAANNNNN')
+        (True, u'ind1', 3, 3)
         """
         assigned = False
         ind = None
@@ -549,6 +696,22 @@ class Demultiplex(object):
     def identifyIndividual_2(self, read1_seq, read2_seq):
         """
         If at least one read starts with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and idx1 and/or idx2 as the position(s) at which the read(s) should be saved. Note that "idx1 != 0 and idx2 = 0", or "idx1 = 0 and idx2 != 0", if the tag is found in only one of the reads.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.method = u'2'
+        >>> i.compilePatterns()
+        >>> i.clipIdx = False
+        >>> i.identifyIndividual_2(u'AAANNNNN', u'AAANNNNN')
+        (True, u'ind1', 0, 0)
+        >>> i.identifyIndividual_2(u'AAANNNNN', u'NNNNNNNN')
+        (True, u'ind1', 0, 0)
+        >>> i.clipIdx = True
+        >>> i.identifyIndividual_2(u'AAANNNNN', u'AAANNNNN')
+        (True, u'ind1', 3, 3)
+        >>> i.identifyIndividual_2(u'AAANNNNN', u'NNNNNNNN')
+        (True, u'ind1', 3, 0)
         """
         assigned = False
         ind = None
@@ -579,6 +742,22 @@ class Demultiplex(object):
     def identifyIndividual_3(self, read1_seq, read2_seq):
         """
         Same as identifyIndividual_2(), but count if one or both reads start with the tag.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.method = u'3'
+        >>> i.compilePatterns()
+        >>> i.clipIdx = False
+        >>> i.identifyIndividual_3(u'AAANNNNN', u'AAANNNNN')
+        (True, u'ind1', 0, 0, 1, 0)
+        >>> i.identifyIndividual_3(u'AAANNNNN', u'NNNNNNNN')
+        (True, u'ind1', 0, 0, 0, 1)
+        >>> i.clipIdx = True
+        >>> i.identifyIndividual_3(u'AAANNNNN', u'AAANNNNN')
+        (True, u'ind1', 3, 3, 1, 0)
+        >>> i.identifyIndividual_3(u'AAANNNNN', u'NNNNNNNN')
+        (True, u'ind1', 3, 0, 0, 1)
         """
         assigned = False
         ind = None
@@ -617,6 +796,20 @@ class Demultiplex(object):
     def identifyIndividual_4a(self, read1_seq):
         """
         If the first read starts with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and idx1 as the position at which the first read should be saved. Note that the second read is ignored, thus idx2 = 0.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.method = u'4a'
+        >>> i.compilePatterns()
+        >>> i.clipIdx = False
+        >>> i.identifyIndividual_4a(u'AAANNNNN')
+        (True, u'ind1', 0, 0)
+        >>> i.identifyIndividual_4a(u'NNNNNNNN')
+        (False, None, 0, 0)
+        >>> i.clipIdx = True
+        >>> i.identifyIndividual_4a(u'AAANNNNN')
+        (True, u'ind1', 3, 0)
         """
         assigned = False
         ind = None
@@ -659,6 +852,25 @@ class Demultiplex(object):
         """
         Assign pair if first read has tag and remaining cut site in its first
         N bases (ignore second read, use self.dist and self.patterns).
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
+        >>> i.retrieveRestrictionEnzyme()
+        >>> i.prepareRemainingMotif()
+        >>> i.method = u'4c'
+        >>> i.compilePatterns()
+        >>> i.clipIdx = False
+        >>> i.identifyIndividual_4c(u'NNNNNNNNNN')
+        (False, None, 0, 0)
+        >>> i.identifyIndividual_4c(u'AAANNNNNNN')
+        (False, None, 0, 0)
+        >>> i.identifyIndividual_4c(u'AAACAGCNNN')
+        (True, u'ind1', 0, 0)
+        >>> i.identifyIndividual_4c(u'AAACTGCNNN')
+        (True, u'ind1', 0, 0)
+        >>> i.clipIdx = True
         """
         assigned = False
         ind = None
@@ -948,9 +1160,10 @@ class Demultiplex(object):
             self.compilePatterns()
             self.comparePatterns()
             
-        self.demultiplexPairedReads()
-        
-        
+        if not self.onlyComparePatterns:
+            self.demultiplexPairedReads()
+            
+            
 if __name__ == "__main__":
     i = Demultiplex()
     
