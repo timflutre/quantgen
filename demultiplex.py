@@ -60,7 +60,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.13.0" # http://semver.org/
+progVersion = "1.13.1" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -76,7 +76,7 @@ class Demultiplex(object):
         self.tagFile = ""
         self.outPrefix = ""
         self.method = ""
-        self.dist = 20
+        self.dist = -1
         self.restrictEnzyme = None
         self.findChimeras = "1"
         self.clipIdx = True
@@ -153,8 +153,7 @@ class Demultiplex(object):
         msg += "\t\t'lenient' starts from the value given via '--subst'\n"
         msg += "\t\tand decreases it until all tags are distinguishable\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp)\n"
-        msg += "\t\tdefault=20\n"
-        msg += "\t\tset to '0' to disable for --met 4b/4c/4d\n"
+        msg += "\t\tany value <= 0 disables it for --met 4b/4c/4d\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
         msg += "      --chim\tsearch if full restriction site found in R1 and/or R2\n"
         msg += "\t\tdefault=1, see --re\n"
@@ -313,8 +312,8 @@ class Demultiplex(object):
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if self.dist < 0:
-            self.dist = 0
+        if self.dist <= 0:
+            self.dist = -1
         if self.nbSubstitutionsAllowed > 0 and not regexIsImported:
             msg = "ERROR: --subst > 0 but module 'regex' can't be imported"
             sys.stderr.write("%s\n\n" % msg)
@@ -495,7 +494,7 @@ class Demultiplex(object):
                 pattern += self.regexpRemainMotif
             if self.dist > 0 and len(pattern) > self.dist:
                 msg = "--dist %i is too short for tag %s" % (self.dist,
-                                                                    tagId)
+                                                             tagId)
                 msg += "\nbecause the whole pattern is %s" % pattern
                 raise ValueError(msg)
             
@@ -527,6 +526,7 @@ class Demultiplex(object):
         >>> i.patterns["ind1"].pattern
         u'^AAA'
         >>> i.method = u'4b'
+        >>> i.dist = 20
         >>> i.compilePatterns()
         >>> i.patterns["ind1"].pattern
         u'AAA'
@@ -566,7 +566,7 @@ class Demultiplex(object):
             if self.nbSubstitutionsAllowed > 0:
                 pattern = "(%s){s<=%i}" % (pattern,
                                            self.nbSubstitutionsAllowed)
-            if self.method in ["1", "2", "3", "4a"] or self.dist == 0:
+            if self.method in ["1", "2", "3", "4a"] or self.dist <= 0:
                 pattern = "^" + pattern
                 
             ## compile the pattern
@@ -632,6 +632,7 @@ class Demultiplex(object):
         >>> i.verbose = 0
         >>> i.tags = {u'ind1': u'TTAC', u'ind2': u'TTAGCTT'}
         >>> i.method = u'4c'
+        >>> i.dist = 20
         >>> i.nbSubstitutionsAllowed = 2
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
         >>> i.retrieveRestrictionEnzyme()
@@ -684,6 +685,7 @@ class Demultiplex(object):
         >>> i.verbose = 0
         >>> i.tags = {u'ind1': u'TTAC', u'ind2': u'TTAGCTT'}
         >>> i.method = u'4c'
+        >>> i.dist = 20
         >>> i.nbSubstitutionsAllowed = 2
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
         >>> i.retrieveRestrictionEnzyme()
@@ -1151,6 +1153,9 @@ class Demultiplex(object):
                 nbChimeras += 1
                 
             if assigned:
+                if self.verbose > 1:
+                    msg = "pair=%i id=%s assigned=%s" % (nbPairs, read1_id, ind)
+                    print(msg)
                 nbAssignedPairs += 1
                 if self.method in ["3","4d"]:
                     nbAssignedPairsTwoTags += t2
@@ -1171,6 +1176,9 @@ class Demultiplex(object):
                                              read2_q[idx2:]))
                 self.dInd2NbAssigned[ind] += 1
             else: # chimera or unassigned
+                if self.verbose > 1:
+                    msg = "pair=%i id=%s assigned=%s" % (nbPairs, read1_id, "NA")
+                    print(msg)
                 nbUnassignedPairs += 1
                 if chimera and self.findChimeras != "1":
                     nbUnassignedPairsChimeras += 1
