@@ -17,7 +17,8 @@
 # $ ./test_demultiplex.py -p ~/src/quantgen/demultiplex.py
 
 # TODO:
-# speed-up reg exp via groups? http://www.regular-expressions.info/brackets.html
+# when --subst > 0, allow to decrease nb subst depending on the pattern (i.e. not for all)
+# when --subst > 0, if several possible assignments, choose best (lower subst, higher length)
 # try https://github.com/faircloth-lab/splitaake/blob/master/bin/splitaake_reads_many_gz.py
 # try https://humgenprojects.lumc.nl/svn/fastools/trunk/fastools/demultiplex.py
 # try https://github.com/pelinakan/UBD
@@ -59,7 +60,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.12.1" # http://semver.org/
+progVersion = "1.13.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -138,9 +139,9 @@ class Demultiplex(object):
         msg += "\t\t4a: assign pair if first read starts with tag (ignore second read)\n"
         msg += "\t\t4b: assign pair if first read has tag in its first N bases\n"
         msg += "\t\t    (ignore second read, see --dist)\n"
-        msg += "\t\t4c: assign pair only if first read has tag and remaining cut site\n"
+        msg += "\t\t4c: assign pair if first read has tag and remaining cut site\n"
         msg += "\t\t    in its first N bases (ignore second read, see --dist and --re)\n"
-        msg += "\t\t4d: assign pair only if first and/or second read has tag and\n"
+        msg += "\t\t4d: assign pair if first and/or second read has tag and\n"
         msg += "\t\t    remaining cut site in its first N bases (see --dist and --re)\n"
         msg += "\t\t    PCR chimeras (R1 tag is different than R2 tag) are detected\n"
         msg += "\t\t    and saved in distinct files than the unassigned\n"
@@ -149,10 +150,11 @@ class Demultiplex(object):
         msg += "\t\tif > 0, the 'regex' module is required\n"
         msg += "      --ensubst\tenforce the nb of substitutions allowed\n"
         msg += "\t\tdefault=lenient/strict\n"
-        msg += "\t\tstart from the value given via '--subst'\n"
-        msg += "\t\tuntil all tags are distinguishable\n"
+        msg += "\t\t'lenient' starts from the value given via '--subst'\n"
+        msg += "\t\tand decreases it until all tags are distinguishable\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp)\n"
         msg += "\t\tdefault=20\n"
+        msg += "\t\tset to '0' to disable for --met 4b/4c/4d\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
         msg += "      --chim\tsearch if full restriction site found in R1 and/or R2\n"
         msg += "\t\tdefault=1, see --re\n"
@@ -500,7 +502,7 @@ class Demultiplex(object):
             
     def compilePatterns(self):
         """
-        Compile patterns, that is each tag + remaining right of cut site (depending on self.method) as regular expression for quicker searches.
+        Compile patterns, that is each tag (+ remaining right of cut site, depending on self.method) as regular expression for quicker searches.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
@@ -540,10 +542,15 @@ class Demultiplex(object):
         >>> i.compilePatterns()
         >>> i.patterns["ind1"].pattern
         u'(AAAC[AT]GC){s<=1}'
+        >>> i.dist = 0
+        >>> i.compilePatterns()
+        >>> i.patterns["ind1"].pattern
+        u'^(AAAC[AT]GC){s<=1}'
         """
         if self.verbose > 0:
             msg = "compile patterns"
             msg += " (method %s" % self.method
+            msg += ", distance %i bp" % self.dist
             msg += ", %i substitution" % self.nbSubstitutionsAllowed
             if self.nbSubstitutionsAllowed > 1:
                 msg += "s"
@@ -551,17 +558,21 @@ class Demultiplex(object):
             print(msg); sys.stdout.flush()
             
         for tagId in self.tags:
-            pattern = ""
-            if self.method in ["1", "2", "3", "4a"]:
-                pattern += "^"
-            pattern += self.tags[tagId]
+            
+            ## build the pattern
+            pattern = self.tags[tagId]
             if self.method in ["4c", "4d"]:
                 pattern += self.regexpRemainMotif
             if self.nbSubstitutionsAllowed > 0:
-                self.patterns[tagId] \
-                    = regex.compile("(%s){s<=%i}" % (pattern,
-                                                     self.nbSubstitutionsAllowed),
-                                    flags=regex.IGNORECASE)
+                pattern = "(%s){s<=%i}" % (pattern,
+                                           self.nbSubstitutionsAllowed)
+            if self.method in ["1", "2", "3", "4a"] or self.dist == 0:
+                pattern = "^" + pattern
+                
+            ## compile the pattern
+            if self.nbSubstitutionsAllowed > 0:
+                self.patterns[tagId] = regex.compile(pattern,
+                                                     flags=regex.IGNORECASE)
             else:
                 self.patterns[tagId] = re.compile(pattern,
                                                   flags=re.IGNORECASE)
@@ -634,6 +645,19 @@ class Demultiplex(object):
         pattern: (TTACC[AT]GC){s<=2}
         string: TTAGCTTCAGC
         start-end: 0-8
+        >>> i.tags = {u'ind1': u'GTGGA', u'ind2': u'TTGCAGGA'}
+        >>> i.compilePatterns()
+        >>> seqs = [u'TTGCAGGACAGC', u'TTGCAGGACTGC']
+        >>> i.comparePatternsTwoTags(u'ind1', u'ind2', seqs)
+        Traceback (most recent call last):
+        ValueError: with 2 allowed substitutions, tag GTGGA corresponding to ind1
+        is indistinguishable from tag TTGCAGGA corresponding to ind2
+        pattern: (GTGGAC[AT]GC){s<=2}
+        string: TTGCAGGACAGC
+        start-end: 3-12
+        >>> i.dist = 0
+        >>> i.compilePatterns()
+        >>> i.comparePatternsTwoTags(u'ind1', u'ind2', seqs)
         """
         for seq in seqs:
             tmpRe = self.patterns[tagId1].search(seq)
