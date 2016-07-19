@@ -48,7 +48,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import IUPAC, generic_dna
 from Bio.Data.IUPACData import ambiguous_dna_values
 
-# should at least be version 0.4.0
+# should at least be version 0.5.0
 from pyutilstimflutre import Utils, ProgVersion, Job, JobGroup, JobManager, \
     Fastqc, SamtoolsFlagstat
 
@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.5.0" # http://semver.org/
+progVersion = "0.6.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -421,7 +421,8 @@ class GbsLane(object):
         fileHandle.close()
         return fileName
         
-    def demultiplex(self, outDir, enzyme, nbSubstitutionsAllowed, iJobGroup):
+    def demultiplex(self, outDir, enzyme, nbSubstitutionsAllowed, enforceSubst,
+                    iJobGroup):
         if len(self.dInitFastqFiles) < 2:
             msg = "can't demultiplex (yet) lane '%s' if single-end" % self.id
             raise ValueError(msg)
@@ -433,6 +434,8 @@ class GbsLane(object):
         cmd += " --ofqp %s/%s" % (outDir, self.id)
         cmd += " --met %s" % "4c"
         cmd += " --subst %i" % nbSubstitutionsAllowed
+        cmd += " --ensubst %s" % enforceSubst
+        cmd += " --dist %i" % 0
         cmd += " --re %s" % enzyme
         cmd += " --chim 1"
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
@@ -647,7 +650,8 @@ class Gbs(object):
         self.fclnToKeep = None
         self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
-        self.nbSubstsAllowedDemult = 1
+        self.nbSubstsAllowedDemult = 2
+        self.enforceSubst = "lenient"
         self.jobManager = None # instantiated in checkAttributes()
         self.samplesCol2idx = {"genotype": None,
                                "flowcell": None,
@@ -713,7 +717,7 @@ class Gbs(object):
         msg += "      --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
         msg += "      --step\tstep(s) to perform (1/2/3/4/..., can be 1-2-...)\n"
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
-        msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.10.0\n"
+        msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.13.1)\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
         msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and Picard)\n"
         msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
@@ -758,9 +762,12 @@ class Gbs(object):
         msg += "      --enz\tname of the restriction enzyme\n"
         msg += "\t\tcompulsory for step 2\n"
         msg += "\t\tdefault=ApeKI\n"
-        msg += "      --number of substitutions allowed during demultiplexing\n"
+        msg += "      --subst\tnumber of substitutions allowed during demultiplexing\n"
         msg += "\t\tcompulsory for step 2\n"
-        msg += "\t\tdefault=1\n"
+        msg += "\t\tdefault=2\n"
+        msg += "      --ensubst\tenforce the nb of substitutions allowed\n"
+        msg += "\t\tcompulsory for step 2\n"
+        msg += "\t\tdefault=lenient/strict\n"
         msg += "      --adp\tpath to the file containing the adapters\n"
         msg += "\t\tcompulsory for step 3\n"
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
@@ -827,14 +834,30 @@ class Gbs(object):
         Parse the command-line arguments.
         """
         try:
-            opts, args = getopt.getopt( sys.argv[1:], "hVv:i:",
-                                        ["help", "version", "verbose=",
-                                         "proj1=", "proj2=", "step=",
-                                         "samples=", "fcln=", "dict=",
-                                         "schdlr=", "queue=", "enz=", "subst=",
-                                         "adp=", "ref=", "jgid=", "tmpd=",
-                                         "jvm=", "knowni=", "known=", "force",
-                                         "pird=", "resou="])
+            opts, args = getopt.getopt(sys.argv[1:],
+                                       "hVv:i:",
+                                       ["help", "version", "verbose=",
+                                        "proj1=",
+                                        "proj2=",
+                                        "step=",
+                                        "samples=",
+                                        "fcln=",
+                                        "dict=",
+                                        "schdlr=",
+                                        "queue=",
+                                        "enz=",
+                                        "subst=",
+                                        "ensubst=",
+                                        "adp=",
+                                        "ref=",
+                                        "jgid=",
+                                        "tmpd=",
+                                        "jvm=",
+                                        "knowni=",
+                                        "known=",
+                                        "force",
+                                        "pird=",
+                                        "resou="])
         except getopt.GetoptError as err:
             sys.stderr.write("%s\n\n" % str(err))
             self.help()
@@ -870,6 +893,8 @@ class Gbs(object):
                 self.enzyme = a
             elif o == "--subst":
                 self.nbSubstsAllowedDemult = int(a)
+            elif o == "--ensubst":
+                self.enforceSubst = a
             elif o == "--adp":
                 self.adpFile = a
             elif o == "--ref":
@@ -958,6 +983,14 @@ class Gbs(object):
         if "2" in self.lSteps:
             if not Utils.isProgramInPath("demultiplex.py"):
                 msg = "ERROR: can't find 'demultiplex.py' in PATH"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            obsMajVer, obsMinVer = ProgVersion.getVersion("demultiplex.py")
+            if not (obsMajVer == 1 and obsMinVer >= 13):
+                msg = "ERROR: 'demultiplex.py' is in version %s.%s" % \
+                      (obsMajVer, obsMinVer)
+                msg += " instead of >= 1.13.1"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -1374,7 +1407,7 @@ class Gbs(object):
             iLane.setInitFastqFiles()
             iLane.makeInitFastqFileSymlinks()
             iLane.demultiplex(stepDir, self.enzyme, self.nbSubstsAllowedDemult,
-                              iJobGroup)
+                              self.enforceSubst, iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
         self.jobManager.wait(iJobGroup.id, self.verbose)
