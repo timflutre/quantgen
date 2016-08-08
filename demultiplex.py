@@ -60,7 +60,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "1.13.1" # http://semver.org/
+progVersion = "1.14.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -71,11 +71,11 @@ class Demultiplex(object):
     def __init__(self):
         self.verbose = 1
         self.inDir = "."
-        self.inFqFile1 = ""
-        self.inFqFile2 = ""
-        self.tagFile = ""
-        self.outPrefix = ""
-        self.method = ""
+        self.inFqFile1 = None
+        self.inFqFile2 = None # optional for single reads
+        self.tagFile = None
+        self.outPrefix = None
+        self.method = None
         self.dist = -1
         self.restrictEnzyme = None
         self.findChimeras = "1"
@@ -91,6 +91,20 @@ class Demultiplex(object):
         self.nbSubstitutionsAllowed = 0 # requires module "regex"
         self.enforceSubst = "lenient"
         self.onlyComparePatterns = False
+        self.inFqHandle1 = None
+        self.inFqHandle2 = None
+        self.reads1 = None
+        self.reads2 = None
+        self.dOutFqHandles = {}
+        self.nbPairs = 0
+        self.nbAssignedPairs = 0
+        self.nbAssignedPairsTwoTags = 0
+        self.nbAssignedPairsOneTag = 0
+        self.nbChimeras = 0
+        self.nbChimerasSite = 0
+        self.nbChimerasTags = 0
+        self.nbUnassignedPairs = 0
+        self.nbUnassignedPairsChimeras = 0
         
         
     def help(self):
@@ -115,6 +129,7 @@ class Demultiplex(object):
         msg += "\t\toptional with --compp\n"
         msg += "      --ifq2\tpath to the second input fastq file\n"
         msg += "\t\tcan be compressed with gzip\n"
+        msg += "\t\tabsent means single reads, present means paired-end reads\n"
         msg += "\t\terror raised if reads not in same order as --ifq1\n"
         msg += "\t\toptional with --compp\n"
         msg += "      --it\tpath to the tag file\n"
@@ -134,15 +149,21 @@ class Demultiplex(object):
         msg += "\t\tonly forward strand is considered\n"
         msg += "\t\talways compulsory\n"
         msg += "\t\t1: assign pair if both reads start with the tag\n"
+        msg += "\t\t   requires --ifq2\n"
         msg += "\t\t2: assign pair if at least one read starts with the tag\n"
+        msg += "\t\t   requires --ifq2\n"
         msg += "\t\t3: same as 2 but count if one or both reads start with the tag\n"
-        msg += "\t\t4a: assign pair if first read starts with tag (ignore second read)\n"
-        msg += "\t\t4b: assign pair if first read has tag in its first N bases\n"
-        msg += "\t\t    (ignore second read, see --dist)\n"
+        msg += "\t\t   requires --ifq2\n"
+        msg += "\t\t4a: assign pair if first read starts with tag\n"
+        msg += "\t\t    ignore second read for assignment, but save it if --ifq2 is present\n"
+        msg += "\t\t4b: assign pair if first read has tag in its first N bases (see --dist)\n"
+        msg += "\t\t    ignore second read for assignment, but save it if --ifq2 is present\n"
         msg += "\t\t4c: assign pair if first read has tag and remaining cut site\n"
-        msg += "\t\t    in its first N bases (ignore second read, see --dist and --re)\n"
+        msg += "\t\t    in its first N bases (see --dist and --re)\n"
+        msg += "\t\t    ignore second read for assignment, but save it if --ifq2 is present\n"
         msg += "\t\t4d: assign pair if first and/or second read has tag and\n"
         msg += "\t\t    remaining cut site in its first N bases (see --dist and --re)\n"
+        msg += "\t\t    requires --ifq2\n"
         msg += "\t\t    PCR chimeras (R1 tag is different than R2 tag) are detected\n"
         msg += "\t\t    and saved in distinct files than the unassigned\n"
         msg += "      --subst\tnumber of substitutions allowed\n"
@@ -249,55 +270,63 @@ class Demultiplex(object):
         """
         Check the values of the command-line parameters.
         """
-        if not self.onlyComparePatterns and self.inDir == "":
-            msg = "ERROR: missing compulsory option --idir"
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        if not self.onlyComparePatterns and not os.path.exists(self.inDir):
-            msg = "ERROR: can't find dir %s" % self.inDir
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        if not self.onlyComparePatterns and self.inFqFile1 == "":
-            msg = "ERROR: missing compulsory option --ifq1"
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        self.inFqFile1 = "%s/%s" % (self.inDir, self.inFqFile1)
-        if not self.onlyComparePatterns and not os.path.exists(self.inFqFile1):
-            msg = "ERROR: can't find file %s" % self.inFqFile1
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        if not self.onlyComparePatterns and self.inFqFile2 == "":
-            msg = "ERROR: missing compulsory option --ifq2"
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        self.inFqFile2 = "%s/%s" % (self.inDir, self.inFqFile2)
-        if not self.onlyComparePatterns and not os.path.exists(self.inFqFile2):
-            msg = "ERROR: can't find file %s" % self.inFqFile2
-            sys.stderr.write("%s\n\n" % msg)
-            self.help()
-            sys.exit(1)
-        if self.tagFile == "":
+        if not self.onlyComparePatterns:
+            if not self.inDir:
+                msg = "ERROR: missing compulsory option --idir"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            elif not os.path.exists(self.inDir):
+                msg = "ERROR: can't find dir %s" % self.inDir
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if not self.inFqFile1:
+                msg = "ERROR: missing compulsory option --ifq1"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            else:
+                self.inFqFile1 = "%s/%s" % (self.inDir, self.inFqFile1)
+                if not os.path.exists(self.inFqFile1):
+                    msg = "ERROR: can't find file %s" % self.inFqFile1
+                    sys.stderr.write("%s\n\n" % msg)
+                    self.help()
+                    sys.exit(1)
+            if self.inFqFile2: # optional for single reads
+                self.inFqFile2 = "%s/%s" % (self.inDir, self.inFqFile2)
+                if not os.path.exists(self.inFqFile2):
+                    msg = "ERROR: can't find file %s" % self.inFqFile2
+                    sys.stderr.write("%s\n\n" % msg)
+                    self.help()
+                    sys.exit(1)
+            if not self.outPrefix:
+                msg = "ERROR: missing compulsory option --ofqp"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+        if not self.tagFile:
             msg = "ERROR: missing compulsory option --it"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if not os.path.exists(self.tagFile):
+        elif not os.path.exists(self.tagFile):
             msg = "ERROR: can't find file %s" % self.tagFile
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
-        if not self.onlyComparePatterns and self.outPrefix == "":
-            msg = "ERROR: missing compulsory option --ofqp"
+        if not self.method:
+            msg = "ERROR: missing compulsory option --met"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
         if self.method not in ["1","2","3","4a","4b","4c","4d","chim"]:
             msg = "ERROR: unknown option --met %s" % self.method
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
+        if self.method in ["1","2","3","4d"] and not self.inFqFile2:
+            msg = "ERROR: missing compulsory option --ifq2"
             sys.stderr.write("%s\n\n" % msg)
             self.help()
             sys.exit(1)
@@ -749,13 +778,47 @@ class Demultiplex(object):
                 print(msg); sys.stdout.flush()
                 
             break
+
+
+    def prepareInReads(self):
+        """
+        Open input fastq file(s) and return iterator(s)
+        """
+        if self.inFqFile1.endswith(".gz"):
+            self.inFqHandle1 = gzip.open(self.inFqFile1, "r")
+        else:
+            self.inFqHandle1 = open(self.inFqFile1, "r")
+        self.reads1 = FastqGeneralIterator(self.inFqHandle1)
+        
+        if self.inFqFile2:
+            if self.inFqFile2.endswith(".gz"):
+                self.inFqHandle2 = gzip.open(self.inFqFile2, "r")
+            else:
+                self.inFqHandle2 = open(self.inFqFile2, "r")
+            self.reads2 = FastqGeneralIterator(self.inFqHandle2)
+            
+            
+    def closeFqHandles(self):
+        self.inFqHandle1.close()
+        
+        if self.inFqFile2:
+            self.inFqHandle2.close()
+            
+        [handle.close() for (ind,handles) in self.dOutFqHandles.items() \
+         for handle in handles]
         
         
     def identifyChimeras(self, read1_seq, read2_seq):
         chimera = False
-        if self.regexpCompilCutMotif.search(read1_seq) != None \
-           or self.regexpCompilCutMotif.search(read2_seq) != None:
-            chimera = True
+        
+        if read2_seq: # paired-end reads
+            if self.regexpCompilCutMotif.search(read1_seq) != None \
+               or self.regexpCompilCutMotif.search(read2_seq) != None:
+                chimera = True
+        else: # single read
+            if self.regexpCompilCutMotif.search(read1_seq) != None:
+                chimera = True
+                
         return chimera
         
         
@@ -1073,50 +1136,54 @@ class Demultiplex(object):
         outHandle.close()
         
         
+    def printSummary(self):
+        msg = "total nb of read pairs: %i" % self.nbPairs
+        msg += "\nnb of assigned read pairs: %i" % self.nbAssignedPairs
+        if self.method in ["3","4d"]:
+            msg += "; 2tags=%i 1tags=%i" % (self.nbAssignedPairsTwoTags, \
+                                            self.nbAssignedPairsOneTag)
+        if self.findChimeras != "0" or self.method in ["4d"]:
+            msg += "\nnb of chimeric read pairs: %i (%.2f%%" % (
+                self.nbChimeras,
+                100 * self.nbChimeras / float(self.nbPairs))
+            if self.findChimeras != "0" and self.method in ["4d"]:
+                msg += "; site=%i tags=%i" % (self.nbChimerasSite,
+                                              self.nbChimerasTags)
+            msg += ")"
+        msg += "\nnb of unassigned read pairs: %i (%.2f%%" % (
+            self.nbUnassignedPairs,
+            100 * self.nbUnassignedPairs / float(self.nbPairs))
+        msg += ")"
+        if self.findChimeras == "2" or self.method in ["4d"]:
+            msg += "\nnb of unassigned read pairs (excluding chimeras): %i (%.2f%%" % (
+                self.nbUnassignedPairs - self.nbUnassignedPairsChimeras,
+                100 * (self.nbUnassignedPairs - self.nbUnassignedPairsChimeras) \
+                / float(self.nbPairs))
+            msg += ")"
+        nbInds = len(self.dOutFqHandles)
+        if "unassigned" in self.dOutFqHandles:
+            nbInds -= 1
+        if "chimeras" in self.dOutFqHandles:
+            nbInds -= 1
+        msg += "\nnb of individuals with assigned reads: %i" % nbInds
+        print(msg); sys.stdout.flush()
+        
+        
     def demultiplexPairedReads(self):
         """
-        Read the data files, launch the identifying method, writes the output.
+        Iterate over all read pairs, try to assign, and save to files.
         """
-        if self.verbose > 0:
-            msg = "demultiplex paired-end reads (method=%s, subst=%i)..." % \
-                  (self.method, self.nbSubstitutionsAllowed)
-            print(msg); sys.stdout.flush()
-            
-        if self.inFqFile1.endswith(".gz"):
-            inFqHandle1 = gzip.open(self.inFqFile1, "r")
-        else:
-            inFqHandle1 = open(self.inFqFile1, "r")
-        if self.inFqFile2.endswith(".gz"):
-            inFqHandle2 = gzip.open(self.inFqFile2, "r")
-        else:
-            inFqHandle2 = open(self.inFqFile2, "r")
-            
-        reads1 = FastqGeneralIterator(inFqHandle1)
-        reads2 = FastqGeneralIterator(inFqHandle2)
-        
-        dOutFqHandles = {}
-        nbPairs = 0
-        nbAssignedPairs = 0
-        nbAssignedPairsTwoTags = 0
-        nbAssignedPairsOneTag = 0
-        nbChimeras = 0
-        nbChimerasSite = 0
-        nbChimerasTags = 0
-        nbUnassignedPairs = 0
-        nbUnassignedPairsChimeras = 0
-        meanQuals = []
-        
-        # iterate over all read pairs
         for (read1_id, read1_seq, read1_q), (read2_id, read2_seq, read2_q) \
-            in itertools.izip(reads1, reads2):
+            in itertools.izip(self.reads1, self.reads2):
             
             if read1_id.split(" ")[0] != read2_id.split(" ")[0]:
                 msg = "ERROR: for pair %i, reads %s and %s are not paired" \
-                      % (nbPairs, read1_id, read2_id)
+                      % (self.nbPairs, read1_id, read2_id)
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
-            nbPairs += 1
+            self.nbPairs += 1
             
+            # try to assign the read pair to an individual via the barcodes
             assigned = False
             ind = None
             chimera = False
@@ -1145,111 +1212,174 @@ class Demultiplex(object):
                         read1_seq, read2_seq)
                     
             if chimeraSite:
-                nbChimerasSite += 1 
+                self.nbChimerasSite += 1 
             if chimeraTags:
-                nbChimerasTags += 1
+                self.nbChimerasTags += 1
             if chimeraSite or chimeraTags:
                 chimera = True
-                nbChimeras += 1
+                self.nbChimeras += 1
                 
+            # save into a file
             if assigned:
                 if self.verbose > 1:
-                    msg = "pair=%i id=%s assigned=%s" % (nbPairs, read1_id, ind)
+                    msg = "pair=%i id=%s assigned=%s" % (self.nbPairs,
+                                                         read1_id, ind)
                     print(msg)
-                nbAssignedPairs += 1
+                self.nbAssignedPairs += 1
                 if self.method in ["3","4d"]:
-                    nbAssignedPairsTwoTags += t2
-                    nbAssignedPairsOneTag += t1
-                if ind not in dOutFqHandles:
-                    dOutFqHandles[ind] = [
+                    self.nbAssignedPairsTwoTags += t2
+                    self.nbAssignedPairsOneTag += t1
+                if ind not in self.dOutFqHandles:
+                    self.dOutFqHandles[ind] = [
                         gzip.open("%s_%s_R1.fastq.gz" %
                                   (self.outPrefix, ind), "w"),
                         gzip.open("%s_%s_R2.fastq.gz" %
                                   (self.outPrefix, ind), "w")]
-                dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
-                                            (read1_id,
-                                             read1_seq[idx1:],
-                                             read1_q[idx1:]))
-                dOutFqHandles[ind][1].write("@%s\n%s\n+\n%s\n" %
-                                            (read2_id,
-                                             read2_seq[idx2:],
-                                             read2_q[idx2:]))
+                self.dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
+                                                 (read1_id,
+                                                  read1_seq[idx1:],
+                                                  read1_q[idx1:]))
+                self.dOutFqHandles[ind][1].write("@%s\n%s\n+\n%s\n" %
+                                                 (read2_id,
+                                                  read2_seq[idx2:],
+                                                  read2_q[idx2:]))
                 self.dInd2NbAssigned[ind] += 1
             else: # chimera or unassigned
                 if self.verbose > 1:
-                    msg = "pair=%i id=%s assigned=%s" % (nbPairs, read1_id, "NA")
+                    msg = "pair=%i id=%s assigned=%s" % (self.nbPairs,
+                                                         read1_id, "NA")
                     print(msg)
-                nbUnassignedPairs += 1
+                self.nbUnassignedPairs += 1
                 if chimera and self.findChimeras != "1":
-                    nbUnassignedPairsChimeras += 1
-                    if "chimeras" not in dOutFqHandles:
-                        dOutFqHandles["chimeras"] = [
+                    self.nbUnassignedPairsChimeras += 1
+                    if "chimeras" not in self.dOutFqHandles:
+                        self.dOutFqHandles["chimeras"] = [
                             gzip.open("%s_chimeras_R1.fastq.gz" %
                                       self.outPrefix, "w"),
                             gzip.open("%s_chimeras_R2.fastq.gz" %
                                       self.outPrefix, "w")]
-                    dOutFqHandles["chimeras"][0].write("@%s\n%s\n+\n%s\n" %
-                                                      (read1_id,
-                                                       read1_seq,
-                                                       read1_q))
-                    dOutFqHandles["chimeras"][1].write("@%s\n%s\n+\n%s\n" %
-                                                      (read2_id,
-                                                       read2_seq,
-                                                       read2_q))
-                else: # chimera or unassigned
-                    if "unassigned" not in dOutFqHandles:
-                        dOutFqHandles["unassigned"] = [
+                    self.dOutFqHandles["chimeras"][0].write("@%s\n%s\n+\n%s\n" %
+                                                            (read1_id,
+                                                             read1_seq,
+                                                             read1_q))
+                    self.dOutFqHandles["chimeras"][1].write("@%s\n%s\n+\n%s\n" %
+                                                            (read2_id,
+                                                             read2_seq,
+                                                             read2_q))
+                else:
+                    if "unassigned" not in self.dOutFqHandles:
+                        self.dOutFqHandles["unassigned"] = [
                             gzip.open("%s_unassigned_R1.fastq.gz" %
                                       self.outPrefix, "w"),
                             gzip.open("%s_unassigned_R2.fastq.gz" %
                                       self.outPrefix, "w")]
-                        
-                    dOutFqHandles["unassigned"][0].write("@%s\n%s\n+\n%s\n" %
-                                                         (read1_id,
-                                                          read1_seq,
-                                                          read1_q))
-                    dOutFqHandles["unassigned"][1].write("@%s\n%s\n+\n%s\n" %
-                                                         (read2_id,
-                                                          read2_seq,
-                                                          read2_q))
+                    self.dOutFqHandles["unassigned"][0].write("@%s\n%s\n+\n%s\n" %
+                                                              (read1_id,
+                                                               read1_seq,
+                                                               read1_q))
+                    self.dOutFqHandles["unassigned"][1].write("@%s\n%s\n+\n%s\n" %
+                                                              (read2_id,
+                                                               read2_seq,
+                                                               read2_q))
                     
-        inFqHandle1.close()
-        inFqHandle2.close()
-        [handle.close() for (ind,handles) in dOutFqHandles.items() \
-         for handle in handles]
+                    
+    def demultiplexSingleReads(self):
+        """
+        Iterate over all reads, try to assign, and save to files.
+        """
+        for (read_id, read_seq, read_q) in self.reads1:
+            self.nbPairs += 1
+            
+            # try to assign the read to an individual via the barcodes
+            assigned = False
+            ind = None
+            chimera = False
+            chimeraSite = False
+            chimeraTags = False
+            if self.findChimeras != "0":
+                chimeraSite = self.identifyChimeras(read_seq, None)
+            if not chimeraSite or self.findChimeras == "1":
+                if self.method == "4a":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_4a(read_seq)
+                elif self.method == "4b":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_4b(read_seq)
+                elif self.method == "4c":
+                    assigned, ind, idx1, idx2 = self.identifyIndividual_4c(read_seq)
+                    
+            if chimeraSite:
+                self.nbChimerasSite += 1 
+            if chimeraTags:
+                self.nbChimerasTags += 1
+            if chimeraSite or chimeraTags:
+                chimera = True
+                self.nbChimeras += 1
+                
+            # save into a file
+            if assigned:
+                if self.verbose > 1:
+                    msg = "read=%i id=%s assigned=%s" % (self.nbPairs,
+                                                         read_id, ind)
+                    print(msg)
+                self.nbAssignedPairs += 1
+                if ind not in self.dOutFqHandles:
+                    self.dOutFqHandles[ind] = [
+                        gzip.open("%s_%s_R1.fastq.gz" %
+                                  (self.outPrefix, ind), "w")]
+                self.dOutFqHandles[ind][0].write("@%s\n%s\n+\n%s\n" %
+                                                 (read_id,
+                                                  read_seq[idx1:],
+                                                  read_q[idx1:]))
+                self.dInd2NbAssigned[ind] += 1
+            else: # chimera or unassigned
+                if self.verbose > 1:
+                    msg = "read=%i id=%s assigned=%s" % (self.nbPairs,
+                                                         read_id, "NA")
+                    print(msg)
+                self.nbUnassignedPairs += 1
+                if chimera and self.findChimeras != "1":
+                    self.nbUnassignedPairsChimeras += 1
+                    if "chimeras" not in self.dOutFqHandles:
+                        self.dOutFqHandles["chimeras"] = [
+                            gzip.open("%s_chimeras_R1.fastq.gz" %
+                                      self.outPrefix, "w")]
+                    self.dOutFqHandles["chimeras"][0].write("@%s\n%s\n+\n%s\n" %
+                                                            (read_id,
+                                                             read_seq,
+                                                             read_q))
+                else:
+                    if "unassigned" not in self.dOutFqHandles:
+                        self.dOutFqHandles["unassigned"] = [
+                            gzip.open("%s_unassigned_R1.fastq.gz" %
+                                      self.outPrefix, "w")]
+                    self.dOutFqHandles["unassigned"][0].write("@%s\n%s\n+\n%s\n" %
+                                                              (read_id,
+                                                               read_seq,
+                                                               read_q))
+                    
+                    
+    def demultiplexReads(self):
+        """
+        Read the data files, launch the identifying method, writes the output.
+        """
+        if self.verbose > 0:
+            msg = "demultiplex %s-end reads (method=%s, subst=%i)..." % \
+                  ("paired" if self.inFqFile2 else "single", self.method,
+                   self.nbSubstitutionsAllowed)
+            print(msg); sys.stdout.flush()
+            
+        self.prepareInReads()
+        
+        if self.inFqFile2:
+            self.demultiplexPairedReads()
+        else:
+            self.demultiplexSingleReads()
+            
+        self.closeFqHandles()
         
         self.saveStatsPerInd()
         
         if self.verbose > 0:
-            msg = "total nb of read pairs: %i" % nbPairs
-            msg += "\nnb of assigned read pairs: %i" % nbAssignedPairs
-            if self.method in ["3","4d"]:
-                msg += "; 2tags=%i 1tags=%i" % (nbAssignedPairsTwoTags, \
-                                                nbAssignedPairsOneTag)
-            if self.findChimeras != "0" or self.method in ["4d"]:
-                msg += "\nnb of chimeric read pairs: %i (%.2f%%" % (
-                    nbChimeras,
-                    100 * nbChimeras / float(nbPairs))
-                if self.findChimeras != "0" and self.method in ["4d"]:
-                    msg += "; site=%i tags=%i" % (nbChimerasSite,
-                                                  nbChimerasTags)
-                msg += ")"
-            msg += "\nnb of unassigned read pairs: %i (%.2f%%" % (
-                nbUnassignedPairs,
-                100 * nbUnassignedPairs / float(nbPairs))
-            msg += ")"
-            if self.findChimeras == "2" or self.method in ["4d"]:
-                msg += "\nnb of unassigned read pairs (excluding chimeras): %i (%.2f%%" % (
-                    nbUnassignedPairs - nbUnassignedPairsChimeras,
-                    100 * (nbUnassignedPairs - nbUnassignedPairsChimeras) / float(nbPairs))
-                msg += ")"
-            nbInds = len(dOutFqHandles)
-            if "unassigned" in dOutFqHandles:
-                nbInds -= 1
-            if "chimeras" in dOutFqHandles:
-                nbInds -= 1
-            msg += "\nnb of individuals with assigned reads: %i" % nbInds
-            print(msg); sys.stdout.flush()
+            self.printSummary()
             
             
     def run(self):
@@ -1268,7 +1398,7 @@ class Demultiplex(object):
             self.comparePatterns()
             
         if not self.onlyComparePatterns:
-            self.demultiplexPairedReads()
+            self.demultiplexReads()
             
             
 if __name__ == "__main__":
