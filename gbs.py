@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.6.0" # http://semver.org/
+progVersion = "0.7.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -130,9 +130,11 @@ class GbsSample(object):
         """
         cmd = "time cutadapt"
         cmd += " -a %s" % reverse_complement(str(adpR2)) # to be removed from R1 reads
-        cmd += " -A %s" % reverse_complement(str(adpR1) + str(self.barcode)) # idem from R2 reads
+        if "R2" in self.dDemultiplexedFastqFiles:
+            cmd += " -A %s" % reverse_complement(str(adpR1) + str(self.barcode)) # idem from R2
         cmd += " -o %s/%s_clean_R1.fastq.gz" % (outDir, self.id)
-        cmd += " -p %s/%s_clean_R2.fastq.gz" % (outDir, self.id)
+        if "R2" in self.dDemultiplexedFastqFiles:
+            cmd += " -p %s/%s_clean_R2.fastq.gz" % (outDir, self.id)
         cmd += " -e 0.2" # error tolerance
         cmd += " -O 3" # min overlap length btw reads and seq passed to -a/-A
         cmd += " -m 35" # min read length
@@ -143,7 +145,6 @@ class GbsSample(object):
         cmd += " %s" % self.dDemultiplexedFastqFiles["R1"]
         if "R2" in self.dDemultiplexedFastqFiles:
             cmd += " %s" % self.dDemultiplexedFastqFiles["R2"]
-        # print(cmd) # debug
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
         bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
         iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
@@ -176,15 +177,16 @@ class GbsSample(object):
         http://www.bioinformatics.babraham.ac.uk/projects/fastqc/
         """
         for Ri in ["R1", "R2"]:
-            cmd = "time fastqc -o %s %s" % (outDir,
-                                            self.dCleanedFastqFiles[Ri])
-            jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
-            bashFile = "%s/job_%s_%s_%s.bash" % (outDir, iJobGroup.id,
-                                                 self.id, Ri)
-            iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
-                       bashFile=bashFile, dir=outDir)
-            iJobGroup.insert(iJob)
-            
+            if Ri in self.dCleanedFastqFiles:
+                cmd = "time fastqc -o %s %s" % (outDir,
+                                                self.dCleanedFastqFiles[Ri])
+                jobName = "stdout_%s_%s_%s" % (iJobGroup.id, self.id, Ri)
+                bashFile = "%s/job_%s_%s_%s.bash" % (outDir, iJobGroup.id,
+                                                     self.id, Ri)
+                iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
+                           bashFile=bashFile, dir=outDir)
+                iJobGroup.insert(iJob)
+                
     def saveNbReadsFromFastqc(self, inDir, outHandle):
         inFile = "%s/%s_clean_R1_fastqc.zip" % (inDir, self.id)
         iFqc = Fastqc(inFile)
@@ -265,14 +267,22 @@ class GbsSample(object):
         cmd += "\ntime samtools flagstat"
         cmd += " ${outDir}/%s.bam" % self.id
         cmd += " >& ${outDir}/flagstat_%s.txt" % self.id
-        cmd += "\necho \"reads in proper pairs and primary alignments\""
+        if "R2" in self.dCleanedFastqFiles:
+            cmd += "\necho \"paired-end reads in proper pairs and primary alignments\""
+        else:
+            cmd += "\necho \"single reads in primary alignments\""
         cmd += "\necho -e \"%s" % self.genotype
         cmd += "\t%s" % self.flowcell
         cmd += "\t%s" % self.lane
-        cmd += "\t\"$(samtools view -f 0x0002 -F 0x0100 -q 5"
-        cmd += " ${outDir}/%s.bam" % self.id
-        cmd += " | cut -f1 | sort | uniq | wc -l)"
-        cmd += " > ${outDir}/reads-proppaired-primaln-q5_%s.txt" % self.id
+        if "R2" in self.dCleanedFastqFiles:
+            cmd += "\t\"$(samtools view -f 0x0002 -F 0x0100 -q 5"
+            cmd += " ${outDir}/%s.bam" % self.id
+            cmd += " | cut -f1 | sort | uniq | wc -l)"
+        else:
+            cmd += "\t\"$(samtools view -F 0x0004 -F 0x0100 -F 0x0800 -q 5"
+            cmd += " ${outDir}/%s.bam" % self.id
+            cmd += " | cut -f1 | sort | uniq | wc -l)"
+        cmd += " > ${outDir}/reads_count-ok_%s.txt" % self.id
         
         jobName = "stdout_%s_%s" % (iJobGroup.id, self.id)
         bashFile = "%s/job_%s_%s.bash" % (outDir, iJobGroup.id, self.id)
@@ -423,13 +433,11 @@ class GbsLane(object):
         
     def demultiplex(self, outDir, enzyme, nbSubstitutionsAllowed, enforceSubst,
                     iJobGroup):
-        if len(self.dInitFastqFiles) < 2:
-            msg = "can't demultiplex (yet) lane '%s' if single-end" % self.id
-            raise ValueError(msg)
         cmd = "demultiplex.py"
         cmd += " --idir %s" % os.path.dirname(self.dInitFastqFiles["R1"][1])
         cmd += " --ifq1 %s" % os.path.basename(self.dInitFastqFiles["R1"][1])
-        cmd += " --ifq2 %s" % os.path.basename(self.dInitFastqFiles["R2"][1])
+        if "R2" in self.dInitFastqFiles:
+            cmd += " --ifq2 %s" % os.path.basename(self.dInitFastqFiles["R2"][1])
         cmd += " --it %s" % self.saveBarcodeFile(outDir, "fasta")
         cmd += " --ofqp %s/%s" % (outDir, self.id)
         cmd += " --met %s" % "4c"
@@ -717,7 +725,7 @@ class Gbs(object):
         msg += "      --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
         msg += "      --step\tstep(s) to perform (1/2/3/4/..., can be 1-2-...)\n"
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
-        msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.13.1)\n"
+        msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.14.0)\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
         msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and Picard)\n"
         msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
@@ -987,10 +995,10 @@ class Gbs(object):
                 self.help()
                 sys.exit(1)
             obsMajVer, obsMinVer = ProgVersion.getVersion("demultiplex.py")
-            if not (obsMajVer == 1 and obsMinVer >= 13):
+            if not (obsMajVer == 1 and obsMinVer >= 14):
                 msg = "ERROR: 'demultiplex.py' is in version %s.%s" % \
                       (obsMajVer, obsMinVer)
-                msg += " instead of >= 1.13.1"
+                msg += " instead of >= 1.14.0"
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -1522,6 +1530,13 @@ class Gbs(object):
         self.jobManager.insert(iJobGroup)
         
         for laneId,iLane in self.dLanes.items():
+            
+            # create this directory here, even if it is used only later,
+            # in gatherSamplesPerLane, so that the user is immediately
+            # warned if the directory already exists, before launching jobs
+            outDir = "%s/%s" % (self.allSamplesDir, iLane.id)
+            self.makeDir(outDir)
+            
             iLane.setCleanedFastqFiles("%s/%s" % (iLane.dir, self.lDirSteps[2]))
             iLane.align(self.pathToPrefixRefGenome, self.tmpDir, self.dictFile,
                         self.lDirSteps[3], iJobGroup)
@@ -1550,7 +1565,6 @@ class Gbs(object):
         for laneId,iLane in self.dLanes.items():
             iLane.setInitialBamFiles(self.lDirSteps[3])
             outDir = "%s/%s" % (self.allSamplesDir, iLane.id)
-            self.makeDir(outDir)
             iLane.gather(self.memJvm, outDir, iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
@@ -1587,7 +1601,7 @@ class Gbs(object):
             
         outHandle.close()
         
-        outFile = "%s/%s_reads-proppaired-primaln-q5.txt" % \
+        outFile = "%s/%s_reads-count-ok.txt" % \
                   (self.allSamplesDir, self.project2Id)
         if os.path.exists(outFile):
             if self.forceRerunSteps:
@@ -1599,14 +1613,15 @@ class Gbs(object):
         txt = "geno"
         txt += "\tflowcell"
         txt += "\tlane"
-        txt += "\tnb.pairs.proppaired.primaln.q5"
+        txt += "\tnb.reads.align.ok" # nb of reads if single, of pairs if paired-end
         outHandle.write("%s\n" % txt)
         outHandle.close()
-        cmd = "cat %s/*_*_*/align-reads/reads-proppaired-primaln-q5_*.txt" % \
+        cmd = "cat %s/*_*_*/align-reads/reads_count-ok_*.txt" % \
               self.allSamplesDir
         # cmd += " | awk '{a[$3]+=$4} END{for(x in a){print x,a[x]}}'"
         # cmd += " | sort -k2,2n"
         cmd += " >> %s" % outFile
+        cmd += "; rm -f %s.gz" % outFile
         cmd += "; gzip %s" % outFile
         p = subprocess.Popen(cmd, shell=True,
                              stdout=subprocess.PIPE).communicate()
