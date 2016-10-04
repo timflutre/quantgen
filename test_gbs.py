@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.0" # http://semver.org/
+progVersion = "0.4.1" # http://semver.org/
 
 
 class TestGbs(object):
@@ -74,6 +74,14 @@ class TestGbs(object):
         msg += "\n"
         msg += "Examples:\n"
         msg += "  %s -p ~/src/gbs.py\n" % os.path.basename(sys.argv[0])
+        msg += "  ../gbs.py --proj1 testGbs --step 1 --samples samples.txt --pird ~/src/...\n"
+        msg += "  ../gbs.py --proj1 testGbs --step 2 --samples samples.txt --pird ~/src/...\n"
+        msg += "  ../gbs.py --proj1 testGbs --step 3 --samples samples.txt --pird ~/src/... --adp adapters.txt\n"
+        msg += "  ../gbs.py --proj1 testGbs --proj2 testGbs-Atha --step 4 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2 --dict ~/src/...refgenome_Atha_v2.dict\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 5 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 6 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 7 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 8 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2 --jgid cohort-Atha\n"
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -186,23 +194,23 @@ class TestGbs(object):
         samplesVvinHandle = open(samplesVvinFile, "w")
         
         lane2samples["1"] = {"R1": "init_reads_lane1_R1.fastq.gz",
-                          "R2": "init_reads_lane1_R2.fastq.gz",
-                          "genos": {"geno1": {"refgenomeId":"Atha_v2", "gen":0,
-                                            "lib":"geno1-A", "tag":"AAAA"},
-                                   "geno2": {"refgenomeId":"Atha_v2", "gen":0,
-                                            "lib":"geno2", "tag":"GGGG"},
-                                   "geno3": {"refgenomeId":"Atha_v2", "gen":1,
-                                            "lib":"geno3", "tag":"TTTT"}}}
+                             "R2": "init_reads_lane1_R2.fastq.gz",
+                             "genos": {"geno1": {"refgenomeId":"Atha_v2", "gen":0,
+                                                 "lib":"geno1-A", "tag":"AAAA"},
+                                       "geno2": {"refgenomeId":"Atha_v2", "gen":0,
+                                                 "lib":"geno2", "tag":"GGGG"},
+                                       "geno3": {"refgenomeId":"Atha_v2", "gen":1,
+                                                 "lib":"geno3", "tag":"TTTT"}}}
         lane2samples["2"] = {"R1": "init_reads_lane2_R1.fastq.gz",
-                          "R2": "init_reads_lane2_R2.fastq.gz",
-                          "genos": {"geno1": {"refgenomeId":"Atha_v2", "gen":0,
-                                            "lib":"geno1-B", "tag":"CCCC"},
-                                   "geno2": {"refgenomeId":"Atha_v2", "gen":0,
-                                            "lib":"geno2", "tag":"TTTT"},
-                                   "geno4": {"refgenomeId":"Atha_v2", "gen":1,
-                                            "lib":"geno4", "tag":"AAAA"},
-                                   "geno5": {"refgenomeId":"Vvin_v1", "gen":0,
-                                            "lib":"geno5", "tag":"AATT"}}}
+                             "R2": "init_reads_lane2_R2.fastq.gz",
+                             "genos": {"geno1": {"refgenomeId":"Atha_v2", "gen":0,
+                                                 "lib":"geno1-B", "tag":"CCCC"},
+                                       "geno2": {"refgenomeId":"Atha_v2", "gen":0,
+                                                 "lib":"geno2", "tag":"TTTT"},
+                                       "geno4": {"refgenomeId":"Atha_v2", "gen":1,
+                                                 "lib":"geno4", "tag":"AAAA"},
+                                       "geno5": {"refgenomeId":"Vvin_v1", "gen":0,
+                                                 "lib":"geno5", "tag":"AATTCC"}}}
         
         # header
         txt = "genotype"

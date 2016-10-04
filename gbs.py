@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.7.0" # http://semver.org/
+progVersion = "0.8.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -303,16 +303,22 @@ class GbsSample(object):
         txt += "\t%s" % iSf.getTxtToWrite()
         outHandle.write("%s\n" % txt)
         
-    def localRealign(self, memJvm, pathToPrefixRefGenome, knownIndelsFile,
+    def localRealign(self, jvmXms, jvmXmx, pathToPrefixRefGenome, knownIndelsFile,
                      outDir, iJobGroup):
-        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd = "java"
+        cmd += " -Xms%s" % jvmXms
+        cmd += " -Xmx%s" % jvmXmx
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T RealignerTargetCreator"
         cmd += " -R %s.fa" % pathToPrefixRefGenome
         cmd += " -I %s" % self.initialBamFile
         if knownIndelsFile:
             cmd += " --known %s" % knownIndelsFile
         cmd += " -o %s/%s.intervals" % (outDir, self.id)
-        cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd += "\njava"
+        cmd += " -Xms%s" % jvmXms
+        cmd += " -Xmx%s" % jvmXmx
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T IndelRealigner"
         cmd += " -R %s.fa" % pathToPrefixRefGenome
         cmd += " -I %s" % self.initialBamFile
@@ -326,9 +332,12 @@ class GbsSample(object):
                    bashFile=bashFile, dir=outDir)
         iJobGroup.insert(iJob)
         
-    def baseQualityRecalibrate(self, memJvm, pathToPrefixRefGenome, knownFile,
-                               outDir, iJobGroup):
-        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+    def baseQualityRecalibrate(self, jvmXms, jvmXmx, pathToPrefixRefGenome,
+                               knownFile, outDir, iJobGroup):
+        cmd = "java"
+        cmd += " -Xms%s" % jvmXms
+        cmd += " -Xmx%s" % jvmXmx
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T BaseRecalibrator"
         cmd += " -R %s.fa" % pathToPrefixRefGenome
         cmd += " -I %s/%s_realn.bam" % (outDir, self.id)
@@ -337,7 +346,10 @@ class GbsSample(object):
         else:
             cmd += " --run_without_dbsnp_potentially_ruining_quality"
         cmd += " -o %s/%s_recal.table" % (outDir, self.id)
-        cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd += "\njava"
+        cmd += " -Xms%s" % jvmXms
+        cmd += " -Xmx%s" % jvmXmx
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T PrintReads"
         cmd += " -R %s.fa" % pathToPrefixRefGenome
         cmd += " -I %s/%s_realn.bam" % (outDir, self.id)
@@ -489,7 +501,7 @@ class GbsLane(object):
         for sampleId,iSample in self.dSamples.items():
             iSample.setInitialBamFile(dirName)
             
-    def gather(self, memJvm, outDir, iJobGroup):
+    def gather(self, jvmXms, jvmXmx, outDir, iJobGroup):
         cmd = "echo \"merge and index...\""
         cmd += "\ntime samtools merge -f"
         cmd += " %s/%s.bam" % (outDir, self.id)
@@ -500,7 +512,10 @@ class GbsLane(object):
         cmd += "\nsamtools index"
         cmd += " %s/%s.bam" % (outDir, self.id)
         cmd += "\n\necho \"insert sizes...\""
-        cmd += "\njava -Xmx%ig -jar `which picard.jar`" % memJvm
+        cmd += "\njava"
+        cmd += " -Xms%s" % jvmXms
+        cmd += " -Xmx%s" % jvmXmx
+        cmd += " -jar `which picard.jar`"
         cmd += " CollectInsertSizeMetrics"
         cmd += " HISTOGRAM_FILE=%s/hist_insert-sizes_picard_%s.pdf" \
                % (outDir, self.id)
@@ -522,7 +537,7 @@ class GbsLane(object):
             iSample = self.dSamples[sampleId]
             iSample.saveSamtoolsFlagstat(outHandle)
             
-    def localRealignSamples(self, memJvm, pathToPrefixRefGenome,
+    def localRealignSamples(self, jvmXms, jvmXmx, pathToPrefixRefGenome,
                             knownIndelsFile, outDirName,
                             iJobGroup):
         for sampleId,iSample in self.dSamples.items():
@@ -530,14 +545,15 @@ class GbsLane(object):
             if os.path.isdir(outDir):
                 shutil.rmtree(outDir)
             os.mkdir(outDir)
-            iSample.localRealign(memJvm, pathToPrefixRefGenome,
+            iSample.localRealign(jvmXms, jvmXmx, pathToPrefixRefGenome,
                                  knownIndelsFile, outDir, iJobGroup)
             
-    def baseQualityRecalibrate(self, memJvm, pathToPrefixRefGenome, knownFile,
-                               outDir, iJobGroup):
+    def baseQualityRecalibrate(self, jvmXms, jvmXmx, pathToPrefixRefGenome,
+                               knownFile, outDir, iJobGroup):
         for sampleId,iSample in self.dSamples.items():
-            iSample.baseQualityRecalibrate(memJvm, pathToPrefixRefGenome,
-                                           knownFile, outDir, iJobGroup)
+            iSample.baseQualityRecalibrate(jvmXms, jvmXmx,
+                                           pathToPrefixRefGenome, knownFile,
+                                           outDir, iJobGroup)
             
             
 class GbsGeno(object):
@@ -565,8 +581,8 @@ class GbsGeno(object):
                                                     stepDir,
                                                     iSample.id))
             
-    def localRealign(self, memJvm, pathToPrefixRefGenome, knownIndelsFile,
-                     outDir, iJobGroup):
+    def localRealign(self, jvmXms, jvmXmx, pathToPrefixRefGenome,
+                     knownIndelsFile, outDir, iJobGroup):
         cmd = ""
         if len(self.lRealignedSampleBamFiles) == 1:
             pathWoExt = os.path.splitext(self.lRealignedSampleBamFiles[0])[0]
@@ -575,7 +591,10 @@ class GbsGeno(object):
             cmd += "\nln -s %s.bai" % pathWoExt
             cmd += " %s/%s_realn.bai" % (outDir, self.id)
         else:
-            cmd += "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+            cmd += "java"
+            cmd += " -Xms%s" % jvmXms
+            cmd += " -Xmx%s" % jvmXmx
+            cmd += " -jar `which GenomeAnalysisTK.jar`"
             cmd += " -T RealignerTargetCreator"
             cmd += " -R %s.fa" % pathToPrefixRefGenome
             for i in range(len(self.lRealignedSampleBamFiles)):
@@ -583,7 +602,10 @@ class GbsGeno(object):
             if knownIndelsFile:
                 cmd += " --known %s" % knownIndelsFile
             cmd += " -o %s/%s.intervals" % (outDir, self.id)
-            cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+            cmd += "\njava"
+            cmd += " -Xms%s" % jvmXms
+            cmd += " -Xmx%s" % jvmXmx
+            cmd += " -jar `which GenomeAnalysisTK.jar`"
             cmd += " -T IndelRealigner"
             cmd += " -R %s.fa" % pathToPrefixRefGenome
             for i in range(len(self.lRealignedSampleBamFiles)):
@@ -601,14 +623,19 @@ class GbsGeno(object):
     def setRealignedGenotypeBamFile(self, pathToDir):
         self.realignedGenoBamFile = "%s/%s_realn.bam" % (pathToDir, self.id)
         
-    def variantCalling(self, memJvm, pathToPrefixRefGenome, knownFile, outDir,
-                       iJobGroup, saveActiveRegions=False,
+    def variantCalling(self, jvmXms, jvmXmx, tmpDir, pathToPrefixRefGenome,
+                       knownFile, outDir, iJobGroup, saveActiveRegions=False,
                        saveActivityProfiles=False):
         """
         https://www.broadinstitute.org/gatk/guide/tooldocs/org_broadinstitute_gatk_tools_walkers_haplotypecaller_HaplotypeCaller.php
         http://gatkforums.broadinstitute.org/discussion/comment/14337/#Comment_14337
         """
-        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % memJvm
+        cmd = "java"
+        cmd += " -Xms%s" % jvmXms
+        cmd += " -Xmx%s" % jvmXmx
+        if tmpDir:
+            cmd += " -Djava.io.tmpdir=%s" % tmpDir
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T HaplotypeCaller"
         cmd += " -R %s.fa" % pathToPrefixRefGenome
         cmd += " -I %s" % self.realignedGenoBamFile
@@ -694,7 +721,8 @@ class Gbs(object):
         self.dictFile = None
         self.jointGenoId = None
         self.tmpDir = "."
-        self.memJvm = 4 # in Gb
+        self.jvmXms = "512m"
+        self.jvmXmx = "4g"
         self.knownIndelsFile = None
         self.knownFile = None
         
@@ -794,7 +822,13 @@ class Gbs(object):
         msg += "\t\tuseful to launch several, different cohorts in parallel\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
-        msg += "      --jvm\tmemory given to the Java Virtual Machine (default=4, in Gb)\n"
+        msg += "\t\tused in step 4 for 'samtools sort'\n"
+        msg += "\t\tused in step 7 for 'GATK HaplotypeCaller'\n"
+        msg += "      --jvmXms\tinitial memory allocated to the Java Virtual Machine\n"
+        msg += "\t\tdefault=512m (can also be specified as 1024k, 1g, etc)\n"
+        msg += "\t\tused in steps 4, 5, 6, 7 and 8 for Picard and GATK\n"
+        msg += "      --jvmXmx\tmaximum memory allocated to the Java Virtual Machine\n"
+        msg += "\t\tdefault=4g\n"
         msg += "\t\tused in steps 4, 5, 6, 7 and 8 for Picard and GATK\n"
         msg += "      --knowni\tpath to a VCF file with known indels (for local realignment)\n"
         msg += "      --known\tpath to a VCF file with known sites (e.g. from dbSNP)\n"
@@ -817,6 +851,9 @@ class Gbs(object):
         msg += "record type of the SAM format (see http://www.htslib.org/). However,\n"
         msg += "internal to this program, the term 'sample' corresponds to the unique\n"
         msg += "triplet (genotype,flowcell,lane).\n"
+        msg += "Jobs are executed in parallel (--schdlr). Their return status is\n"
+        msg += "recorded in a SQLite database which is removed at the end. If a job\n"
+        msg += "fails, the whole script stops with an error.\n"
         msg += "\n"
         msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
         print(msg); sys.stdout.flush()
@@ -860,7 +897,8 @@ class Gbs(object):
                                         "ref=",
                                         "jgid=",
                                         "tmpd=",
-                                        "jvm=",
+                                        "jvmXms=",
+                                        "jvmXmx=",
                                         "knowni=",
                                         "known=",
                                         "force",
@@ -913,8 +951,10 @@ class Gbs(object):
                  self.jointGenoId = a
             elif o == "--tmpd":
                 self.tmpDir = a
-            elif o == "--jvm":
-                self.memJvm = int(a)
+            elif o == "--jvmXms":
+                self.jvmXms = a
+            elif o == "--jvmXmx":
+                self.jvmXmx = a
             elif o == "--knowni":
                 self.knownIndelsFile = a
             elif o == "--known":
@@ -1053,10 +1093,12 @@ class Gbs(object):
                 self.help()
                 sys.exit(1)
             obsMajVer, obsMinVer = ProgVersion.getVersionGatk()
-            if not (obsMajVer == 3 and obsMinVer >= 5):
+            expMajVer = 3
+            expMinVer = 5
+            if not (obsMajVer == expMajVer and obsMinVer >= expMinVer):
                 msg = "ERROR: 'GATK' is in version %s.%s" % \
                       (obsMajVer, obsMinVer)
-                msg += " instead of >= 3.5"
+                msg += " instead of >= %i.%i" % (expMajVer, expMinVer)
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -1565,7 +1607,7 @@ class Gbs(object):
         for laneId,iLane in self.dLanes.items():
             iLane.setInitialBamFiles(self.lDirSteps[3])
             outDir = "%s/%s" % (self.allSamplesDir, iLane.id)
-            iLane.gather(self.memJvm, outDir, iJobGroup)
+            iLane.gather(self.jvmXms, self.jvmXmx, outDir, iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
         self.jobManager.wait(iJobGroup.id, self.verbose)
@@ -1652,7 +1694,8 @@ class Gbs(object):
         
         for laneId,iLane in self.dLanes.items():
             iLane.setInitialBamFiles(self.lDirSteps[3]) # from previous step
-            iLane.localRealignSamples(self.memJvm, self.pathToPrefixRefGenome,
+            iLane.localRealignSamples(self.jvmXms, self.jvmXmx,
+                                      self.pathToPrefixRefGenome,
                                       self.knownIndelsFile, self.lDirSteps[4],
                                       iJobGroup)
             
@@ -1688,7 +1731,7 @@ class Gbs(object):
             stepDir = "%s/%s" % (iGeno.dir, self.lDirSteps[5])
             self.makeDir(stepDir)
             iGeno.setRealignedSampleBamFiles(self.lDirSteps[4])
-            iGeno.localRealign(self.memJvm,
+            iGeno.localRealign(self.jvmXms, self.jvmXmx,
                                self.pathToPrefixRefGenome,
                                self.knownIndelsFile, stepDir,
                                iJobGroup)
@@ -1726,8 +1769,9 @@ class Gbs(object):
             self.makeDir(stepDir)
             iGeno.setRealignedGenotypeBamFile("%s/%s" % (iGeno.dir,
                                                          self.lDirSteps[5]))
-            iGeno.variantCalling(self.memJvm, self.pathToPrefixRefGenome,
-                                 self.knownFile, stepDir, iJobGroup)
+            iGeno.variantCalling(self.jvmXms, self.jvmXmx, self.tmpDir,
+                                 self.pathToPrefixRefGenome, self.knownFile,
+                                 stepDir, iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
         self.jobManager.wait(iJobGroup.id, self.verbose)
@@ -1763,7 +1807,12 @@ class Gbs(object):
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
+        cmd = "java"
+        cmd += " -Xms%s" % self.jvmXms
+        cmd += " -Xmx%s" % self.jvmXmx
+        # if self.tmpDir:
+        #     cmd += " -Djava.io.tmpdir=%s" % self.tmpDir
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T GenotypeGVCFs"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
         lGenoIds = self.dGenos.keys()
@@ -1810,7 +1859,10 @@ class Gbs(object):
         
         stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
         self.makeDir(stepDir)
-        cmd = "java -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
+        cmd = "java"
+        cmd += " -Xms%s" % self.jvmXms
+        cmd += " -Xmx%s" % self.jvmXmx
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T VariantRecalibrator"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
         prevStepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
@@ -1823,7 +1875,10 @@ class Gbs(object):
         cmd += " -rscriptFile %s/plots_%s.R" % (stepDir, self.project2Id)
         if self.verbose > 1:
             print(cmd1)
-        cmd += "\njava -Xmx%ig -jar `which GenomeAnalysisTK.jar`" % self.memJvm
+        cmd += "\njava"
+        cmd += " -Xms%s" % self.jvmXms
+        cmd += " -Xmx%s" % self.jvmXmx
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T ApplyRecalibration"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
         cmd += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
@@ -1872,7 +1927,8 @@ class Gbs(object):
         
         for laneId,iLane in self.dLanes.items():
             outDir = "%s/%s" % (self.lDirSteps[4], laneId)
-            iLane.baseQualityRecalibrate(self.memJvm, self.pathToPrefixRefGenome,
+            iLane.baseQualityRecalibrate(self.jvmXms, self.jvmXmx,
+                                         self.pathToPrefixRefGenome,
                                          self.knownFile, outDir, iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
