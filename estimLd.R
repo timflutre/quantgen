@@ -8,7 +8,7 @@
 
 rm(list=ls())
 prog.name <- "estimLd.R"
-prog.version <- "1.1.0" # http://semver.org/
+prog.version <- "1.1.1" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -178,17 +178,18 @@ checkParams <- function(params){
     quit("no", status=1)
   }
 
-  suppressPackageStartupMessages(library(LDcorSV))
   suppressPackageStartupMessages(library(rutilstimflutre))
+  if(any(params$correct.kinship, params$correct.structure))
+    suppressPackageStartupMessages(library(LDcorSV))
 }
 
 run <- function(params){
   if(params$verbose > 0)
-    write(paste0("load real genotypes (and discard if MAF < ", params$min.maf,
+    write(paste0("load SNP genotypes (and discard if MAF < ", params$min.maf,
                  ") ..."), stdout())
   X <- as.matrix(read.table(file=params$file.genos, sep="\t"))
   print(dim(X))
-  mafs <- estimMaf(X=X)
+  mafs <- estimSnpMaf(X=X)
   if(any(mafs < params$min.maf)){
     X <- X[, - which(mafs < params$min.maf)]
     stopifnot(ncol(X) > 0)
@@ -226,6 +227,8 @@ run <- function(params){
 
   ld <- estimLd(X=X, K=A, pops=pops, snp.coords=snp.coords,
                 only.chr=params$only.chr, only.pop=params$only.pop,
+                use.ldcorsv=ifelse(any(! is.null(A), ! is.null(pops)),
+                                   TRUE, FALSE),
                 verbose=params$verbose)
 
   write.table(x=ld, file=gzfile(params$file.out), quote=FALSE, row.names=FALSE,
