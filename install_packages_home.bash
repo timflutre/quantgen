@@ -9,7 +9,7 @@
 set -e
 
 # list of programs in alphabetical order
-declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bmagwa" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastphase" "fastqc" "fcgene" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "inphap" "insilicut" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
+declare -a progs=("art" "artfastqgen" "autoconf" "automake" "bedtools" "biobambam" "blup_gen_snp" "bmagwa" "bsfg" "bwa" "carthagene" "cutadapt" "deindexer" "dmu" "dnemulator" "dwgsim" "eagle" "ea-utils" "eigensoft" "emacs" "epcr" "eqtlbma" "ess" "fastphase" "fastqc" "fcgene" "forqs" "gbs-barcode-splitter" "gemma" "gs3" "gsl" "htslib" "help2man" "igv" "inphap" "insilicut" "keepassx" "latex2html" "ldso" "libtool" "lsof" "mapmaker" "ms" "mstrat" "openbugs" "patman" "platypus" "primer3" "polymode" "R" "rar" "repet" "rpy2" "quantinemo" "samtools" "scilab" "sickle" "smart" "southgreen_utils" "stacks" "tabula" "tar" "tedna" "texinfo" "texlive" "tm" "tmap" "trim-galore" "trimmomatic" "ubd" "wgsim" "xclip" "zlib")
 
 if [ "$#" -ne 1 ]; then
     echo "ERROR: need to provide a program name as parameter"
@@ -421,6 +421,19 @@ if [ "$1" == "insilicut" ]; then
     make
     # make check
     make install
+fi
+
+if [ "$1" == "keepassx" ]; then
+    mkdir -p $1
+    cd $1
+    wget https://www.keepassx.org/releases/2.0.2/keepassx-2.0.2.tar.gz
+    tar -xzvf keepassx-2.0.2.tar.gz
+    cd keepassx-2.0.2/
+    mkdir build
+    cd build
+    cmake ..
+    make
+    sudo make install
 fi
 
 if [ "$1" == "latex2html" ]; then
