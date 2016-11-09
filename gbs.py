@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.8.0" # http://semver.org/
+progVersion = "0.9.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -687,7 +687,7 @@ class Gbs(object):
         self.enzyme = "ApeKI"
         self.nbSubstsAllowedDemult = 2
         self.enforceSubst = "lenient"
-        self.jobManager = None # instantiated in checkAttributes()
+        self.jobManager = None # instantiated in run()
         self.samplesCol2idx = {"genotype": None,
                                "flowcell": None,
                                "lane": None,
@@ -760,9 +760,7 @@ class Gbs(object):
         msg += "\t\t6: local realignment per genotype (with GATK v >= 3.5)\n"
         msg += "\t\t7: variant and genotype calling per genotype (with GATK HaplotypeCaller v >= 3.5)\n"
         msg += "\t\t8: variant and genotype calling jointly across genotypes (with GATK GenotypeGVCFs v >= 3.5)\n"
-        # msg += "\t\t9: variant recalibration (with GATK v >= 3.5)\n"
-        # msg += "\t\t10: genotype refinement (with GATK v >= 3.5)\n"
-        # msg += "\t\t11: base quality scores recalibration (with GATK v >= 3.5)\n"
+        msg += "\t\t9: variant filtering (with GATK v >= 3.5)"
         msg += "      --samples\tpath to the 'samples' file\n"
         msg += "\t\tcompulsory for all steps, but can differ between steps\n"
         msg += "\t\t e.g. if samples come from different species or are aligned\n"
@@ -1107,7 +1105,8 @@ class Gbs(object):
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-        if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps:
+        if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps or \
+           "9" in self.lSteps:
             if not Utils.isProgramInPath("GenomeAnalysisTK.jar"):
                 msg = "ERROR: can't find 'GenomeAnalysisTK.jar' in PATH"
                 sys.stderr.write("%s\n\n" % msg)
@@ -1141,7 +1140,7 @@ class Gbs(object):
             if os.path.dirname(self.pathToPrefixRefGenome) == "":
                 self.pathToPrefixRefGenome = "%s/%s" % (os.getcwd(),
                                                         self.pathToPrefixRefGenome)
-        if "8" in self.lSteps:
+        if "8" in self.lSteps or "9" in self.lSteps:
             if not self.jointGenoId:
                 msg = "ERROR: missing compulsory option --jgid"
                 sys.stderr.write("%s\n\n" % msg)
@@ -1842,14 +1841,15 @@ class Gbs(object):
         self.endStep(8, cwd, startTime)
         
         
-    def variantRecalibration(self):
+    def variantFiltering(self):
         if self.verbose > 0:
-            msg = "recalibrate variant calls across genotypes..."
+            msg = "filter variant calls across genotypes..."
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
-        groupJobId = self.makeGroupJobId("%s_gbs-step9-recalibcall" \
-                                         % self.project2Id)
+        groupJobId = self.makeGroupJobId("%s_%s_gbs-step9-filter" \
+                                         % (self.project2Id,
+                                            self.jointGenoId))
         if self.verbose > 0:
             msg = "groupJobId=%s" % groupJobId
             sys.stdout.write("%s\n" % msg)
@@ -1857,39 +1857,78 @@ class Gbs(object):
         iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
         self.jobManager.insert(iJobGroup)
         
-        stepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
-        self.makeDir(stepDir)
+        stepDir = "%s/%s_%s" % (self.allGenosDir, self.lDirSteps[7],
+                                self.jointGenoId)
+        if not os.path.exists(stepDir):
+            msg = "dir %s doesn't exist\n" % stepDir
+            msg += "\nlaunch step 8 first"
+            raise OSError(msg)
+        if self.verbose > 0:
+            msg = "results will be in '%s'" % stepDir
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
         cmd = "java"
         cmd += " -Xms%s" % self.jvmXms
         cmd += " -Xmx%s" % self.jvmXmx
+        # if self.tmpDir:
+        #     cmd += " -Djava.io.tmpdir=%s" % self.tmpDir
         cmd += " -jar `which GenomeAnalysisTK.jar`"
-        cmd += " -T VariantRecalibrator"
+        cmd += " -T SelectVariants"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
-        prevStepDir = "%s/%s" % (self.allGenosDir, self.lDirSteps[8])
-        cmd += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
-        # cmd1 += " -resource:%s" % TODO
-        cmd += " -an QD -an MQ -an MQRankSum -an ReadPosRankSum -an FS -an SOR -an InbreedingCoeff"
-        cmd += " -mode BOTH"
-        cmd += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
-        cmd += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
-        cmd += " -rscriptFile %s/plots_%s.R" % (stepDir, self.project2Id)
-        if self.verbose > 1:
-            print(cmd1)
-        cmd += "\njava"
+        cmd += " -V %s/%s_%s_raw.vcf.gz" % (stepDir, self.project2Id,
+                                            self.jointGenoId)
+        cmd += " -selectType SNP"
+        cmd += " -o %s/%s_%s_raw-snps.vcf.gz" % (stepDir, self.project2Id,
+                                                 self.jointGenoId)
+        cmd += "\n"
+        cmd += "java"
         cmd += " -Xms%s" % self.jvmXms
         cmd += " -Xmx%s" % self.jvmXmx
+        # if self.tmpDir:
+        #     cmd += " -Djava.io.tmpdir=%s" % self.tmpDir
         cmd += " -jar `which GenomeAnalysisTK.jar`"
-        cmd += " -T ApplyRecalibration"
+        cmd += " -T VariantFiltration"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
-        cmd += " -input %s/%s_raw.vcf.gz" % (prevStepDir, self.project2Id)
-        cmd += " -tranchesFile %s/%s.tranches" % (stepDir, self.project2Id)
-        cmd += " -recalFile %s/%s.recal" % (stepDir, self.project2Id)
-        cmd += " -mode BOTH"
-        cmd += " -o %s/%s.vcf.gz" % (stepDir, self.project2Id)
+        cmd += " -V %s/%s_%s_raw-snps.vcf.gz" % (stepDir, self.project2Id,
+                                                 self.jointGenoId)
+        cmd += " --clusterSize 3"
+        cmd += " --clusterWindowSize 0"
+        cmd += " --filterExpression \"DP > 100000\" --filterName \"high_DP\""
+        cmd += " --filterExpression \"QD < 2.0\" --filterName \"low_QD\""
+        cmd += " --filterExpression \"FS > 60.0\" --filterName \"high_FS\""
+        cmd += " --filterExpression \"MQ < 40.0\" --filterName \"low_MQ\""
+        cmd += " --filterExpression \"MQRankSum < -12.5\" --filterName \"low_MQRankSum\""
+        cmd += " --filterExpression \"ReadPosRankSum < -8.0\" --filterName \"low_RPRS\""
+        cmd += " --filterExpression \"HaplotypeScore > 13.0\" --filterName \"high_HS\""
+        cmd += " --filterExpression \"SOR > 4.0\" --filterName \"high_SOR\""
+        cmd += " -o %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
+                                                     self.jointGenoId)
+        cmd += "\n"
+        cmd += "java"
+        cmd += " -Xms%s" % self.jvmXms
+        cmd += " -Xmx%s" % self.jvmXmx
+        # if self.tmpDir:
+        #     cmd += " -Djava.io.tmpdir=%s" % self.tmpDir
+        cmd += " -jar `which GenomeAnalysisTK.jar`"
+        cmd += " -T SelectVariants"
+        cmd += " -R %s.fa" % self.pathToPrefixRefGenome
+        cmd += " -V %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
+                                                     self.jointGenoId)
+        cmd += " --restrictAllelesTo BIALLELIC"
+        cmd += " --excludeFiltered"
+        cmd += " -mv -mvq 50 -invMv"
+        cmd += " -o %s/%s_%s_raw-snps_gatk-filter.vcf.gz" % (stepDir,
+                                                             self.project2Id,
+                                                             self.jointGenoId)
+        cmd += "\n"
+        cmd += "rm %s/%s_%s_raw-snps_tmp.vcf.gz*" % (stepDir, self.project2Id,
+                                                     self.jointGenoId)
         if self.verbose > 1:
-            print(cmd2)
+            print(cmd)
         jobName = "stdout_%s" % (iJobGroup.id)
-        bashFile = "%s/job_%s_%s.bash" % (stepDir, iJobGroup.id, "varrecalib")
+        bashFile = "%s/job_%s_%s.bash" % (stepDir, iJobGroup.id,
+                                          "select-filter-snps")
         iJob = Job(groupId=iJobGroup.id, name=jobName, cmd=cmd,
                    bashFile=bashFile, dir=stepDir)
         iJobGroup.insert(iJob)
@@ -1900,7 +1939,7 @@ class Gbs(object):
         
     def step9(self):
         cwd, startTime = self.beginStep(9)
-        self.variantRecalibration()
+        self.variantFiltering()
         self.endStep(9, cwd, startTime)
         
         
@@ -1950,14 +1989,15 @@ class Gbs(object):
             self.setupLaneDirectories()
         if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps:
             self.setupSampleDirectories()
-        if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps:
+        if "6" in self.lSteps or "7" in self.lSteps or "8" in self.lSteps or \
+           "9" in self.lSteps:
             self.setupGenotypeDirectories()
             
         # set up job manager
         if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps:
             self.jobManager = JobManager(self.scheduler, self.project1Id)
         if "4" in self.lSteps or "5" in self.lSteps or "6" in self.lSteps \
-           or "7" in self.lSteps or "8" in self.lSteps:
+           or "7" in self.lSteps or "8" in self.lSteps or "9" in self.lSteps:
             self.jobManager = JobManager(self.scheduler, self.project2Id)
             
         # execute the step(s)
@@ -1985,11 +2025,8 @@ class Gbs(object):
         if "8" in self.lSteps: # var and geno call jointly
             self.step8()
             
-        if "9" in self.lSteps: # var recalibr
+        if "9" in self.lSteps: # var filter
             self.step9()
-            
-        if "10" in self.lSteps: # refine geno
-            self.step10()
             
         self.jobManager.close()
         
