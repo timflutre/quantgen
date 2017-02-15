@@ -4,19 +4,34 @@
 ## Copyright 2016-2017 INRA, Montpellier SupAgro
 ## License: AGPL-3+
 
+## TO BE CHANGED FOR EACH BREEDER
+breeder <- "test"
+fin <- "data_todo.txt"
+year <- 2015 # TO BE CHANGED ALONG THE GAME
+
+args <- commandArgs(trailingOnly=TRUE)
+if(length(args) != 3){
+  print(args)
+  stop("usage: Rscript game-master_cross.R <breeder> <file_name> <year>")
+} else{
+  breeder <- args[1]
+  fin <- args[2]
+  year <- as.numeric(args[3])
+}
+
 library(RSQLite)
+library(MASS)
 library(rutilstimflutre)
 
 root.dir <- "~/work2/atelier-prog-selection-2017"
 setup <- getBreedingGameSetup(root.dir)
-
-year <- 2018 # TO BE CHANGED ALONG THE GAME
-
-## TO BE CHANGED FOR EACH BREEDER
-breeder <- "test"
-fin <- paste0(setup$breeder.dirs[[breeder]], "/data_todo.txt")
+fin <- paste0(setup$breeder.dirs[[breeder]], "/", fin)
+print(breeder)
+print(fin)
+print(year)
 stopifnot(breeder %in% setup$breeders)
 stopifnot(file.exists(fin))
+pre.fin <- strsplit(basename(fin), "\\.")[[1]][1]
 
 ## 0. load required data
 f <- paste0(setup$truth.dir, "/p0.RData")
@@ -30,7 +45,7 @@ subset.snps[["ld"]] <- rownames(read.table(f))
 ## 1. read the input file from the students
 inds.todo <- readCheckBreedDataFile(fin, max.nb.plots=p0$K,
                                     subset.snps=subset.snps)
-(types <- countRequestedBreedTypes(inds.todo))
+(data.types <- countRequestedBreedTypes(inds.todo))
 
 ## 2. check that the requested individuals already exist
 db <- dbConnect(SQLite(), dbname=setup$dbname)
@@ -53,7 +68,8 @@ for(i in 1:nrow(inds.todo)){
     stop(paste0(f, " doesn't exist"))
   load(f)
 
-  ind$genos <- segSites2allDoses(ind$haplos, ind.id)
+  ind$genos <- segSites2allDoses(seg.sites=ind$haplos, ind.ids=ind.id,
+                                 rnd.choice.ref.all=FALSE)
 
   if(is.null(X)){
     X <- ind$genos
@@ -61,7 +77,6 @@ for(i in 1:nrow(inds.todo)){
     X <- rbind(X, ind$genos)
 }
 dim(X)
-afs <- estimSnpAf(X)
 
 ## 4. handle the "pheno" tasks for the requested individuals
 idx <- which(inds.todo$task == "pheno")
@@ -90,15 +105,17 @@ if(length(idx) > 0){
   phenos$Z.J <- matrix(1, nrow=phenos$N)
   phenos$Z.K <- model.matrix(~ phenos.df$plot - 1)
 
-  phenos$alpha <- rnorm(n=phenos$J, mean=0, sd=sqrt(p0$sigma.alpha2))
-  phenos$gamma <- p0$gamma[levels(phenos.df$plot)]
+  phenos$alpha <- setNames(rnorm(n=phenos$J, mean=0, sd=sqrt(p0$sigma.alpha2)),
+                           levels(phenos.df$year))
+  phenos$gamma <- setNames(rnorm(n=phenos$K, mean=0, sd=sqrt(p0$sigma.gamma2)),
+                           levels(phenos.df$plot))
 
   ## as in simulTraits12Rnd()
-  X.tmp <- X[inds.todo$ind[idx], , drop=FALSE] - 1
-  G.A <- X.tmp %*% cbind(p0$trait1$beta[colnames(X.tmp)],
-                         p0$trait2$beta[colnames(X.tmp)])
+  X.tmp <- X[inds.todo$ind[idx], , drop=FALSE]
+  G.A <- (X.tmp - 1) %*% cbind(p0$trait1$beta[colnames(X.tmp)],
+                               p0$trait2$beta[colnames(X.tmp)])
   Sigma <- matrix(c(p0$trait1$sigma2, 0, 0, p0$trait2$sigma2), nrow=2, ncol=2)
-  Epsilon <- mvrnorm(n=nrow(X.tmp), mean=c(0,0), Sigma=Sigma)
+  Epsilon <- mvrnorm(n=nrow(X.tmp), mu=c(0,0), Sigma=Sigma)
   Y <- G.A + Epsilon
   for(t in 1:2){
     trait <- paste0("trait", t)
@@ -106,23 +123,24 @@ if(length(idx) > 0){
       phenos$Z.K %*% phenos$gamma + phenos$Z.I %*% Y[,t]
   }
 
-  phenos$trait3 <- list(y=matrix(rbinom(n=phenos$N, size=1,
-                                        prob=p0$trait3$h2 *
-                                          (phenos$Z.I %*%
-                                           (phenos$X0 %*%
-                                            p0$trait3$beta == -1)))))
+  phenos$trait3 <- list(y=rep(0, phenos$N)) # "0" means "no symptoms"
+  phenos$trait3$y[phenos.df$pathogen] <- 1
+  idx <- which(phenos.df$pathogen & (X.tmp[, p0$trait3$qtn.id] %in%
+                                     p0$trait3$resist.genos))
+  if(length(idx) > 0)
+    phenos$trait3$y[idx] <- 1 - rbinom(n=length(idx), size=1,
+                                       prob=p0$trait3$h2)
+
   phenos.df$trait1.raw <- phenos$trait1$y[,1]
   phenos.df$trait2 <- phenos$trait2$y[,1]
-  if(all(phenos.df$pathogen))
-    phenos.df$trait3 <- phenos$trait3$y[,1]
+  phenos.df$trait3 <- phenos$trait3$y
   phenos.df$trait1 <- phenos.df$trait1.raw
   tmp <- (phenos.df$pathogen & as.logical(phenos.df$trait3))
   if(any(tmp))
     phenos.df$trait1[tmp] <- (1 - p0$prop.yield.loss) * phenos.df$trait1[tmp]
 
   ## write the phenotypes (all inds into the same file)
-  fout <- paste0(setup$breeder.dirs[[breeder]], "/", strsplit(basename(fin),
-                                                              "\\.")[[1]][1],
+  fout <- paste0(setup$breeder.dirs[[breeder]], "/", pre.fin,
                  "_phenos-", year, ".txt.gz")
   if(file.exists(fout))
     stop(paste0(fout, " already exists"))
@@ -135,11 +153,11 @@ if(length(idx) > 0){
 for(dty in c("ld", "hd")){
   idx <- which(inds.todo$task == "geno" & inds.todo$details == dty &
                inds.todo$ind %in% rownames(X))
+  message(paste0(dty, ": ", length(idx)))
   if(length(idx) > 0){
 
     ## write the genotypes (all inds into the same file)
-    fout <- paste0(setup$breeder.dirs[[breeder]], "/", strsplit(basename(fin),
-                                                                "\\.")[[1]][1],
+    fout <- paste0(setup$breeder.dirs[[breeder]], "/", pre.fin,
                    "_genos-", dty, ".txt.gz")
     if(file.exists(fout))
       stop(paste0(fout, " already exists"))
@@ -165,8 +183,7 @@ if(length(idx) > 0){
   }
 
   ## write the genotypes (all inds into the same file)
-  fout <- paste0(setup$breeder.dirs[[breeder]], "/", strsplit(basename(fin),
-                                                              "\\.")[[1]][1],
+  fout <- paste0(setup$breeder.dirs[[breeder]], "/", pre.fin,
                  "-single-snps", ".txt.gz")
   if(file.exists(fout))
     stop(paste0(fout, " already exists"))
@@ -176,11 +193,11 @@ if(length(idx) > 0){
 }
 
 ## 7. log
-for(type in types){
-  if(types[type] > 0){
+for(type in names(data.types)){
+  if(data.types[type] > 0){
     query <- paste0("INSERT INTO log(breeder,task,quantity)",
                     " VALUES ('", breeder, "', '", type, "', '",
-                    types[type], "')")
+                    data.types[type], "')")
     res <- dbGetQuery(db, query)
   }
 }

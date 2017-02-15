@@ -118,8 +118,8 @@ table(phenos$trait3[phenos$pathogen])
 
 Plot the raw phenotypic data with no subsetting:
 ```{r}
-hist(phenos$trait1, breaks="FD", main="trait 1", freq=FALSE)
-hist(phenos$trait2, breaks="FD", main="trait 2", freq=FALSE)
+hist(phenos$trait1, breaks="FD", main="trait 1", las=1)
+hist(phenos$trait2, breaks="FD", main="trait 2", las=1)
 ```
 
 Plot the raw phenotypic data by subsetting per year:
@@ -240,6 +240,21 @@ if(FALSE){
 
 # Analysis of traits 1 and 2
 
+## Truth
+
+Look at the true genotypic values:
+```{r}
+u <- cbind(p0$trait1$u, p0$trait2$u)
+mean(u[,1])
+mean(u[,2])
+var(u[,1])
+var(u[,2])
+cor(u[,1], u[,2])
+regplot(u[,1], u[,2], main="True values ('biological', not 'statistical')",
+        xlab="Genotypic values of trait1", ylab="Genotypic values of trait2")
+```
+
+
 ## Separately
 
 Note that the information in the `pathogen` column (in the `phenos` data.frame) is partially redundant with the `year` column, in interaction wih the `ind` column.
@@ -316,8 +331,8 @@ fit1.r <- lm(trait1 ~ 1 + resistant, data=phenos)
 phenos$res1 <- residuals(fit1.r)
 ```
 
-Remove known confounders for both traits simultaneously:
-```{r}
+Remove known confounders for both traits simultaneously (a bit slow):
+```{r, eval=FALSE}
 system.time(
     fit12 <- mmer(Y=phenos[, c("res1", "trait2")],
                   X=model.matrix(~ 1 + year, phenos),
@@ -325,6 +340,10 @@ system.time(
                                   K=diag(nlevels(phenos$ind)))),
                   method="NR", REML=TRUE, MVM=TRUE))
 summary(fit12)
+mean(fit12$u.hat$ind[,1])
+mean(fit12$u.hat$ind[,2])
+var(fit12$u.hat$ind[,1])
+var(fit12$u.hat$ind[,2])
 cor(fit12$u.hat$ind[,1], fit12$u.hat$ind[,2])
 regplot(fit12$u.hat$ind[,1], fit12$u.hat$ind[,2], main="Multivariate LMM",
         xlab="BLUPs of trait1", ylab="BLUPs of trait2")

@@ -4,15 +4,27 @@
 ## Copyright 2016-2017 INRA, Montpellier SupAgro
 ## License: AGPL-3+
 
+## TO BE CHANGED FOR EACH BREEDER
+breeder <- "test"
+fin <- "todo.txt"
+
+args <- commandArgs(trailingOnly=TRUE)
+if(length(args) != 2){
+  print(args)
+  stop("usage: Rscript game-master_cross.R <breeder> <file_name>")
+} else{
+  breeder <- args[1]
+  fin <- args[2]
+}
+
 library(RSQLite)
 library(rutilstimflutre)
 
 root.dir <- "~/work2/atelier-prog-selection-2017"
 setup <- getBreedingGameSetup(root.dir)
-
-## TO BE CHANGED FOR EACH BREEDER
-breeder <- "test"
-fin <- paste0(setup$breeder.dirs[[breeder]], "/todo.txt")
+fin <- paste0(setup$breeder.dirs[[breeder]], "/", fin)
+print(breeder)
+print(fin)
 stopifnot(breeder %in% setup$breeders)
 stopifnot(file.exists(fin))
 
@@ -20,15 +32,17 @@ stopifnot(file.exists(fin))
 crosses.todo <- readCheckBreedPlantFile(fin)
 (cross.types <- countRequestedBreedTypes(crosses.todo))
 
-## 2. check the presence of the parents in the set of existing individuals
+## 2. check the presence of new individuals in the set of existing individuals
 parent.ids <- unique(c(crosses.todo$parent1, crosses.todo$parent2))
 parent.ids <- parent.ids[! is.na(parent.ids)]
+child.ids <- crosses.todo$child
 db <- dbConnect(SQLite(), dbname=setup$dbname)
 tbl <- paste0("crosses_", breeder)
 stopifnot(tbl %in% dbListTables(db))
 query <- paste0("SELECT child FROM ", tbl)
 res <- dbGetQuery(conn=db, query)
 stopifnot(all(parent.ids %in% res$child))
+stopifnot(all(! child.ids %in% res$child))
 
 ## 3. load the haplotypes of all parents
 parents <- list(haplos=list())

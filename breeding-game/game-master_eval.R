@@ -8,48 +8,64 @@ library(RSQLite)
 library(rutilstimflutre)
 
 root.dir <- "~/work2/atelier-prog-selection-2017"
-setup <- getBreedingDirs(root.dir)
+setup <- getBreedingGameSetup(root.dir)
 
 ## 1. determine if the candidates are registrable (i.e. better than controls)
 candidates <- list()
-for(breeder in setup$breeders){
+f <- paste0(setup$truth.dir, "/p0.RData")
+load(f)
+for(breeder in c("controls", setup$breeders)){
   message(breeder)
-  candidates[[breeder]] <- data.frame(ind=rep(NA,5),
-                                      trait1=NA,
-                                      trait2=NA,
-                                      trait3=NA,
-                                      stringsAsFactors=FALSE)
-  f <- paste0(setup$breeder.dirs[[breeder]], "/inscription.txt")
+  if(breeder == "controls"){
+    f <- paste0(setup$init.dir, "/temoins.txt")
+  } else
+    f <- paste0(setup$breeder.dirs[[breeder]], "/inscription.txt")
   if(! file.exists(f)){
-    warning(paste0(breeder, " skipped because no 'inscription.txt'"))
+    warning(paste0(breeder, " skipped because input file doesn't exist"))
   } else{
-    ind.ids <- read.table(f, header=TRUE, stringsAsFactors=FALSE)
-    if("ind" %in% colnames(ind.ids) &
-       nrow(ind.ids) == nrow(candidates[[breeder]])){
-      candidates[[breeder]]$ind <- ind.ids
-      for(i in 1:nrow(candidates[[breeder]])){
+    ind.ids <- read.table(f, header=TRUE, stringsAsFactors=FALSE)[,1]
+    candidates[[breeder]] <- data.frame(ind=ind.ids,
+                                        trait1=NA, trait2=NA, trait3=NA,
+                                        stringsAsFactors=FALSE)
+    for(i in 1:nrow(candidates[[breeder]])){
+      if(breeder == "controls"){
+        f <- paste0(setup$truth.dir, "/",
+                    candidates[[breeder]][i,"ind"], "_haplos.RData")
+      } else
         f <- paste0(setup$truth.dir, "/", breeder, "/",
                     candidates[[breeder]][i,"ind"], "_haplos.RData")
-        if(file.exists(f)){
-          load(f)
-          genos <- segSites2allDoses(ind$haplos)
-          for(trait in paste0("trait", 1:2))
-            candidates[[breeder]][i, trait] <- p0[[trait]]$mu +
-              genos %*% p0[[trait]]$beta
-          candidates[[breeder]][i, "trait3"] <-
-            ! (candidates[[breeder]][i, "ind"] %in%
-               names(p0$trait3$inds.resist)[p0$trait3$inds.resist])
+      if(! file.exists(f)){
+        warning(paste0("skip ", ind.ids[i], " as it doesn't exist"))
+      } else{
+        load(f)
+        X <- segSites2allDoses(seg.sites=ind$haplos, rnd.choice.ref.all=FALSE)
+        if(breeder == "controls")
+          print(paste0(candidates[[breeder]][i,"ind"], " ",
+                       X[, p0$trait3$qtn.id]))
+        for(trait in paste0("trait", 1:2)){
+          stopifnot(all(colnames(X) == names(p0[[trait]]$beta)))
+          candidates[[breeder]][i, trait] <- p0[[trait]]$mu +
+            (X - 1) %*% p0[[trait]]$beta
         }
+        candidates[[breeder]][i, "trait3"] <-
+          as.numeric(! X[, p0$trait3$qtn.id] %in% p0$trait3$resist.genos)
+        candidates[[breeder]] <- candidates[[breeder]][
+            order(candidates[[breeder]]$trait1,
+                  candidates[[breeder]]$trait2,
+                  decreasing=TRUE),]
       }
     }
   }
 }
 
-candidates
+lapply(candidates, head)
+lapply(candidates, nrow)
 
+(min.trait1 <- 1.01 * mean(candidates$controls$trait1))
+min.trait2 <- 14
 lapply(candidates, function(x){
-  idx <- which.max(x$trait1[x$trait2 >= 14])
-  c(x$trait1[idx], x$trait2[idx], x$trait3[idx])
+  best.candidates <- x$ind[x$trait1 >= min.trait1 & x$trait2 >= min.trait2]
+  x[x$ind %in% best.candidates,]
 })
 
 ## 2. sum the cost of each breeder
@@ -63,7 +79,7 @@ for(breeder in setup$breeders){
   message(breeder)
   files <- Sys.glob(paths=paste0(setup$breeder.dirs[[breeder]], "/*.txt"))
   if(length(files) > 0){
-    budgets[[breeder]] <- setNames(rep(0, 7), tasks)
+    budgets[[breeder]] <- setNames(rep(0, length(tasks)), tasks)
     for(f in files){
       if(basename(f) == "inscription.txt")
         next
@@ -97,4 +113,4 @@ budgets
 
 total <- sapply(budgets, function(budget){budget[names(costs)] * costs})
 (total <- rbind(total, colSums(total)))
-## breeder1=2323 PE breeder2=1962 PE breeder3=6781
+## breeder1= breeder2= breeder3=
