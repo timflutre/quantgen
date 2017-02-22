@@ -23,7 +23,8 @@ library(RSQLite)
 library(MASS)
 library(rutilstimflutre)
 
-root.dir <- "~/work2/atelier-prog-selection-2017"
+## root.dir <- "~/work2/atelier-prog-selection-2017"
+root.dir <- getwd()
 setup <- getBreedingGameSetup(root.dir)
 fin <- paste0(setup$breeder.dirs[[breeder]], "/", fin)
 print(breeder)
@@ -32,8 +33,10 @@ print(year)
 stopifnot(breeder %in% setup$breeders)
 stopifnot(file.exists(fin))
 pre.fin <- strsplit(basename(fin), "\\.")[[1]][1]
+db <- dbConnect(SQLite(), dbname=setup$dbname)
 
-## 0. load required data
+message("0. load required data")
+flush.console()
 f <- paste0(setup$truth.dir, "/p0.RData")
 load(f)
 subset.snps <- list()
@@ -42,21 +45,23 @@ subset.snps[["hd"]] <- rownames(read.table(f))
 f <- paste0(setup$init.dir, "/snp_coords_ld.txt.gz")
 subset.snps[["ld"]] <- rownames(read.table(f))
 
-## 1. read the input file from the students
+message("1. read the input file from the students")
+flush.console()
 inds.todo <- readCheckBreedDataFile(fin, max.nb.plots=p0$K,
                                     subset.snps=subset.snps)
 (data.types <- countRequestedBreedTypes(inds.todo))
 
-## 2. check that the requested individuals already exist
-db <- dbConnect(SQLite(), dbname=setup$dbname)
-tbl <- paste0("crosses_", breeder)
+message("2. check that the requested individuals already exist")
+flush.console()
+tbl <- paste0("plant_material_", breeder)
 stopifnot(tbl %in% dbListTables(db))
 query <- paste0("SELECT child FROM ", tbl)
 res <- dbGetQuery(conn=db, query)
 stopifnot(all(inds.todo$ind %in% res$child))
 
-## 3. load the haplotypes and convert to genotypes
-X <- NULL
+message("3. load the haplotypes and convert to genotypes")
+flush.console()
+X <- NULL # TODO: allocate whole matrix at this stage
 for(i in 1:nrow(inds.todo)){
   ind.id <- inds.todo$ind[i]
   if(ind.id %in% rownames(X))
@@ -76,63 +81,33 @@ for(i in 1:nrow(inds.todo)){
   } else
     X <- rbind(X, ind$genos)
 }
+## TODO: remove empty rows, if any
 dim(X)
 
-## 4. handle the "pheno" tasks for the requested individuals
+message("4. handle the 'pheno' tasks for the requested individuals")
+flush.console()
 idx <- which(inds.todo$task == "pheno")
 length(idx)
 if(length(idx) > 0){
-  nb.plots <- as.numeric(inds.todo$details[idx])
-  phenos.df <- data.frame(ind=rep(inds.todo$ind[idx], nb.plots),
-                          year=as.factor(rep(year, sum(nb.plots))),
-                          plot=as.character(1:sum(nb.plots)),
-                          pathogen=ifelse((year - 2015) %% 3 == 0, TRUE, FALSE),
-                          trait1.raw=NA,
-                          trait1=NA,
-                          trait2=NA,
-                          trait3=NA)
+  phenos.df <- makeDfPhenos(ind.ids=inds.todo$ind[idx],
+                            nb.plots=as.numeric(inds.todo$details[idx]),
+                            year=year,
+                            pathogen=ifelse((year - 2005) %% 3 == 0,
+                                            TRUE, FALSE))
+  phenos <- simulTraits12(dat=phenos.df,
+                          mu=p0$mu,
+                          sigma.alpha2=p0$sigma.alpha2,
+                          X=X,
+                          Beta=p0$Beta,
+                          h2=p0$h2)
+  phenos$trait3 <- simulTrait3(dat=phenos.df,
+                               X=X,
+                               qtn.id=p0$trait3$qtn.id,
+                               resist.genos=p0$trait3$resist.genos,
+                               prob.resist.no.qtl=p0$trait3$prob.resist.no.qtl)
 
-  ## draw phenotypes
-  phenos <- list(N=nrow(phenos.df),
-                 I=nlevels(phenos.df$ind),
-                 J=nlevels(phenos.df$year),
-                 K=nlevels(phenos.df$plot),
-                 P=ncol(X))
-  if(phenos$I == 1){
-    phenos$Z.I <- matrix(1, phenos$N)
-  } else
-    phenos$Z.I <- model.matrix(~ phenos.df$ind - 1)
-  phenos$Z.J <- matrix(1, nrow=phenos$N)
-  phenos$Z.K <- model.matrix(~ phenos.df$plot - 1)
-
-  phenos$alpha <- setNames(rnorm(n=phenos$J, mean=0, sd=sqrt(p0$sigma.alpha2)),
-                           levels(phenos.df$year))
-  phenos$gamma <- setNames(rnorm(n=phenos$K, mean=0, sd=sqrt(p0$sigma.gamma2)),
-                           levels(phenos.df$plot))
-
-  ## as in simulTraits12Rnd()
-  X.tmp <- X[inds.todo$ind[idx], , drop=FALSE]
-  G.A <- (X.tmp - 1) %*% cbind(p0$trait1$beta[colnames(X.tmp)],
-                               p0$trait2$beta[colnames(X.tmp)])
-  Sigma <- matrix(c(p0$trait1$sigma2, 0, 0, p0$trait2$sigma2), nrow=2, ncol=2)
-  Epsilon <- mvrnorm(n=nrow(X.tmp), mu=c(0,0), Sigma=Sigma)
-  Y <- G.A + Epsilon
-  for(t in 1:2){
-    trait <- paste0("trait", t)
-    phenos[[trait]]$y <- p0[[trait]]$mu + phenos$Z.J %*% phenos$alpha +
-      phenos$Z.K %*% phenos$gamma + phenos$Z.I %*% Y[,t]
-  }
-
-  phenos$trait3 <- list(y=rep(0, phenos$N)) # "0" means "no symptoms"
-  phenos$trait3$y[phenos.df$pathogen] <- 1
-  idx <- which(phenos.df$pathogen & (X.tmp[, p0$trait3$qtn.id] %in%
-                                     p0$trait3$resist.genos))
-  if(length(idx) > 0)
-    phenos$trait3$y[idx] <- 1 - rbinom(n=length(idx), size=1,
-                                       prob=p0$trait3$h2)
-
-  phenos.df$trait1.raw <- phenos$trait1$y[,1]
-  phenos.df$trait2 <- phenos$trait2$y[,1]
+  phenos.df$trait1.raw <- phenos$Y[,1]
+  phenos.df$trait2 <- phenos$Y[,2]
   phenos.df$trait3 <- phenos$trait3$y
   phenos.df$trait1 <- phenos.df$trait1.raw
   tmp <- (phenos.df$pathogen & as.logical(phenos.df$trait3))
@@ -149,7 +124,8 @@ if(length(idx) > 0){
               sep="\t", row.names=FALSE, col.names=TRUE)
 }
 
-## 5. handle the "geno" tasks for the requested individuals
+message("5. handle the 'geno' tasks for the requested individuals")
+flush.console()
 for(dty in c("ld", "hd")){
   idx <- which(inds.todo$task == "geno" & inds.todo$details == dty &
                inds.todo$ind %in% rownames(X))
@@ -167,7 +143,8 @@ for(dty in c("ld", "hd")){
   }
 }
 
-## 6. handle the "snp" tasks for the requested individuals
+message("6. handle the 'snp' tasks for the requested individuals")
+flush.console()
 idx <- which(inds.todo$task == "geno" & ! inds.todo$details %in% c("ld","hd"))
 length(idx)
 if(length(idx) > 0){
@@ -192,11 +169,14 @@ if(length(idx) > 0){
               sep="\t", row.names=FALSE, col.names=TRUE)
 }
 
-## 7. log
+message("7. log")
+flush.console()
 for(type in names(data.types)){
   if(data.types[type] > 0){
-    query <- paste0("INSERT INTO log(breeder,task,quantity)",
-                    " VALUES ('", breeder, "', '", type, "', '",
+    query <- paste0("INSERT INTO log(breeder,year,task,quantity)",
+                    " VALUES ('", breeder,
+                    "', '", year,
+                    "', '", type, "', '",
                     data.types[type], "')")
     res <- dbGetQuery(db, query)
   }

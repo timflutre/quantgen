@@ -1,6 +1,6 @@
 ---
 title: "Breeding game: setup"
-author: "Timothée Flutre, Jacques David"
+author: "Timothée Flutre, Philippe Brabant, Jacques David"
 date: "`r format(Sys.time(), '%d/%m/%Y %H:%M:%S')`"
 colorlinks: true
 output:
@@ -13,7 +13,6 @@ output:
     toc: true
     toc_depth: 3
     number_sections: TRUE
-urlcolor: blue
 ---
 
 <!--
@@ -34,17 +33,17 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 * https://github.com/timflutre/atelier-prediction-genomique
 
-* Copyright 2016-2017 INRA, Montpellier SupAgro
+* Copyright 2016-2017 INRA, Montpellier SupAgro, AgroParisTech
 
-* License: AGPL-3+
+* License: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+
+
+# Set up the environment
 
 This R chunk is used to assess how much time it takes to execute the R code in this document until the end:
 ```{r time_0}
 t0 <- proc.time()
 ```
-
-
-# Set up the environment
 
 Load the packages:
 ```{r load_pkg}
@@ -56,11 +55,11 @@ library(MASS)
 
 Set up directories:
 ```{r setup_dir}
-root.dir <- "~/work2/atelier-prog-selection-2017"
+root.dir <- "~/work2/atelier-prog-selection-2018"
 if(! dir.exists(root.dir))
   dir.create(root.dir)
-## shared.dir <- "~/Dropbox/atelier-prog-selection-2016"
-setup <- setUpBreedingGame(root.dir=root.dir, shared.dir=NULL,
+shared.dir <- NULL #"~/Dropbox/atelier-prog-selection-2018"
+setup <- setUpBreedingGame(root.dir=root.dir, shared.dir=shared.dir,
                            nb.breeders=4, lang="fr")
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
@@ -72,6 +71,8 @@ dbname <- setup$dbname
 
 
 # Simulate haplotypes and genotypes
+
+## Use the sequential coalescent with recombination
 
 Nb of initial individuals:
 ```{r init_inds}
@@ -93,14 +94,14 @@ Simulate haplotypes and genotypes of initial individuals:
 
 ```{r init_chrs}
 nb.chrs <- 10
-L <- 10^6 # chromosome length, in base pairs
+L <- 10^6     # chromosome length, in base pairs
 mu <- 10^(-8) # neutral mutation rate in events / base / generation
 (u <- mu * L) # neutral mutation rate in events / chrom / gen
-c <- mu # recomb rate in events / base / gen
-(r <- c * L) # recomb rate in events / chrom / gen
+c <- mu       # recomb rate in events / base / gen
+(r <- c * L)  # recomb rate in events / chrom / gen
 ```
 
-Simplest evolutionary scenario similar to real data for domesticated plants:
+Simplest evolutionary scenario similar to real data from domesticated plants:
 ```{r evol_scenario}
 ##                             _____
 ##                            /
@@ -116,8 +117,8 @@ Simplest evolutionary scenario similar to real data for domesticated plants:
 Nea <- 5 * 10^4         # ancestral
 Neb <- 10 * 10^2        # bottleneck
 Nec <- Ne0 <- 5 * 10^3  # current
-(theta <- 4 * Ne0 * u) # scaled neutral mutation rate in events / chrom
-(rho <- 4 * Ne0 * r) # scaled recomb rate in events / chrom
+(theta <- 4 * Ne0 * u)  # scaled neutral mutation rate in events / chrom
+(rho <- 4 * Ne0 * r)    # scaled recomb rate in events / chrom
 T1 <- 8000
 T2 <- T1 + 2000
 (alpha <- - (4 * Ne0) / T1 * log(Neb / Ne0)) # exp growth rate from Nec to Neb
@@ -127,7 +128,7 @@ T2 <- T1 + 2000
 
 Simulate genotypes via the coalescent:
 ```{r simul_geno_coalescent}
-set.seed(1)
+set.seed(65291)
 f <- paste0(truth.dir, "/g0.RData")
 if(! file.exists(f)){
   g0 <- simulCoalescent(nb.inds=I,
@@ -140,6 +141,7 @@ if(! file.exists(f)){
                         nb.pops=1,
                         get.trees=FALSE,
                         get.tmrca=FALSE,
+                        rnd.choice.ref.all=FALSE,
                         verbose=1)
   save(g0, file=f)
 } else
@@ -148,12 +150,16 @@ tools::md5sum(path.expand(f))
 head(g0$snp.coords)
 g0$haplos$chr1[1:4, 1:6]
 g0$genos[1:2, 1:6]
-hist(x=estimSnpAf(X=g0$genos), xlab="Allele frequency", ylab="Number of markers",
-     main=paste0(ncol(g0$genos), " SNPs"), col="grey", border="white", las=1, breaks="FD")
 ```
 
-Look at the MAFs:
+## Look at (M)AFs, LD, A
+
+Look at the AFs and MAFs:
 ```{r look_mafs}
+afs <- estimSnpAf(X=g0$genos)
+hist(x=afs, xlab="Allele frequency", ylab="Number of markers",
+     main=paste0(ncol(g0$genos), " SNPs"), col="grey", border="white",
+     las=1, breaks="FD")
 mafs <- estimSnpMaf(X=g0$genos)
 summary(mafs)
 sum(mafs >= 0.01) # nb of non-rare SNPs
@@ -238,12 +244,13 @@ hist(coancestries[upper.tri(coancestries)], breaks="Sturges")
 abline(v=0, lty=2, col="red")
 ```
 
+## Choose SNPs for genotyping
+
 Ascertain SNPs for the genotyping arrays (high and low density):
 
 * hyp: mimick de novo sequencing of a few individuals
 
 ```{r ascertain_snps}
-set.seed(8)
 if(! file.exists(paste0(init.dir, "/snp_coords_hd.txt.gz"))){
   nb.inds.denovo <- 20
   nb.snps.hd <- 10*10^3
@@ -274,9 +281,10 @@ if(! file.exists(paste0(init.dir, "/snp_coords_hd.txt.gz"))){
 }
 ```
 
+## Make lines
+
 Make collection of lines via haplodiploidization:
 ```{r coll_lines}
-set.seed(5)
 f <- paste0(truth.dir, "/coll.Rdata")
 if(! file.exists(f)){
   coll <- list()
@@ -308,152 +316,27 @@ gc()
 
 # Simulate phenotypes
 
-## Generic preparation
-
-Make data.frame for initial phenotypes given to players:
-```{r init_pheno}
-It <- 150      # nb of lines per trial (i.e. year and site)
-J <- 10        # years
-K <- 1         # site
-L <- 300       # plots per site
-R <- 2         # replicate per line per trial
-N <- J * K * L # nb of measurements per trait for all trials
-first.year <- 2005
-latest.year <- first.year + J - 1
-p0.df <- data.frame(ind=NA,
-                    year=as.factor(rep(first.year:latest.year, each=L)),
-                    plot=as.factor(rep(1:L, times=J)),
-                    pathogen=NA,
-                    trait1.raw=NA,
-                    trait1=NA,
-                    trait2=NA,
-                    trait3=NA)
-It.new <- 75   # nb of new lines per year (starting the second year)
-line.ids <- getIndNamesFromHaplos(coll$haplos)[1:(It+ (J-1) * It.new)]
-(length(line.ids)) # total nb of lines tested at least one year
-p0.df$ind[p0.df$year == levels(p0.df$year)[1]] <- rep(line.ids[1:It],
-                                                      each=R)
-for(j in 1:J){
-  year <- levels(p0.df$year)[j]
-  p0.df$ind[p0.df$year == year] <- rep(line.ids[(1+(j-1)*It.new):((j-1)*It.new+It)],
-                                       each=R)
-}
-p0.df$ind <- as.factor(p0.df$ind)
-head(p0.df)
-str(p0.df)
-```
-
-hyp: pathogens present (and detected) every three years:
-```{r patho_years}
-p0.df$pathogen <- FALSE
-years.with.patho <- seq(from=first.year, by=3, length.out=4)
-p0.df$pathogen[p0.df$year %in% years.with.patho] <- TRUE
-```
-
-Export genotypes for the players using high-density chip, but only for lines planted the last year:
-```{r export_geno}
-f <- paste0(init.dir, "/genos_coll-", latest.year, ".txt.gz")
-subset.coll <- unique(as.character(p0.df$ind[p0.df$year == latest.year]))
-write.table(x=coll$genos[subset.coll, subset.snps[["hd"]]],
-            file=gzfile(f), quote=FALSE,
-            sep="\t", row.names=TRUE, col.names=TRUE)
-```
-
 Simulate phenotypes of initial lines:
 
 * hyp: only 3 traits are considered
 
 * hyp: trait 1 has additive infinitesimal genetic architecture (e.g. yield)
 
-* hyp: trait 2 has additive infinitesimal genetic architecture (e.g. protein)
-
-* hyp: traits 1 and 2 are negatively genetically correlated (i.e. pleiotropy)
+* hyp: trait 2 has additive infinitesimal genetic architecture (e.g. quality)
 
 * hyp: for traits 1 and 2, all SNPs (even the rarest) have a non-zero effect
 
+* hyp: traits 1 and 2 are negatively genetically correlated (i.e. pleiotropy)
+
+* hyp: "year" effects are different for traits 1 and 2, with the same variance but no covariance between traits or plots
+
+* hyp: errors are different for traits 1 and 2, with the same variance but no covariance between traits, plots or years
+
+* hyp: pathogens present every three years
+
 * hyp: trait 3 has a single, major QTL (e.g. resistance)
 
-* hyp: "year" and "plot" effects are the same for traits 1 and 2
-
-* for traits 1 and 2, use the "equivalent" model AM <=> RR
-
-```{r init_list_phenos}
-p0 <- list(N=nrow(p0.df),
-           I=nlevels(p0.df$ind),
-           J=nlevels(p0.df$year),
-           K=nlevels(p0.df$plot),
-           Z.I=model.matrix(~ p0.df$ind - 1),
-           Z.J=model.matrix(~ p0.df$year - 1),
-           Z.K=model.matrix(~ p0.df$plot - 1),
-           sigma.alpha2=10, # large "year" effect
-           sigma.gamma2=1) # small "plot" effect
-```
-
-Thin to avoid LD between causal SNPs?
-```{r}
-## mafs <- estimSnpMaf(X=coll$genos[levels(p0.df$ind),])
-## thin.snps <- thinSnps(method="coord", threshold=5*10^2,
-##                       snp.coords=coll$snp.coords[names(mafs)[mafs >= 0.01],])
-thin.snps <- colnames(coll$genos)
-(p0$P <- length(thin.snps))
-p0$X <- coll$genos[levels(p0.df$ind), thin.snps]
-p0$afs <- estimSnpAf(X=p0$X)
-```
-
-Draw "year" and "plot" effects:
-```{r draw_fix_eff}
-set.seed(736452)
-(p0$alpha <- setNames(rnorm(n=p0$J, mean=0, sd=sqrt(p0$sigma.alpha2)),
-                      levels(p0.df$year)))
-p0$gamma <- setNames(rnorm(n=p0$K, mean=0, sd=sqrt(p0$sigma.gamma2)),
-                     levels(p0.df$plot))
-summary(p0$gamma)
-```
-
-## Traits 1 and 2
-
-Simulate the random part of traits 1 and 2 jointly (caution, keep `center.genos=FALSE`):
-```{r make_trait1}
-set.seed(39452)
-traits12 <- simulTraits12Rnd(h2=c(0.3, 0.4), sigma.beta2=c(10^(-5), 10^(-5)),
-                             prop.pleio=0.4, cor.pleio=-0.7,
-                             X=p0$X, center.genos=FALSE, plot=TRUE)
-```
-
-Make traits 1 and 2:
-```{r}
-p0$trait1 <- list(beta=traits12$Beta[,1],
-                  sigma2=traits12$sigma2[1],
-                  u=traits12$G.A[,1])
-p0$trait1$y <- p0$Z.J %*% p0$alpha + p0$Z.K %*% p0$gamma +
-  p0$Z.I %*% traits12$Y[,1]
-(p0$trait1$mu <- 40 - mean(p0$trait1$y))
-p0$trait1$y <- p0$trait1$y + p0$trait1$mu
-p0$trait2 <- list(beta=traits12$Beta[,2],
-                  sigma2=traits12$sigma2[2],
-                  u=traits12$G.A[,2])
-p0$trait2$y <- p0$Z.J %*% p0$alpha + p0$Z.K %*% p0$gamma +
-  p0$Z.I %*% traits12$Y[,2]
-(p0$trait2$mu <- 14 - mean(p0$trait2$y))
-p0$trait2$y <- p0$trait2$y + p0$trait2$mu
-hist(p0$trait1$y, breaks="FD", las=1)
-boxplot(p0$trait1$y ~ p0.df$year, las=1, main="p0$trait1$y"); abline(h=mean(p0$trait1$y), lty=2)
-hist(p0$trait2$y, breaks="FD", las=1)
-boxplot(p0$trait2$y ~ p0.df$year, las=1, main="p0$trait2$y"); abline(h=mean(p0$trait2$y), lty=2)
-regplot(p0$trait1$y, p0$trait2$y, xlab="p0$trait1$y", ylab="p0$trait2$y")
-```
-
-Free some memory:
-```{r}
-rm(traits12)
-gc()
-```
-
-## Trait 3
-
-Make trait 3:
-
-* hyp: "y=1" means "presence of symptoms" and, very likely, non-resistance
+* hyp: "trait3=0" means "absence of symptoms" and, very likely, presence of the resistance allele (but the years with pathogen, some genotypes without the resistant allele may exceptionnally show no symptom)
 
 * hyp: the causal SNP is on the low-density chip
 
@@ -461,39 +344,99 @@ Make trait 3:
 
 * hyp: the resistance-confering allele has a dominant effect
 
-```{r make_trait3}
-set.seed(83544)
-p0$trait3 <- list(mu=0, h2=0.975)
-mafs <- estimSnpMaf(afs=p0$afs)
-(p0$trait3$qtn.id <- names(sample(x=which(mafs >= 0.14 & mafs <= 0.16 &
-                                          names(mafs) %in% subset.snps[["ld"]]),
-                                  size=1)))
-mafs[p0$trait3$qtn.id]
-table(p0$X[, p0$trait3$qtn.id])
-(is.minor.counted <- p0$afs[p0$trait3$qtn.id] < 0.5)
-if(is.minor.counted){
-  p0$trait3$inds.resist <- rownames(p0$X)[p0$X[, p0$trait3$qtn.id] >= 1]
-  p0$trait3$resist.genos <- c(1,2)
-} else{
-  p0$trait3$inds.resist <- rownames(p0$X)[p0$X[, p0$trait3$qtn.id] <= 1]
-  p0$trait3$resist.genos <- c(0,1)
+## Generic preparation
+
+Make data.frame for initial phenotypes given to players:
+```{r init_pheno}
+line.ids <- getIndNamesFromHaplos(coll$haplos)[1:(150 + (10-1) * 75)]
+p0.df <- makeDfInitPhenos(nb.lines.per.year=150, nb.years=10,
+                          nb.plots.per.line.per.year=2,
+                          first.year=2005, line.ids)
+head(p0.df)
+str(p0.df)
+```
+
+Export genotypes for the players using high-density chip, but only for lines planted the last year:
+```{r export_geno}
+f <- paste0(init.dir, "/genos_coll-latest-year.txt.gz")
+latest.year <- as.numeric(levels(p0.df$year)[nlevels(p0.df$year)])
+subset.coll <- unique(as.character(p0.df$ind[p0.df$year == latest.year]))
+write.table(x=coll$genos[subset.coll, subset.snps[["hd"]]],
+            file=gzfile(f), quote=FALSE,
+            sep="\t", row.names=TRUE, col.names=TRUE)
+```
+
+Thin to avoid LD between causal SNPs?
+```{r choose_causal_snps}
+## mafs <- estimSnpMaf(X=coll$genos[levels(p0.df$ind),])
+## thin.snps <- thinSnps(method="coord", threshold=5*10^2,
+##                       snp.coords=coll$snp.coords[names(mafs)[mafs >= 0.01],])
+length(thin.snps <- colnames(coll$genos))
+```
+
+## Traits 1 and 2
+
+Simulate the SNP effects for traits 1 and 2 jointly:
+```{r simum_snp_effects_trait1_trait2}
+set.seed(39452)
+snp.effects12 <- simulSnpEffectsTraits12(snp.ids=thin.snps,
+                                         sigma.beta2=c(trait1=10^(-5),
+                                                       trait2=10^(-5)),
+                                         prop.pleio=0.4, cor.pleio=-0.7)
+```
+
+Make phenotypes for traits 1 and 2 jointly:
+```{r make_phenos_trait1_trait2}
+p0 <- simulTraits12(dat=p0.df, mu=c(trait1=40, trait2=14),
+                    sigma.alpha2=c(trait1=1.5^2, trait2=1^2),
+                    X=coll$genos[levels(p0.df$ind), thin.snps],
+                    Beta=snp.effects12$Beta,
+                    h2=c(trait1=0.3, trait2=0.4))
+regplot(p0$G.A[,1], p0$G.A[,2], xlab="p0$G.A[,1]", ylab="p0$G.A[,2]", las=1)
+```
+
+Do some visual checks:
+```{r plots_phenos_trait1_trait2}
+hist(p0$Y[,1], breaks="FD", las=1, col="grey", border="white")
+boxplot(p0$Y[,1] ~ p0.df$year, las=1, main="p0$Y[,1]")
+abline(h=mean(p0$Y[,1]), lty=2)
+hist(p0$Y[,2], breaks="FD", las=1, col="grey", border="white")
+boxplot(p0$Y[,2] ~ p0.df$year, las=1, main="p0$Y[,2]")
+abline(h=mean(p0$Y[,2]), lty=2)
+regplot(p0$Y[,1], p0$Y[,2], xlab="p0$Y[,1]", ylab="p0$Y[,2]", las=1)
+plot(p0$Y[,1], p0$Y[,2], xlab="p0$Y[,1]", ylab="p0$Y[,2]", las=1, type="n")
+for(j in 1:nlevels(p0.df$year)){
+  year <- levels(p0.df$year)[j]
+  idx <- p0.df$year == year
+  points(p0$Y[idx,1], p0$Y[idx,2], col=j)
+  abline(lm(p0$Y[idx,2] ~ p0$Y[idx,1]), col=j)
 }
-length(p0$trait3$inds.resist)
-p0$trait3$y <- rep(0, p0$N) # "0" means "no symptoms"
-p0$trait3$y[p0.df$pathogen] <- 1
-idx <- which(p0.df$pathogen & (p0.df$ind %in% p0$trait3$inds.resist))
-p0$trait3$y[idx] <- 1 - rbinom(n=length(idx), size=1, prob=p0$trait3$h2)
-table(p0$trait3$y[idx])
-all(unique(p0.df$ind[idx]) %in% p0$trait3$inds.resist)
-length(unique(p0.df$ind[idx]))
+```
+
+## Trait 3
+
+Make the "pathogen" column:
+```{r patho_years}
+p0.df$pathogen <- FALSE
+first.year <- as.numeric(levels(p0.df$year)[1])
+(years.with.patho <- seq(from=first.year, by=3, length.out=4))
+p0.df$pathogen[p0.df$year %in% years.with.patho] <- TRUE
+```
+
+Make trait 3:
+```{r make_trait3}
+p0$trait3 <- simulTrait3(dat=p0.df, X=p0$X, afs=p0$afs,
+                         subset.snps=subset.snps[["ld"]],
+                         prob.resist.no.qtl=0.02)
+table(p0$trait3$y)
 ```
 
 ## Finalize
 
 Fill "phenotype" data.frame for players:
 ```{r fill_pheno_players}
-p0.df$trait1.raw <- p0$trait1$y[,1]
-p0.df$trait2 <- p0$trait2$y[,1]
+p0.df$trait1.raw <- p0$Y[,1]
+p0.df$trait2 <- p0$Y[,2]
 p0.df$trait3 <- p0$trait3$y
 ```
 
@@ -503,9 +446,11 @@ p0$prop.yield.loss <- 0.2
 p0.df$trait1 <- p0.df$trait1.raw
 idx <- p0.df$pathogen & (p0.df$trait3 == 1)
 p0.df$trait1[idx] <- (1 - p0$prop.yield.loss) * p0.df$trait1[idx]
-hist(p0.df$trait1, breaks="FD", las=1)
+hist(p0.df$trait1, breaks="FD", las=1, col="grey", border="white")
 boxplot(p0.df$trait1 ~ p0.df$year, las=1, main="p0.df$trait1")
 abline(h=mean(p0.df$trait1), lty=2)
+regplot(p0.df$trait1, p0.df$trait2, xlab="p0.df$trait1", ylab="p0.df$trait2",
+        las=1)
 ```
 
 Save data:
@@ -529,72 +474,113 @@ tools::md5sum(path.expand(f))
 
 At the end of the game, each breeder has to submit at least one new variety.
 For them to be registered, they should be "better" than controls.
-The controls are chosen so that they have (i) a "genotypic yield" among the 80% best, (ii) a "genotypic quality" above 14/1000, and (iii) the resistant allele.
+The controls are chosen so that they have:
 
-Rank the genotypes:
-```{r}
-genovals <- data.frame(trait1=p0$trait1$mu + (p0$X - 1) %*% p0$trait1$beta,
-                       trait2=p0$trait2$mu + (p0$X - 1) %*% p0$trait2$beta,
-                       trait3=as.numeric(! p0$X[, p0$trait3$qtn.id] %in%
-                                         p0$trait3$resist.genos),
-                       row.names=rownames(p0$X))
-mean(genovals$trait1)
-var(genovals$trait1)
-mean(genovals$trait2)
-var(genovals$trait2)
-table(genovals$trait3)
-genovals <- genovals[order(genovals$trait1, decreasing=TRUE),]
+* an "additive genotypic yield" among the 40% best lines,
+
+* an "additive genotypic quality" above the mean of all lines,
+
+* the resistant allele for some of them.
+
+Retrieve the breeding values of each line in the collection:
+```{r rank_genos}
+BVs <- data.frame(trait1=p0$mu[1] + p0$G.A[,1],
+                  trait2=p0$mu[2] + p0$G.A[,2],
+                  trait3=! p0$X[, p0$trait3$qtn.id] %in% p0$trait3$resist.genos,
+                  row.names=rownames(p0$X))
+summary(BVs)
 ```
 
-Identify those that can be controls:
-```{r}
-nrow(potential.controls <- genovals[genovals$trait2 >= 14 &
-                                    genovals$trait3 == 0,])
-nrow(potential.controls <- potential.controls[1:floor((1-0.8)*nrow(potential.controls)),])
+Identify potential controls:
+```{r identify_potential_controls, eval=TRUE}
+BVs <- BVs[order(BVs$trait1, decreasing=TRUE),]
+length(idx1 <- 1:ceiling(0.4 * nrow(BVs)))
+summary(BVs[idx1,])
+length(idx2 <- which(BVs$trait2 >= mean(BVs$trait2)))
+potential.controls <- BVs[intersect(idx1, idx2),]
+summary(potential.controls)
 ```
 
-Select five controls among them (the least good, to be easier for the players):
-```{r}
+Select five controls among them:
+```{r choose_controls, eval=TRUE}
 nb.controls <- 5
-(controls <- rownames(potential.controls)[
-  (nrow(potential.controls)-nb.controls+1):nrow(potential.controls)])
-genovals[controls,]
-mean(genovals[controls, "trait1"])
-var(genovals[controls, "trait1"])
-mean(genovals[controls, "trait2"])
-var(genovals[controls, "trait2"])
-print(p0$X[controls, p0$trait3$qtn.id])
+nb.ctls.resist <- 2
+stopifnot(sum(potential.controls$trait3 == 0) >= nb.ctls.resist)
+nb.ctls.sensitiv <- nb.controls - nb.ctls.resist
+stopifnot(sum(potential.controls$trait3 != 0) >= nb.ctls.sensitiv)
+length(pot.ctls.resist <- rownames(potential.controls)[potential.controls$trait3 == 0])
+ctls.resist <- sample(pot.ctls.resist, nb.ctls.resist)
+length(pot.ctls.sensitiv <- rownames(potential.controls)[potential.controls$trait3 != 0])
+ctls.sensitiv <- sample(pot.ctls.sensitiv, nb.ctls.sensitiv)
+controls <- c(ctls.resist, ctls.sensitiv)
+BVs[controls,]
+```
+
+Plot how good they are compare to the rest of the collection:
+```{r plot_controls_phenos}
+plot(x=p0$mu[1] + p0$G.A[,1], y=p0$mu[2] + p0$G.A[,2], las=1, main="Controls")
+abline(v=mean(p0$mu[1] + p0$G.A[,1]), h=mean(p0$mu[2] + p0$G.A[,2]), lty=2)
+points(x=p0$mu[1] + p0$G.A[ctls.resist, 1],
+       y=p0$mu[2] + p0$G.A[ctls.resist, 2],
+       pch=19, col="green")
+points(x=p0$mu[1] + p0$G.A[ctls.sensitiv, 1],
+       y=p0$mu[2] + p0$G.A[ctls.sensitiv, 2],
+       pch=17, col="green")
+plot(x=p0.df$trait1, y=p0.df$trait2, main="Controls")
+points(x=p0.df$trait1[p0.df$ind %in% ctls.resist],
+       y=p0.df$trait2[p0.df$ind %in% ctls.resist],
+       pch=19, col="green")
+points(x=p0.df$trait1[p0.df$ind %in% ctls.sensitiv],
+       y=p0.df$trait2[p0.df$ind %in% ctls.sensitiv],
+       pch=17, col="green")
 ```
 
 Save controls for the players:
-```{r}
+```{r savel_controls, eval=TRUE}
 f <- paste0(init.dir, "/temoins.txt")
 write.table(x=controls, file=f, quote=FALSE, sep="\t", row.names=FALSE, col.names=FALSE)
 ```
 
-<!--
-TODO: Make and save phenotypes of controls in several plots the last few years to give a kind of reference to the players:
-```{r phenos_controls}
-I.ctl <- length(controls) # nb of controls
-J.ctl <- 4 # nb of years, from the latest
-L.ctl <- 4 # nb of plots per site
-first.year.ctl <- latest.year - J.ctl + 1
-latest.year.ctl <- first.year.ctl + J.ctl - 1
-first.plot.ctl <- L + 1
-latest.plot.ctl <- first.plot.ctl + L.ctl - 1
-phectl.df <- data.frame(
-    ind=rep(rep(controls, each=L.ctl), J.ctl),
-    year=as.factor(rep(first.year.ctl:latest.year.ctl, each=I.ctl * L.ctl)),
-    plot=as.factor(rep(rep(first.plot.ctl:latest.plot.ctl, I.ctl),
-                       J.ctl)),
-    pathogen=FALSE,
-    trait1.raw=NA,
-    trait1=NA,
-    trait2=NA,
-    trait3=NA)
-phectl.df$pathogen[phectl.df$year %in% years.with.patho] <- TRUE
+Make and save phenotypes of controls in several plots from another site (hence with different "year" effects) the last few years to give a kind of reference to the players:
+```{r phenos_controls, eval=TRUE}
+nb.years.per.ctl <- 4
+nb.plots.per.ctl <- 5
+phectls.df <- NULL
+for(j in 1:nb.years.per.ctl){
+  year <- latest.year - nb.years.per.ctl + j
+  phectl.df <- makeDfPhenos(ind.ids=controls,
+                            nb.plots=rep(nb.plots.per.ctl, length(controls)),
+                            year=year,
+                            pathogen=ifelse((year - 2005) %% 3 == 0,
+                                            TRUE, FALSE))
+  phectl <- simulTraits12(dat=phectl.df, mu=p0$mu, sigma.alpha2=p0$sigma.alpha2,
+                          X=p0$X[controls,], Beta=p0$Beta, h2=p0$h2, verbose=0)
+  phectl$trait3 <- simulTrait3(dat=phectl.df, X=p0$X, qtn.id=p0$trait3$qtn.id,
+                               resist.genos=p0$trait3$resist.genos,
+                               prob.resist.no.qtl=p0$trait3$prob.resist.no.qtl,
+                               verbose=0)
+  phectl.df$trait1.raw <- phectl$Y[,1]
+  phectl.df$trait2 <- phectl$Y[,2]
+  phectl.df$trait3 <- phectl$trait3$y
+  phectl.df$trait1 <- phectl.df$trait1.raw
+  tmp <- (phectl.df$pathogen & as.logical(phectl.df$trait3))
+  if(any(tmp))
+    phectl.df$trait1[tmp] <- (1 - p0$prop.yield.loss) * phectl.df$trait1[tmp]
+  phectl.df <- phectl.df[, -grep("raw", colnames(phectl.df))]
+  print(summary(phectl.df))
+  fout <- paste0(setup$init.dir, "/phenos_controls.txt.gz")
+  if(file.exists(fout))
+    file.remove(fout)
+  write.table(x=phectl.df, file=gzfile(fout), quote=FALSE,
+              sep="\t", row.names=FALSE, col.names=TRUE)
+  if(j == 1){
+    phectls.df <- phectl.df
+  } else
+    phectls.df <- rbind(phectls.df, phectl.df)
+}
+regplot(phectls.df$trait1, phectls.df$trait2, xlab="phectls.df$trait1",
+        ylab="phectls.df$trait2", las=1)
 ```
--->
 
 Free some memory:
 ```{r free_mem_phenos}
@@ -605,7 +591,7 @@ gc()
 
 # Set up database and example files
 
-Create a database with tables for logging and crosses per breeder:
+Create a database with a table for logging, as well as a table of plant material per breeder:
 ```{r setup_db}
 db <- dbConnect(SQLite(), dbname=dbname)
 dbListTables(db)
@@ -616,13 +602,14 @@ if(tbl %in% dbListTables(db)){
 }
 query <- paste0("CREATE TABLE ", tbl,
                 "(breeder TEXT",
+                ", year INT",
                 ", task TEXT",
                 ", quantity INT",
                 ", time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)")
 res <- dbGetQuery(conn=db, query)
 dbListFields(db, tbl)
 for(breeder in breeders){
-  tbl <- paste0("crosses_", breeder)
+  tbl <- paste0("plant_material_", breeder)
   if(tbl %in% dbListTables(db)){
     query <- paste0("DROP TABLE ", tbl)
     res <- dbGetQuery(conn=db, query)
@@ -649,8 +636,7 @@ for(i in 1:length(ind.ids)){
     fto <- paste0(truth.dir, "/", breeder, "/", ind.id, "_haplos.RData")
     if(! file.exists(fto))
       file.symlink(f, fto)
-    tbl <- paste0("crosses_", breeder)
-    ## print(c(breeder, ind.id))
+    tbl <- paste0("plant_material_", breeder)
     query <- paste0("INSERT INTO ", tbl, " VALUES",
                     "('", tmp.ids[i],
                     "', '", NA,
@@ -660,12 +646,12 @@ for(i in 1:length(ind.ids)){
 }
 ```
 
-Make an example of a "cross" file:
+Make an example of a "plant material" file:
 ```{r ex_cross}
-(cross.examples <- makeExamplePlantFile(init.dir))
+(plant.examples <- makeExamplePlantFile(init.dir))
 ```
 
-Make an example of an "inds" file to geno and/or pheno:
+Make an example of an "data" file:
 ```{r ex_data}
 (data.examples <- makeExampleDataFile(init.dir))
 ```

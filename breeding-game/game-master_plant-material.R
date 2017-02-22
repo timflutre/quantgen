@@ -7,44 +7,51 @@
 ## TO BE CHANGED FOR EACH BREEDER
 breeder <- "test"
 fin <- "todo.txt"
+year <- 2015 # TO BE CHANGED ALONG THE GAME
 
 args <- commandArgs(trailingOnly=TRUE)
-if(length(args) != 2){
+if(length(args) != 3){
   print(args)
-  stop("usage: Rscript game-master_cross.R <breeder> <file_name>")
+  stop("usage: Rscript game-master_cross.R <breeder> <file_name> <year>")
 } else{
   breeder <- args[1]
   fin <- args[2]
+  year <- as.numeric(args[3])
 }
 
 library(RSQLite)
 library(rutilstimflutre)
 
-root.dir <- "~/work2/atelier-prog-selection-2017"
+## root.dir <- "~/work2/atelier-prog-selection-2017"
+root.dir <- getwd()
 setup <- getBreedingGameSetup(root.dir)
 fin <- paste0(setup$breeder.dirs[[breeder]], "/", fin)
 print(breeder)
 print(fin)
+print(year)
 stopifnot(breeder %in% setup$breeders)
 stopifnot(file.exists(fin))
+db <- dbConnect(SQLite(), dbname=setup$dbname)
 
-## 1. read the input file from the students
+message("1. read the input file from the students")
+flush.console()
 crosses.todo <- readCheckBreedPlantFile(fin)
 (cross.types <- countRequestedBreedTypes(crosses.todo))
 
-## 2. check the presence of new individuals in the set of existing individuals
+message("2. check the presence of new individuals in the set of existing individuals")
+flush.console()
 parent.ids <- unique(c(crosses.todo$parent1, crosses.todo$parent2))
 parent.ids <- parent.ids[! is.na(parent.ids)]
 child.ids <- crosses.todo$child
-db <- dbConnect(SQLite(), dbname=setup$dbname)
-tbl <- paste0("crosses_", breeder)
+tbl <- paste0("plant_material_", breeder)
 stopifnot(tbl %in% dbListTables(db))
 query <- paste0("SELECT child FROM ", tbl)
 res <- dbGetQuery(conn=db, query)
 stopifnot(all(parent.ids %in% res$child))
 stopifnot(all(! child.ids %in% res$child))
 
-## 3. load the haplotypes of all parents
+message("3. load the haplotypes of all parents")
+flush.console()
 parents <- list(haplos=list())
 for(parent.id in parent.ids){
   if("ind" %in% ls())
@@ -63,7 +70,8 @@ for(parent.id in parent.ids){
 }
 stopifnot(sapply(parents$haplos, nrow) / 2 == length(parent.ids))
 
-## 4. perform the requested crosses
+message("4. perform the requested crosses")
+flush.console()
 new.inds <- list()
 loc.crossovers <- drawLocCrossovers(crosses=crosses.todo,
                                     nb.snps=sapply(parents$haplos, ncol))
@@ -71,7 +79,8 @@ new.inds$haplos <- makeCrosses(haplos=parents$haplos,
                                crosses=crosses.todo,
                                loc.crossovers=loc.crossovers, verbose=2)
 
-## 5. save the haplotypes of the new individuals
+message("5. save the haplotypes of the new individuals")
+flush.console()
 for(new.ind.id in getIndNamesFromHaplos(new.inds$haplos)){
   message(new.ind.id)
   ind <- list(haplos=getHaplosInd(new.inds$haplos, new.ind.id))
@@ -79,7 +88,8 @@ for(new.ind.id in getIndNamesFromHaplos(new.inds$haplos)){
   save(ind, file=f)
 }
 
-## 6. insert the requested crosses into their table
+message("6. insert the requested crosses into their table")
+flush.console()
 nrow(res <- dbGetQuery(db, paste0("SELECT * FROM ", tbl)))
 for(i in 1:nrow(crosses.todo)){
   message(paste0(i, "/", nrow(crosses.todo)))
@@ -91,12 +101,15 @@ for(i in 1:nrow(crosses.todo)){
 }
 nrow(res <- dbGetQuery(db, paste0("SELECT * FROM ", tbl)))
 
-## 7. log
+message("7. log")
+flush.console()
 for(type in names(cross.types)){
   if(cross.types[type] > 0){
-    query <- paste0("INSERT INTO log(breeder,task,quantity)",
-                    " VALUES ('", breeder, "', '", type, "', '",
-                    cross.types[type], "')")
+    query <- paste0("INSERT INTO log(breeder,year,task,quantity)",
+                    " VALUES ('", breeder,
+                    "', '", year,
+                    "', '", type,
+                    "', '", cross.types[type], "')")
     res <- dbGetQuery(db, query)
   }
 }
