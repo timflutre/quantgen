@@ -97,11 +97,11 @@ if(length(idx) > 0){
   phenos <- simulTraits12(dat=phenos.df,
                           mu=p0$mu,
                           sigma.alpha2=p0$sigma.alpha2,
-                          X=X,
+                          X=X[levels(phenos.df$ind),],
                           Beta=p0$Beta,
                           h2=p0$h2)
   phenos$trait3 <- simulTrait3(dat=phenos.df,
-                               X=X,
+                               X=X[levels(phenos.df$ind),],
                                qtn.id=p0$trait3$qtn.id,
                                resist.genos=p0$trait3$resist.genos,
                                prob.resist.no.qtl=p0$trait3$prob.resist.no.qtl)

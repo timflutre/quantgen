@@ -356,11 +356,12 @@ head(p0.df)
 str(p0.df)
 ```
 
-Export genotypes for the players using high-density chip, but only for lines planted the last year:
+Export genotypes for the players using high-density chip, but only for a subset of lines:
 ```{r export_geno}
-f <- paste0(init.dir, "/genos_coll-latest-year.txt.gz")
-latest.year <- as.numeric(levels(p0.df$year)[nlevels(p0.df$year)])
-subset.coll <- unique(as.character(p0.df$ind[p0.df$year == latest.year]))
+f <- paste0(init.dir, "/genos_subset-coll.txt.gz")
+subset.years <- as.numeric(levels(p0.df$year)[
+  (floor(0.5*nlevels(p0.df$year))):nlevels(p0.df$year)])
+subset.coll <- unique(as.character(p0.df$ind[p0.df$year %in% subset.years]))
 write.table(x=coll$genos[subset.coll, subset.snps[["hd"]]],
             file=gzfile(f), quote=FALSE,
             sep="\t", row.names=TRUE, col.names=TRUE)
@@ -526,6 +527,8 @@ points(x=p0$mu[1] + p0$G.A[ctls.resist, 1],
 points(x=p0$mu[1] + p0$G.A[ctls.sensitiv, 1],
        y=p0$mu[2] + p0$G.A[ctls.sensitiv, 2],
        pch=17, col="green")
+legend("topright", legend=c("resistant", "sensitive"), pch=c(19,17),
+       col="green", bty="n")
 plot(x=p0.df$trait1, y=p0.df$trait2, main="Controls")
 points(x=p0.df$trait1[p0.df$ind %in% ctls.resist],
        y=p0.df$trait2[p0.df$ind %in% ctls.resist],
@@ -533,6 +536,8 @@ points(x=p0.df$trait1[p0.df$ind %in% ctls.resist],
 points(x=p0.df$trait1[p0.df$ind %in% ctls.sensitiv],
        y=p0.df$trait2[p0.df$ind %in% ctls.sensitiv],
        pch=17, col="green")
+legend("topleft", legend=c("resistant", "sensitive"), pch=c(19,17),
+       col="green", bty="n")
 ```
 
 Save controls for the players:
@@ -541,21 +546,28 @@ f <- paste0(init.dir, "/temoins.txt")
 write.table(x=controls, file=f, quote=FALSE, sep="\t", row.names=FALSE, col.names=FALSE)
 ```
 
-Make and save phenotypes of controls in several plots from another site (hence with different "year" effects) the last few years to give a kind of reference to the players:
+Make and save phenotypes of controls in several additionnal plots the last few years to give a good reference to the players:
 ```{r phenos_controls, eval=TRUE}
 nb.years.per.ctl <- 4
 nb.plots.per.ctl <- 5
 phectls.df <- NULL
+latest.year <- as.numeric(levels(p0.df$year)[nlevels(p0.df$year)])
 for(j in 1:nb.years.per.ctl){
   year <- latest.year - nb.years.per.ctl + j
   phectl.df <- makeDfPhenos(ind.ids=controls,
-                            nb.plots=rep(nb.plots.per.ctl, length(controls)),
+                            nb.plots.per.ind=rep(nb.plots.per.ctl,
+                                                 length(controls)),
                             year=year,
                             pathogen=ifelse((year - 2005) %% 3 == 0,
                                             TRUE, FALSE))
-  phectl <- simulTraits12(dat=phectl.df, mu=p0$mu, sigma.alpha2=p0$sigma.alpha2,
-                          X=p0$X[controls,], Beta=p0$Beta, h2=p0$h2, verbose=0)
-  phectl$trait3 <- simulTrait3(dat=phectl.df, X=p0$X, qtn.id=p0$trait3$qtn.id,
+  phectl.df$plot <- as.factor(as.numeric(phectl.df$plot) +
+                              nlevels(p0.df$plot))
+  phectl <- simulTraits12(dat=phectl.df, mu=p0$mu,
+                          Alpha=p0$Alpha[as.character(year), , drop=FALSE],
+                          X=p0$X[levels(phectl.df$ind),], Beta=p0$Beta,
+                          sigma2=p0$sigma2, verbose=1)
+  phectl$trait3 <- simulTrait3(dat=phectl.df, X=p0$X[levels(phectl.df$ind),],
+                               qtn.id=p0$trait3$qtn.id,
                                resist.genos=p0$trait3$resist.genos,
                                prob.resist.no.qtl=p0$trait3$prob.resist.no.qtl,
                                verbose=0)
