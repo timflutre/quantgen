@@ -64,7 +64,7 @@ setup <- getBreedingGameSetup(root.dir)
 
 # Load all input files
 
-Phenotypes:
+## Phenotypes
 
 * yield (trait1)
 
@@ -72,6 +72,7 @@ Phenotypes:
 
 * presence of disease symptoms (trait3)
 
+Collection:
 ```{r}
 f <- paste0(setup$init.dir, "/phenos_coll.txt.gz")
 tools::md5sum(path.expand(f))
@@ -81,9 +82,20 @@ phenos$plot <- as.factor(phenos$plot)
 str(phenos)
 ```
 
-Genotypes and SNP coordinates:
+Controls:
 ```{r}
-f <- paste0(setup$init.dir, "/genos_coll-latest-year.txt.gz")
+f <- paste0(setup$init.dir, "/phenos_controls.txt.gz")
+tools::md5sum(path.expand(f))
+phectls <- read.table(f, header=TRUE)
+phectls$year <- as.factor(phectls$year)
+phectls$plot <- as.factor(phectls$plot)
+str(phectls)
+```
+
+## Genotypes and SNP coordinates
+
+```{r}
+f <- paste0(setup$init.dir, "/genos_subset-coll.txt.gz")
 tools::md5sum(path.expand(f))
 genos <- as.matrix(read.table(f, header=TRUE))
 genos[1:3, 1:4]
@@ -95,7 +107,8 @@ snp.coords <- snp.coords[colnames(genos),]
 head(snp.coords)
 ```
 
-Load truth:
+## Truth
+
 ```{r}
 f <- paste0(setup$truth.dir, "/p0.RData")
 tools::md5sum(path.expand(f))
@@ -170,7 +183,7 @@ for(year in levels(phenos$year))
 
 # Analysis of trait3
 
-Extract the data for which genotypes and phenotypes are available:
+Extract the data of the latest year for which genotypes and phenotypes are available:
 ```{r}
 str(dat <- droplevels(phenos[phenos$year == 2014,]))
 ```
@@ -193,10 +206,10 @@ if(file.exists(Sys.which("gemma"))){
   print(system.time(
       res3.gemma <- gemma(model="ulmm",
                           y=blups3,
-                          X=genos,
+                          X=genos[names(blups3),],
                           snp.coords=snp.coords,
                           ## chr.ids=snp.coords[true.qtl3, "chr"],
-                          W=matrix(rep(1, nrow(genos))),
+                          W=matrix(rep(1, length(blups3))),
                           out.dir=setup$truth.dir,
                           task.id="asso-coll-2014",
                           clean="all", verbose=1)))
@@ -212,10 +225,11 @@ if(file.exists(Sys.which("gemma"))){
                                                               snp.coords$chr))))),
                    main="GEMMA on BLUPs of trait3",
                    suggestiveline=FALSE, genomewideline=FALSE, highlight=true.qtl3)
-  print(table(genos[, true.qtl3]))
+  print(table(genos[names(blups3), true.qtl3]))
   print(median(blups3[genos[names(blups3), true.qtl3] == 0]))
   print(median(blups3[genos[names(blups3), true.qtl3] == 2]))
-  print(length(resist.varieties <- rownames(genos)[genos[,true.qtl3] == 2]))
+  print(length(resist.varieties <- rownames(genos)[genos[names(blups3),
+                                                         true.qtl3] == 2]))
 
   betterSummary(phenos$trait1[phenos$year == "2014"])
   betterSummary(phenos$trait1[phenos$year == "2014" & ! phenos$ind %in% resist.varieties])
@@ -228,12 +242,13 @@ Launch QTLRel (if available):
 if(! file.exists(Sys.which("gemma"))){
   afs <- colMeans(genos) / 2
   A.mark <- genos %*% t(genos) / (2 * sum(afs * (1 - afs)))
+  A.mark <- A.mark[names(blups3), names(blups3)]
   res3 <- list()
-  res3$vc <- estVC(y=blups3[rownames(A.mark)],
+  res3$vc <- estVC(y=blups3,
                    v=list(AA=A.mark, DD=NULL, HH=NULL,
                           AD=NULL, MH=NULL, EE=diag(length(blups3))))
   idx.snps <- 1:ncol(genos)
-  res3$scan <- scanOne(y=blups3[rownames(genos)], gdat=genos[,idx.snps],
+  res3$scan <- scanOne(y=blups3, gdat=genos[names(blups3), idx.snps],
                        vc=res3$vc, test="F", numGeno=TRUE)
   stopifnot(all(names(res3$scan$p) == rownames(snp.coords)))
   tmp <- data.frame(BP=snp.coords$pos,

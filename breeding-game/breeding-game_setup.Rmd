@@ -580,11 +580,6 @@ for(j in 1:nb.years.per.ctl){
     phectl.df$trait1[tmp] <- (1 - p0$prop.yield.loss) * phectl.df$trait1[tmp]
   phectl.df <- phectl.df[, -grep("raw", colnames(phectl.df))]
   print(summary(phectl.df))
-  fout <- paste0(setup$init.dir, "/phenos_controls-", year, ".txt.gz")
-  if(file.exists(fout))
-    file.remove(fout)
-  write.table(x=phectl.df, file=gzfile(fout), quote=FALSE,
-              sep="\t", row.names=FALSE, col.names=TRUE)
   if(j == 1){
     phectls.df <- phectl.df
   } else
@@ -592,6 +587,11 @@ for(j in 1:nb.years.per.ctl){
 }
 regplot(phectls.df$trait1, phectls.df$trait2, xlab="phectls.df$trait1",
         ylab="phectls.df$trait2", las=1)
+fout <- paste0(setup$init.dir, "/phenos_controls.txt.gz")
+if(file.exists(fout))
+  file.remove(fout)
+write.table(x=phectls.df, file=gzfile(fout), quote=FALSE,
+            sep="\t", row.names=FALSE, col.names=TRUE)
 ```
 
 Free some memory:
