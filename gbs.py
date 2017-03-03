@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 # Aim: perform the computational aspects of genotyping-by-sequencing
-# Copyright (C) 2015-2016 Institut National de la Recherche Agronomique
-# License: GPL-3+
+# Copyright (C) 2015-2017 Institut National de la Recherche Agronomique
+# License: AGPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
 
@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.9.0" # http://semver.org/
+progVersion = "0.9.1" # http://semver.org/
 
 
 class GbsSample(object):
@@ -720,6 +720,7 @@ class Gbs(object):
         self.pathToPrefixRefGenome = None
         self.dictFile = None
         self.jointGenoId = None
+        self.restrictAllelesTo = "ALL"
         self.tmpDir = "."
         self.jvmXms = "512m"
         self.jvmXmx = "4g"
@@ -765,7 +766,7 @@ class Gbs(object):
         msg += "\t\tcompulsory for all steps, but can differ between steps\n"
         msg += "\t\t e.g. if samples come from different species or are aligned\n"
         msg += "\t\t on different ref genomes, different samples file should\n"
-        msg += "\t\t be used for steps 4-8, representing different subsets of\n"
+        msg += "\t\t be used for steps 4-9, representing different subsets of\n"
         msg += "\t\t the file used for steps 1-3\n"
         msg += "\t\tthe file should be encoded in ASCII\n"
         msg += "\t\tthe first row should be a header with column names\n"
@@ -808,7 +809,7 @@ class Gbs(object):
         msg += "\t\tname: at least 'adpR1' (also 'adpR2' if paired-end)\n"
         msg += "\t\tsequence: from 5' (left) to 3' (right)\n"
         msg += "      --ref\tpath to the prefix of files for the reference genome\n"
-        msg += "\t\tcompulsory for steps 4, 5, 6, 7, 8\n"
+        msg += "\t\tcompulsory for steps 4, 5, 6, 7, 8, 9\n"
         msg += "\t\tshould correspond to the 'ref_genome' column in --samples\n"
         msg += "\t\te.g. '/data/Atha_v2' for '/data/Atha_v2.fa', '/data/Atha_v2.bwt', etc\n"
         msg += "\t\tthese files are produced via 'bwa index ...'\n"
@@ -816,8 +817,12 @@ class Gbs(object):
         msg += "\t\tcompulsory for step 4\n"
         msg += "\t\tsee 'CreateSequenceDictionary' in the Picard software\n"
         msg += "      --jgid\tcohort identifier to use for joint genotyping\n"
-        msg += "\t\tcompulsory for step 8\n"
+        msg += "\t\tcompulsory for steps 8, 9\n"
         msg += "\t\tuseful to launch several, different cohorts in parallel\n"
+        msg += "      --rat\trestrict alleles to be of a particular allelicity\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tdefault=ALL/BIALLELIC/MULTIALLELIC\n"
+        msg += "\t\tsee '--restrictAllelesTo' in GATK's SelectVariant\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
         msg += "\t\tused in step 4 for 'samtools sort'\n"
@@ -865,8 +870,8 @@ class Gbs(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2015-2016 Institut National de la Recherche Agronomique.\n"
-        msg += "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
+        msg += "Copyright (C) 2015-2017 Institut National de la Recherche Agronomique.\n"
+        msg += "License AGPLv3+: GNU AGPL version 3 or later <http://gnu.org/licenses/agpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut]."
         print(msg.encode("utf8")); sys.stdout.flush()
@@ -894,6 +899,7 @@ class Gbs(object):
                                         "adp=",
                                         "ref=",
                                         "jgid=",
+                                        "rat=",
                                         "tmpd=",
                                         "jvmXms=",
                                         "jvmXmx=",
@@ -947,6 +953,8 @@ class Gbs(object):
                  self.dictFile = a
             elif o == "--jgid":
                  self.jointGenoId = a
+            elif o == "--rat":
+                self.restrictAllelesTo = a
             elif o == "--tmpd":
                 self.tmpDir = a
             elif o == "--jvmXms":
@@ -1143,6 +1151,14 @@ class Gbs(object):
         if "8" in self.lSteps or "9" in self.lSteps:
             if not self.jointGenoId:
                 msg = "ERROR: missing compulsory option --jgid"
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+                
+        if "9" in self.lSteps:
+            if self.restrictAllelesTo not in ["ALL", "BIALLELIC",
+                                              "MULTIALLELIC"]:
+                msg = "ERROR: unknown option --rat %s" % self.restrictAllelesTo
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -1842,6 +1858,9 @@ class Gbs(object):
         
         
     def variantFiltering(self):
+        """
+        http://www.nature.com/articles/sdata201511
+        """
         if self.verbose > 0:
             msg = "filter variant calls across genotypes..."
             sys.stdout.write("%s\n" % msg)
@@ -1892,16 +1911,16 @@ class Gbs(object):
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
         cmd += " -V %s/%s_%s_raw-snps.vcf.gz" % (stepDir, self.project2Id,
                                                  self.jointGenoId)
-        cmd += " --clusterSize 3"
-        cmd += " --clusterWindowSize 0"
-        cmd += " --filterExpression \"DP > 100000\" --filterName \"high_DP\""
-        cmd += " --filterExpression \"QD < 2.0\" --filterName \"low_QD\""
-        cmd += " --filterExpression \"FS > 60.0\" --filterName \"high_FS\""
-        cmd += " --filterExpression \"MQ < 40.0\" --filterName \"low_MQ\""
-        cmd += " --filterExpression \"MQRankSum < -12.5\" --filterName \"low_MQRankSum\""
-        cmd += " --filterExpression \"ReadPosRankSum < -8.0\" --filterName \"low_RPRS\""
-        cmd += " --filterExpression \"HaplotypeScore > 13.0\" --filterName \"high_HS\""
-        cmd += " --filterExpression \"SOR > 4.0\" --filterName \"high_SOR\""
+        cmd += " --clusterSize 3" # default value from GATK
+        cmd += " --clusterWindowSize 0" # default value from GATK
+        cmd += " --filterName \"high_DP\" --filterExpression \"DP > 100000\""
+        cmd += " --filterName \"low_QD\" --filterExpression \"QD < 2.0\""
+        cmd += " --filterName \"high_FS\" --filterExpression \"FS > 60.0\""
+        cmd += " --filterName \"low_MQ\" --filterExpression \"MQ < 40.0\""
+        cmd += " --filterName \"low_MQRankSum\" --filterExpression \"MQRankSum < -12.5\""
+        cmd += " --filterName \"low_RPRS\" --filterExpression \"ReadPosRankSum < -8.0\""
+        cmd += " --filterName \"high_HS\" --filterExpression \"HaplotypeScore > 13.0\""
+        cmd += " --filterName \"high_SOR\" --filterExpression \"SOR > 4.0\""
         cmd += " -o %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
                                                      self.jointGenoId)
         cmd += "\n"
@@ -1915,9 +1934,10 @@ class Gbs(object):
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
         cmd += " -V %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
                                                      self.jointGenoId)
-        cmd += " --restrictAllelesTo BIALLELIC"
+        cmd += " --restrictAllelesTo %s" % self.restrictAllelesTo
         cmd += " --excludeFiltered"
-        cmd += " -mv -mvq 50 -invMv"
+        cmd += " --excludeNonVariants"
+        # cmd += " -ped %s -mv -mvq 50 -invMv" % self.pedFile
         cmd += " -o %s/%s_%s_raw-snps_gatk-filter.vcf.gz" % (stepDir,
                                                              self.project2Id,
                                                              self.jointGenoId)
