@@ -11,7 +11,7 @@
 # - use env var for Java jar (e.g. for Picard)
 # - see where to introduce BQSR
 # - catch exception if step dir already exists, and skip step for the given lane(s)
-# - add option to load pedigree (PED format)
+# - add step to launch PLINK --mendel after using GATK VariantsToBinaryPed
 # - check version of all external programs
 # - check that dates in samples file agree with SAM specification
 # - add option to ignore R2 files
@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.9.1" # http://semver.org/
+progVersion = "0.10.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -721,6 +721,9 @@ class Gbs(object):
         self.dictFile = None
         self.jointGenoId = None
         self.restrictAllelesTo = "ALL"
+        self.famFile = None
+        self.mendelianViolationQualThreshold = 0
+        self.excludeSampleFile = None
         self.tmpDir = "."
         self.jvmXms = "512m"
         self.jvmXmx = "4g"
@@ -823,6 +826,17 @@ class Gbs(object):
         msg += "\t\tused in step 9\n"
         msg += "\t\tdefault=ALL/BIALLELIC/MULTIALLELIC\n"
         msg += "\t\tsee '--restrictAllelesTo' in GATK's SelectVariant\n"
+        msg += "      --fam\tpath to the file containing pedigree information\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tdiscard variants with Mendelian violations (see Semler et al, 2012)\n"
+        msg += "\t\tshould be in the 'fam' format specified by PLINK\n"
+        msg += "\t\tvalidation strictness (GATK '-pedValidationType') is set at 'SILENT'\n"
+        msg += "\t\t allowing some samples to be absent from the pedigree\n"
+        msg += "      --mvq\tminimum GQ for each trio member to accept a site as a Mendelian violation\n"
+        msg += "\t\tused in step 9 if '--fam' is specified\n"
+        msg += "\t\tdefault=0\n"
+        msg += "      --xlssf\tpath to the file with genotypes to exclude\n"
+        msg += "\t\tused in step 9 (can be especially useful if '--fam' is specified)\n"
         msg += "      --tmpd\tpath to a temporary directory on child nodes (default=.)\n"
         msg += "\t\te.g. it can be /tmp or /scratch\n"
         msg += "\t\tused in step 4 for 'samtools sort'\n"
@@ -900,6 +914,9 @@ class Gbs(object):
                                         "ref=",
                                         "jgid=",
                                         "rat=",
+                                        "fam=",
+                                        "mvq=",
+                                        "xlssf=",
                                         "tmpd=",
                                         "jvmXms=",
                                         "jvmXmx=",
@@ -955,6 +972,12 @@ class Gbs(object):
                  self.jointGenoId = a
             elif o == "--rat":
                 self.restrictAllelesTo = a
+            elif o == "--fam":
+                self.famFile = a
+            elif o == "--mvq":
+                self.mendelianViolationQualThreshold = int(a)
+            elif o == "--xlssf":
+                self.excludeSampleFile = a
             elif o == "--tmpd":
                 self.tmpDir = a
             elif o == "--jvmXms":
@@ -1162,8 +1185,20 @@ class Gbs(object):
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-                
-                
+            if self.famFile:
+                if not os.path.exists(self.famFile):
+                    msg = "ERROR: can't find file %s" % self.famFile
+                    sys.stderr.write("%s\n\n" % msg)
+                    self.help()
+                    sys.exit(1)
+            if self.excludeSampleFile:
+                if not os.path.exists(self.excludeSampleFile):
+                    msg = "ERROR: can't find file %s" % self.excludeSampleFile
+                    sys.stderr.write("%s\n\n" % msg)
+                    self.help()
+                    sys.exit(1)
+                    
+                    
     def loadHeaderSamplesFile(self, line):
         """
         Set values to self.samplesCol2idx.
@@ -1937,7 +1972,12 @@ class Gbs(object):
         cmd += " --restrictAllelesTo %s" % self.restrictAllelesTo
         cmd += " --excludeFiltered"
         cmd += " --excludeNonVariants"
-        # cmd += " -ped %s -mv -mvq 50 -invMv" % self.pedFile
+        if self.famFile:
+            cmd += " -ped %s" % self.famFile
+            cmd += " -mv -mvq %i -invMv" % self.mendelianViolationQualThreshold
+            cmd += " --pedigreeValidationType SILENT"
+        if self.excludeSampleFile:
+            cmd += " --exclude_sample_file %s" % self.excludeSampleFile
         cmd += " -o %s/%s_%s_raw-snps_gatk-filter.vcf.gz" % (stepDir,
                                                              self.project2Id,
                                                              self.jointGenoId)
