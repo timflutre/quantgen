@@ -8,6 +8,7 @@
 # Versioning: https://github.com/timflutre/quantgen
 
 # TODO:
+# - update pyutilstimflutre to compress job stdout/stderr files
 # - use env var for Java jar (e.g. for Picard)
 # - see where to introduce BQSR
 # - catch exception if step dir already exists, and skip step for the given lane(s)
