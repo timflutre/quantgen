@@ -714,7 +714,7 @@ class Gbs(object):
                           "realign-reads-geno",
                           "call-variants-geno",
                           "joint-genotyping", # to be completed by jointGenoId
-                          "variant-recalib"]
+                          "variant-geno-filter"]
         self.adpFile = None
         self.adapters = {}
         self.pathToPrefixRefGenome = None
