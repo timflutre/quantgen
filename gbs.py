@@ -58,7 +58,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.10.0" # http://semver.org/
+progVersion = "0.11.0" # http://semver.org/
 
 
 class GbsSample(object):
@@ -721,6 +721,12 @@ class Gbs(object):
         self.dictFile = None
         self.jointGenoId = None
         self.restrictAllelesTo = "ALL"
+        self.minDp = None
+        self.minGq = None
+        self.maxNbFilterGenos = None
+        self.maxFracFilterGenos = None
+        self.maxNbNocallGenos = None
+        self.maxFracNocallGenos = None
         self.famFile = None
         self.mendelianViolationQualThreshold = 0
         self.excludeSampleFile = None
@@ -764,7 +770,7 @@ class Gbs(object):
         msg += "\t\t6: local realignment per genotype (with GATK v >= 3.5)\n"
         msg += "\t\t7: variant and genotype calling per genotype (with GATK HaplotypeCaller v >= 3.5)\n"
         msg += "\t\t8: variant and genotype calling jointly across genotypes (with GATK GenotypeGVCFs v >= 3.5)\n"
-        msg += "\t\t9: variant filtering (with GATK v >= 3.5)"
+        msg += "\t\t9: variant and genotype filtering (with GATK v >= 3.5)\n"
         msg += "      --samples\tpath to the 'samples' file\n"
         msg += "\t\tcompulsory for all steps, but can differ between steps\n"
         msg += "\t\t e.g. if samples come from different species or are aligned\n"
@@ -826,13 +832,30 @@ class Gbs(object):
         msg += "\t\tused in step 9\n"
         msg += "\t\tdefault=ALL/BIALLELIC/MULTIALLELIC\n"
         msg += "\t\tsee '--restrictAllelesTo' in GATK's SelectVariant\n"
+        msg += "      --mdp\tminimum value for DP (read depth; e.g. 10)\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tsee GATK's VariantFiltration\n"
+        msg += "      --mgq\tminimum value for GQ (genotype quality; e.g. 20)\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tsee GATK's VariantFiltration\n"
+        msg += "      --mnfg\tmaximum number of filtered genotypes to keep a variant\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tsee '--maxFilteredGenotypes' in GATK's SelectVariants\n"
+        msg += "      --mffg\tmaximum fraction of filtered genotypes to keep a variant\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tsee '--maxFractionFilteredGenotypes' in GATK's SelectVariants\n"
+        msg += "      --mnnc\tmaximum number of not-called genotypes to keep a variant\n"
+        msg += "\t\tused in step 9\n"
+        msg += "      --mfnc\tmaximum fraction of not-called genotypes to keep a variant\n"
+        msg += "\t\tused in step 9\n"
+        msg += "\t\tsee '--maxNOCALLfraction' in GATK's SelectVariants\n"
         msg += "      --fam\tpath to the file containing pedigree information\n"
         msg += "\t\tused in step 9\n"
         msg += "\t\tdiscard variants with Mendelian violations (see Semler et al, 2012)\n"
         msg += "\t\tshould be in the 'fam' format specified by PLINK\n"
         msg += "\t\tvalidation strictness (GATK '-pedValidationType') is set at 'SILENT'\n"
         msg += "\t\t allowing some samples to be absent from the pedigree\n"
-        msg += "      --mvq\tminimum GQ for each trio member to accept a site as a Mendelian violation\n"
+        msg += "      --mvq\tminimum GQ for each trio member to accept a variant as a Mendelian violation\n"
         msg += "\t\tused in step 9 if '--fam' is specified\n"
         msg += "\t\tdefault=0\n"
         msg += "      --xlssf\tpath to the file with genotypes to exclude\n"
@@ -848,7 +871,7 @@ class Gbs(object):
         msg += "\t\tdefault=4g\n"
         msg += "\t\tused in steps 4, 5, 6, 7 and 8 for Picard and GATK\n"
         msg += "      --knowni\tpath to a VCF file with known indels (for local realignment)\n"
-        msg += "      --known\tpath to a VCF file with known sites (e.g. from dbSNP)\n"
+        msg += "      --known\tpath to a VCF file with known variants (e.g. from dbSNP)\n"
         msg += "      --force\tforce to re-run step(s)\n"
         msg += "\t\tthis removes without warning the step directory if it exists\n"
         msg += "\n"
@@ -914,6 +937,12 @@ class Gbs(object):
                                         "ref=",
                                         "jgid=",
                                         "rat=",
+                                        "mdp=",
+                                        "mgq=",
+                                        "mnfg=",
+                                        "mffg=",
+                                        "mnnc=",
+                                        "mfnc=",
                                         "fam=",
                                         "mvq=",
                                         "xlssf=",
@@ -972,6 +1001,18 @@ class Gbs(object):
                  self.jointGenoId = a
             elif o == "--rat":
                 self.restrictAllelesTo = a
+            elif o == "--mdp":
+                self.minDp = int(a)
+            elif o == "--mgq":
+                self.minGq = int(a)
+            elif o == "--mnfg":
+                self.maxNbFilterGenos = int(a)
+            elif o == "--mffg":
+                self.maxFracFilterGenos = float(a)
+            elif o == "--mnnc":
+                self.maxNbNocallGenos = int(a)
+            elif o == "--mfnc":
+                self.maxFracNocallGenos = float(a)
             elif o == "--fam":
                 self.famFile = a
             elif o == "--mvq":
@@ -1956,6 +1997,12 @@ class Gbs(object):
         cmd += " --filterName \"low_RPRS\" --filterExpression \"ReadPosRankSum < -8.0\""
         cmd += " --filterName \"high_HS\" --filterExpression \"HaplotypeScore > 13.0\""
         cmd += " --filterName \"high_SOR\" --filterExpression \"SOR > 4.0\""
+        if self.minDp:
+            cmd += " --genotypeFilterName \"low_DP\""
+            cmd += " --genotypeFilterExpression \"DP < %i\"" % self.minDp
+        if self.minGq:
+            cmd += " --genotypeFilterName \"low_GQ\""
+            cmd += " --genotypeFilterExpression \"GQ < %i\"" % self.minGq
         cmd += " -o %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
                                                      self.jointGenoId)
         cmd += "\n"
@@ -1972,6 +2019,15 @@ class Gbs(object):
         cmd += " --restrictAllelesTo %s" % self.restrictAllelesTo
         cmd += " --excludeFiltered"
         cmd += " --excludeNonVariants"
+        cmd += " --setFilteredGtToNocall"
+        if self.maxNbFilterGenos:
+            cmd += " --maxFilteredGenotypes %i" % self.maxNbFilterGenos
+        if self.maxFracFilterGenos:
+            cmd += " --maxFractionFilteredGenotypes %f" % self.maxFracFilterGenos
+        if self.maxNbNocallGenos:
+            cmd += " --maxNOCALLnumber %i" % self.maxNbNocallGenos
+        if self.maxFracNocallGenos:
+            cmd += " --maxNOCALLfraction %f" % self.maxFracNocallGenos
         if self.famFile:
             cmd += " -ped %s" % self.famFile
             cmd += " -mv -mvq %i -invMv" % self.mendelianViolationQualThreshold
