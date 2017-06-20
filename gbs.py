@@ -9,6 +9,7 @@
 
 # TODO:
 # - update pyutilstimflutre to compress job stdout/stderr files
+# - refactor variantFiltering()
 # - use env var for Java jar (e.g. for Picard)
 # - see where to introduce BQSR
 # - catch exception if step dir already exists, and skip step for the given lane(s)
@@ -59,7 +60,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.11.0" # http://semver.org/
+progVersion = "0.11.1" # http://semver.org/
 
 
 class GbsSample(object):
@@ -1963,7 +1964,8 @@ class Gbs(object):
             msg = "results will be in '%s'" % stepDir
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
-            
+
+        # 1) SelectVariants -selectType SNP
         cmd = "java"
         cmd += " -Xms%s" % self.jvmXms
         cmd += " -Xmx%s" % self.jvmXmx
@@ -1977,6 +1979,8 @@ class Gbs(object):
         cmd += " -selectType SNP"
         cmd += " -o %s/%s_%s_raw-snps.vcf.gz" % (stepDir, self.project2Id,
                                                  self.jointGenoId)
+        
+        # 2) VariantFiltration --filterExpression --genotypeFilterExpression
         cmd += "\n"
         cmd += "java"
         cmd += " -Xms%s" % self.jvmXms
@@ -1990,22 +1994,32 @@ class Gbs(object):
                                                  self.jointGenoId)
         cmd += " --clusterSize 3" # default value from GATK
         cmd += " --clusterWindowSize 0" # default value from GATK
-        cmd += " --filterName \"high_DP\" --filterExpression \"DP > 100000\""
-        cmd += " --filterName \"low_QD\" --filterExpression \"QD < 2.0\""
-        cmd += " --filterName \"high_FS\" --filterExpression \"FS > 60.0\""
-        cmd += " --filterName \"low_MQ\" --filterExpression \"MQ < 40.0\""
-        cmd += " --filterName \"low_MQRankSum\" --filterExpression \"MQRankSum < -12.5\""
-        cmd += " --filterName \"low_RPRS\" --filterExpression \"ReadPosRankSum < -8.0\""
-        cmd += " --filterName \"high_HS\" --filterExpression \"HaplotypeScore > 13.0\""
-        cmd += " --filterName \"high_SOR\" --filterExpression \"SOR > 4.0\""
+        cmd += " --filterName \"high_DP\""
+        cmd += " --filterExpression \"DP > 100000\""
+        cmd += " --filterName \"low_QD\""
+        cmd += " --filterExpression \"QD < 2.0\""
+        cmd += " --filterName \"high_FS\""
+        cmd += " --filterExpression \"FS > 60.0\""
+        cmd += " --filterName \"low_MQ\""
+        cmd += " --filterExpression \"MQ < 40.0\""
+        cmd += " --filterName \"low_MQRankSum\""
+        cmd += " --filterExpression \"MQRankSum < -12.5\""
+        cmd += " --filterName \"low_RPRS\""
+        cmd += " --filterExpression \"ReadPosRankSum < -8.0\""
+        cmd += " --filterName \"high_HS\""
+        cmd += " --filterExpression \"HaplotypeScore > 13.0\""
+        cmd += " --filterName \"high_SOR\""
+        cmd += " --filterExpression \"SOR > 4.0\""
         if self.minDp:
             cmd += " --genotypeFilterName \"low_DP\""
             cmd += " --genotypeFilterExpression \"DP < %i\"" % self.minDp
         if self.minGq:
             cmd += " --genotypeFilterName \"low_GQ\""
             cmd += " --genotypeFilterExpression \"GQ < %i\"" % self.minGq
-        cmd += " -o %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
+        cmd += " -o %s/%s_%s_raw-snps_tmp1.vcf.gz" % (stepDir, self.project2Id,
                                                      self.jointGenoId)
+        
+        # 3) SelectVariants <exclude sites> --setFilteredGtToNocall -ped ...
         cmd += "\n"
         cmd += "java"
         cmd += " -Xms%s" % self.jvmXms
@@ -2015,32 +2029,70 @@ class Gbs(object):
         cmd += " -jar `which GenomeAnalysisTK.jar`"
         cmd += " -T SelectVariants"
         cmd += " -R %s.fa" % self.pathToPrefixRefGenome
-        cmd += " -V %s/%s_%s_raw-snps_tmp.vcf.gz" % (stepDir, self.project2Id,
+        cmd += " -V %s/%s_%s_raw-snps_tmp1.vcf.gz" % (stepDir, self.project2Id,
                                                      self.jointGenoId)
         cmd += " --restrictAllelesTo %s" % self.restrictAllelesTo
         cmd += " --excludeFiltered"
         cmd += " --excludeNonVariants"
         cmd += " --setFilteredGtToNocall"
-        if self.maxNbFilterGenos:
-            cmd += " --maxFilteredGenotypes %i" % self.maxNbFilterGenos
-        if self.maxFracFilterGenos:
-            cmd += " --maxFractionFilteredGenotypes %f" % self.maxFracFilterGenos
-        if self.maxNbNocallGenos:
-            cmd += " --maxNOCALLnumber %i" % self.maxNbNocallGenos
-        if self.maxFracNocallGenos:
-            cmd += " --maxNOCALLfraction %f" % self.maxFracNocallGenos
         if self.famFile:
             cmd += " -ped %s" % self.famFile
             cmd += " -mv -mvq %i -invMv" % self.mendelianViolationQualThreshold
             cmd += " --pedigreeValidationType SILENT"
         if self.excludeSampleFile:
             cmd += " --exclude_sample_file %s" % self.excludeSampleFile
-        cmd += " -o %s/%s_%s_raw-snps_gatk-filter.vcf.gz" % (stepDir,
+        cmd += " -o %s/%s_%s_raw-snps_tmp2.vcf.gz" % (stepDir,
+                                                      self.project2Id,
+                                                      self.jointGenoId)
+        
+        # 4) SelectVariants <FilteredGenotypes> <NOCALL>
+        # http://gatkforums.broadinstitute.org/gatk/discussion/9795
+        if self.maxNbFilterGenos or self.maxFracFilterGenos or \
+           self.maxNbNocallGenos or self.maxFracNocallGenos:
+            cmd += "\n"
+            cmd += "java"
+            cmd += " -Xms%s" % self.jvmXms
+            cmd += " -Xmx%s" % self.jvmXmx
+            # if self.tmpDir:
+            #     cmd += " -Djava.io.tmpdir=%s" % self.tmpDir
+            cmd += " -jar `which GenomeAnalysisTK.jar`"
+            cmd += " -T SelectVariants"
+            cmd += " -R %s.fa" % self.pathToPrefixRefGenome
+            cmd += " -V %s/%s_%s_raw-snps_tmp2.vcf.gz" % (stepDir, self.project2Id,
+                                                          self.jointGenoId)
+            if self.maxNbFilterGenos:
+                cmd += " --maxFilteredGenotypes %i" % self.maxNbFilterGenos
+            if self.maxFracFilterGenos:
+                cmd += " --maxFractionFilteredGenotypes %f" % self.maxFracFilterGenos
+            if self.maxNbNocallGenos:
+                cmd += " --maxNOCALLnumber %i" % self.maxNbNocallGenos
+            if self.maxFracNocallGenos:
+                cmd += " --maxNOCALLfraction %f" % self.maxFracNocallGenos
+            cmd += " -o %s/%s_%s_raw-snps_gatk-filter.vcf.gz" % (stepDir,
+                                                                 self.project2Id,
+                                                                 self.jointGenoId)
+            cmd += "\n"
+            cmd += "rm %s/%s_%s_raw-snps_tmp2.vcf.gz*" % (stepDir, self.project2Id,
+                                                          self.jointGenoId)
+        else:
+            cmd += "\n"
+            cmd += "mv %s/%s_%s_raw-snps_tmp2.vcf.gz" % (stepDir,
+                                                         self.project2Id,
+                                                         self.jointGenoId)
+            cmd += " %s/%s_%s_raw-snps_gatk-filter.vcf.gz" % (stepDir,
+                                                              self.project2Id,
+                                                              self.jointGenoId)
+            cmd += "\n"
+            cmd += "mv %s/%s_%s_raw-snps_tmp2.vcf.gz.tbi" % (stepDir,
                                                              self.project2Id,
                                                              self.jointGenoId)
+            cmd += " %s/%s_%s_raw-snps_gatk-filter.vcf.gz.tbi" % (stepDir,
+                                                                  self.project2Id,
+                                                                  self.jointGenoId)
         cmd += "\n"
-        cmd += "rm %s/%s_%s_raw-snps_tmp.vcf.gz*" % (stepDir, self.project2Id,
-                                                     self.jointGenoId)
+        cmd += "rm %s/%s_%s_raw-snps_tmp1.vcf.gz*" % (stepDir, self.project2Id,
+                                                      self.jointGenoId)
+        
         if self.verbose > 1:
             print(cmd)
         jobName = "stdout_%s" % (iJobGroup.id)
