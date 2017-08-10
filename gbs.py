@@ -60,7 +60,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.11.1" # http://semver.org/
+progVersion = "0.11.2" # http://semver.org/
 
 
 class GbsSample(object):
@@ -371,7 +371,7 @@ class GbsLane(object):
         self.flowcell = flowcell
         self.number = number
         self.dir = None
-        self.dSamples = {}
+        self.dSamples = {} # keys: sample id ; values: GbsSample object
         self.dInitFastqFiles = {} # key(s): R1 (and R2, optional)
                                   # values: [init, symlink]
         
@@ -504,10 +504,11 @@ class GbsLane(object):
             iSample.setInitialBamFile(dirName)
             
     def gather(self, jvmXms, jvmXmx, outDir, iJobGroup):
-        cmd = "echo \"merge and index...\""
+        lSamples = self.dSamples.keys()
+        cmd = "echo \"merge and index BAMs from %s (%i samples)...\"" \
+              % (self.id, len(lSamples))
         cmd += "\ntime samtools merge -f"
         cmd += " %s/%s.bam" % (outDir, self.id)
-        lSamples = self.dSamples.keys()
         lSamples.sort()
         for sampleId in lSamples:
             cmd += " %s" % self.dSamples[sampleId].initialBamFile
@@ -704,6 +705,7 @@ class Gbs(object):
                                "fastq_file_R2": None}
         self.dSamples = {}
         self.dLanes = {}
+        self.dFlowcells = {}
         self.dGenos = {}
         self.allLanesDir = None # depends on cwd and project1Id
         self.allSamplesDir = None # depends on cwd and project2Id
@@ -1265,7 +1267,7 @@ class Gbs(object):
             
     def loadContentSamplesFile(self, lines):
         """
-        Fill self.dSamples, self.dLanes and self.dGenos.
+        Fill self.dSamples, self.dLanes, self.dFlowcells and self.dGenos.
         """
         refgenome = set()
         
@@ -1312,13 +1314,18 @@ class Gbs(object):
                                  tokens[self.samplesCol2idx["fastq_file_R2"]])
             self.dSamples[iSample.id] = iSample
             refgenome.add(iSample.refGenome)
-            
+
+            if flowcell not in self.dFlowcells:
+                self.dFlowcells[flowcell] = []
+            if laneNum not in self.dFlowcells[flowcell]:
+                self.dFlowcells[flowcell].append(laneNum)
+
             # create and fill a "GbsLane" object
             laneId = "%s_%i" % (flowcell, laneNum)
             if laneId not in self.dLanes:
                 self.dLanes[laneId] = GbsLane(laneId, flowcell, laneNum)
             self.dLanes[laneId].insert(iSample)
-            
+
             # create and fill a "GbsGeno" object
             if geno not in self.dGenos:
                 self.dGenos[geno] = GbsGeno(geno)
@@ -1350,9 +1357,20 @@ class Gbs(object):
         samplesHandle.close()
         
         if self.verbose > 0:
-            msg = "nb of samples: %i" % len(self.dSamples)
-            msg += "\nnb of lanes: %i" % len(self.dLanes)
-            msg += "\nnb of genotypes: %i" % len(self.dGenos)
+            msg = "nb of genotypes: %i" % len(self.dGenos)
+            msg += "\nnb of samples: %i" % len(self.dSamples)
+            msg += "\nnb of flowcell%s: %i" \
+                   % ("s" if len(self.dFlowcells) > 1 else "",
+                      len(self.dFlowcells))
+            msg += "\nnb of lane%s: %i" \
+                   % ("s" if len(self.dLanes) > 1 else "",
+                      len(self.dLanes))
+            for flowcell in self.dFlowcells:
+                for laneNum in self.dFlowcells[flowcell]:
+                    laneId = "%s_%i" % (flowcell, laneNum)
+                    msg += "\nflowcell %s, lane %i: %i samples" \
+                           % (flowcell, laneNum,
+                              len(self.dLanes[laneId].dSamples))
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
@@ -1369,8 +1387,11 @@ class Gbs(object):
             iLane.dir = dirLane
             if not os.path.exists(dirLane):
                 os.mkdir(dirLane)
-                
-                
+        if self.verbose > 0:
+            msg = "lane directories: %s" % self.allLanesDir
+            print(msg); sys.stdout.flush()
+
+
     def setupSampleDirectories(self):
         """
         One sub-directory per sample.
@@ -1384,8 +1405,11 @@ class Gbs(object):
             iSample.dir = dirSample
             if not os.path.exists(dirSample):
                 os.mkdir(dirSample)
-                
-                
+        if self.verbose > 0:
+            msg = "sample directories: %s" % self.allSamplesDir
+            print(msg); sys.stdout.flush()
+
+
     def setupGenotypeDirectories(self):
         """
         One sub-directory per genotype.
@@ -1399,8 +1423,11 @@ class Gbs(object):
             iGeno.dir = dirGeno
             if not os.path.exists(dirGeno):
                 os.mkdir(dirGeno)
-                
-                
+        if self.verbose > 0:
+            msg = "genotype directories: %s" % self.allGenosDir
+            print(msg); sys.stdout.flush()
+
+
     def beginStep(self, stepNum):
         if self.verbose > 0:
             msg = "perform step %i..." % stepNum
@@ -1449,7 +1476,7 @@ class Gbs(object):
             msg = "step %i is done (%s, see '%s/')" \
                   % (stepNum,
                      stepDuration,
-                     os.path.basename(self.lDirSteps[stepNum - 1]))
+                     self.lDirSteps[stepNum - 1])
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
@@ -1739,29 +1766,30 @@ class Gbs(object):
         outFile = "%s/%s_reads-count-ok.txt" % \
                   (self.allSamplesDir, self.project2Id)
         if os.path.exists(outFile):
-            if self.forceRerunSteps:
-                os.remove(outFile)
+            os.remove(outFile)
         if os.path.exists("%s.gz" % outFile):
-            if self.forceRerunSteps:
-                os.remove("%s.gz" % outFile)
+            os.remove("%s.gz" % outFile)
         outHandle = open(outFile, "w")
         txt = "geno"
         txt += "\tflowcell"
         txt += "\tlane"
         txt += "\tnb.reads.align.ok" # nb of reads if single, of pairs if paired-end
         outHandle.write("%s\n" % txt)
+        for laneId in self.dLanes:
+            for sampleId in self.dLanes[laneId].dSamples:
+                tmpFile = "%s/%s/align-reads/reads_count-ok_%s.txt" \
+                          % (self.allSamplesDir, sampleId, sampleId)
+                tmpHandle = open(tmpFile, "rb")
+                outHandle.write(tmpHandle.read())
+                tmpHandle.close()
         outHandle.close()
-        cmd = "cat %s/*_*_*/align-reads/reads_count-ok_*.txt" % \
-              self.allSamplesDir
-        # cmd += " | awk '{a[$3]+=$4} END{for(x in a){print x,a[x]}}'"
-        # cmd += " | sort -k2,2n"
-        cmd += " >> %s" % outFile
-        cmd += "; rm -f %s.gz" % outFile
-        cmd += "; gzip %s" % outFile
-        p = subprocess.Popen(cmd, shell=True,
-                             stdout=subprocess.PIPE).communicate()
-        
-        
+        with open(outFile, "rb") as f_in, \
+             gzip.open("%s.gz" % outFile, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        if os.path.exists(outFile):
+            os.remove(outFile)
+
+
     def step4(self):
         cwd, startTime = self.beginStep(4)
         self.alignCleanedReads()
