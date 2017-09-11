@@ -158,8 +158,20 @@ class TestGbs(object):
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
-                
-                
+        args = ["which", "bwa"]
+        try:
+            p = subprocess.check_output(args, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError, e:
+            msg = "can't find 'bwa' in PATH"
+            raise ValueError(msg)
+        args = ["which", "samtools"]
+        try:
+            p = subprocess.check_output(args, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError, e:
+            msg = "can't find 'samtools' in PATH"
+            raise ValueError(msg)
+        
+        
     #==========================================================================
     
     
