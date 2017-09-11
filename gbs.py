@@ -60,7 +60,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.11.2" # http://semver.org/
+progVersion = "0.11.3" # http://semver.org/
 
 
 class GbsSample(object):
@@ -126,7 +126,8 @@ class GbsSample(object):
         if len(lFilesR2) == 1:
             self.dDemultiplexedFastqFiles["R2"] = lFilesR2[0]
             
-    def clean(self, adpR1, adpR2, outDir, iJobGroup):
+    def clean(self, adpR1, adpR2, errTol, minOvl, minReadLen, minQual,
+              maxNPerc, outDir, iJobGroup):
         """
         https://cutadapt.readthedocs.org/en/stable/
         """
@@ -137,12 +138,12 @@ class GbsSample(object):
         cmd += " -o %s/%s_clean_R1.fastq.gz" % (outDir, self.id)
         if "R2" in self.dDemultiplexedFastqFiles:
             cmd += " -p %s/%s_clean_R2.fastq.gz" % (outDir, self.id)
-        cmd += " -e 0.2" # error tolerance
-        cmd += " -O 3" # min overlap length btw reads and seq passed to -a/-A
-        cmd += " -m 35" # min read length
+        cmd += " -e %f" % errTol # error tolerance
+        cmd += " -O %i" % minOvl # min overlap len btw reads and seq passed to -a/-A
+        cmd += " -m %i" % minReadLen # min read length
         # cmd += " -U 3" # fixed nb of bases removed from starts of R2 reads
-        cmd += " -q 20,20" # quality trimming
-        cmd += " --max-n 0.2"
+        cmd += " -q %i,%i" % (minQual, minQual) # quality trimming
+        cmd += " --max-n %f" % maxNPerc
         # cmd += " --maximum-length 150"
         cmd += " %s" % self.dDemultiplexedFastqFiles["R1"]
         if "R2" in self.dDemultiplexedFastqFiles:
@@ -445,8 +446,8 @@ class GbsLane(object):
         fileHandle.close()
         return fileName
         
-    def demultiplex(self, outDir, enzyme, nbSubstitutionsAllowed, enforceSubst,
-                    iJobGroup):
+    def demultiplex(self, outDir, enzyme, method, nbSubstitutionsAllowed,
+                    enforceSubst, iJobGroup):
         cmd = "demultiplex.py"
         cmd += " --idir %s" % os.path.dirname(self.dInitFastqFiles["R1"][1])
         cmd += " --ifq1 %s" % os.path.basename(self.dInitFastqFiles["R1"][1])
@@ -454,7 +455,7 @@ class GbsLane(object):
             cmd += " --ifq2 %s" % os.path.basename(self.dInitFastqFiles["R2"][1])
         cmd += " --it %s" % self.saveBarcodeFile(outDir, "fasta")
         cmd += " --ofqp %s/%s" % (outDir, self.id)
-        cmd += " --met %s" % "4c"
+        cmd += " --met %s" % method
         cmd += " --subst %i" % nbSubstitutionsAllowed
         cmd += " --ensubst %s" % enforceSubst
         cmd += " --dist %i" % 0
@@ -470,9 +471,11 @@ class GbsLane(object):
         for sampleId,iSample in self.dSamples.items():
             iSample.setDemultiplexedFastqFiles(pathToDir)
             
-    def clean(self, adpR1, adpR2, outDir, iJobGroup):
+    def clean(self, adpR1, adpR2, errTol, minOvl, minReadLen, minQual,
+              maxNPerc, outDir, iJobGroup):
         for sampleId,iSample in self.dSamples.items():
-            iSample.clean(adpR1, adpR2, outDir, iJobGroup)
+            iSample.clean(adpR1, adpR2, errTol, minOvl, minReadLen, minQual,
+                          maxNPerc, outDir, iJobGroup)
             
     def setCleanedFastqFiles(self, pathToDir):
         for sampleId,iSample in self.dSamples.items():
@@ -688,6 +691,7 @@ class Gbs(object):
         self.fclnToKeep = None
         self.pathToInReadsDir = ""
         self.enzyme = "ApeKI"
+        self.dmxMethod = "4c"
         self.nbSubstsAllowedDemult = 2
         self.enforceSubst = "lenient"
         self.jobManager = None # instantiated in run()
@@ -721,6 +725,11 @@ class Gbs(object):
                           "variant-geno-filter"]
         self.adpFile = None
         self.adapters = {}
+        self.errTol = 0.2
+        self.minOvl = 3
+        self.minReadLen = 35
+        self.minQual = 20
+        self.maxNPerc = 0.2
         self.pathToPrefixRefGenome = None
         self.dictFile = None
         self.jointGenoId = None
@@ -769,7 +778,7 @@ class Gbs(object):
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
         msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.14.0)\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
-        msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.1 and Picard)\n"
+        msg += "\t\t4: alignment per sample (with BWA MEM v >= 0.7.12, Samtools v >= 1.3, Picard and R v >= 3)\n"
         msg += "\t\t5: local realignment per sample (with GATK v >= 3.5)\n"
         msg += "\t\t6: local realignment per genotype (with GATK v >= 3.5)\n"
         msg += "\t\t7: variant and genotype calling per genotype (with GATK HaplotypeCaller v >= 3.5)\n"
@@ -796,7 +805,7 @@ class Gbs(object):
         msg += "\t\t seq_platform (e.g. 'ILLUMINA', see SAM format specification)\n"
         msg += "\t\t seq_platform_model (e.g. 'HiSeq 2000')\n"
         msg += "\t\t flowcell (e.g. 'C5YMDACXX')\n"
-        msg += "\t\t lane (e.g. '3')\n"
+        msg += "\t\t lane (e.g. '3', can be '31' if a first demultiplexing was done per index)\n"
         msg += "\t\t date (e.g. '2015-01-15', see SAM format specification)\n"
         msg += "\t\t fastq_file_R1 (filename, one per lane, gzip-compressed)\n"
         msg += "\t\t fastq_file_R2 (filename, one per lane, gzip-compressed)\n"
@@ -810,6 +819,9 @@ class Gbs(object):
         msg += "      --enz\tname of the restriction enzyme\n"
         msg += "\t\tcompulsory for step 2\n"
         msg += "\t\tdefault=ApeKI\n"
+        msg += "      --dmxmet\nmethod used to demultiplex\n"
+        msg += "\t\tcompulsory for step 2\n"
+        msg += "\t\tdefault=4c (see the help of demultiplex.py to know more)\n"
         msg += "      --subst\tnumber of substitutions allowed during demultiplexing\n"
         msg += "\t\tcompulsory for step 2\n"
         msg += "\t\tdefault=2\n"
@@ -821,6 +833,21 @@ class Gbs(object):
         msg += "\t\tsame format as FastQC: name<tab>sequence\n"
         msg += "\t\tname: at least 'adpR1' (also 'adpR2' if paired-end)\n"
         msg += "\t\tsequence: from 5' (left) to 3' (right)\n"
+        msg = "       --errtol\terror tolerance to find adapters\n"
+        msg += "\t\tcompulsory for step 3\n"
+        msg += "\t\tdefault=0.2\n"
+        msg = "       --minovl\tminimum overlap length between reads and adapters\n"
+        msg += "\t\tcompulsory for step 3\n"
+        msg += "\t\tdefault=3 (in bases)\n"
+        msg = "       --minrl\tminimum length to keep a read\n"
+        msg += "\t\tcompulsory for step 3\n"
+        msg += "\t\tdefault=35 (in bases)\n"
+        msg = "       --minq\tminimum quality to trim a read\n"
+        msg += "\t\tcompulsory for step 3\n"
+        msg += "\t\tdefault=20 (used for both reads if paired-end)\n"
+        msg = "       --maxNp\tmaximum percentage of N to keep a read\n"
+        msg += "\t\tcompulsory for step 3\n"
+        msg += "\t\tdefault=0.2\n"
         msg += "      --ref\tpath to the prefix of files for the reference genome\n"
         msg += "\t\tcompulsory for steps 4, 5, 6, 7, 8, 9\n"
         msg += "\t\tshould correspond to the 'ref_genome' column in --samples\n"
@@ -935,9 +962,15 @@ class Gbs(object):
                                         "schdlr=",
                                         "queue=",
                                         "enz=",
+                                        "dmxmet=",
                                         "subst=",
                                         "ensubst=",
                                         "adp=",
+                                        "errtol=",
+                                        "minovl=",
+                                        "minrl=",
+                                        "minq=",
+                                        "maxNp=",
                                         "ref=",
                                         "jgid=",
                                         "rat=",
@@ -991,12 +1024,24 @@ class Gbs(object):
                 self.pathToInReadsDir = a
             elif o == "--enz":
                 self.enzyme = a
+            elif o == "--dmxmet":
+                self.dmxMethod = a
             elif o == "--subst":
                 self.nbSubstsAllowedDemult = int(a)
             elif o == "--ensubst":
                 self.enforceSubst = a
             elif o == "--adp":
                 self.adpFile = a
+            elif o == "--errtol":
+                self.errTol = float(a)
+            elif o == "--minovl":
+                self.minOvl = int(a)
+            elif o == "--minrl":
+                self.minReadLen = int(a)
+            elif o == "--minq":
+                self.minQual = int(a)
+            elif o == "--maxNp":
+                self.maxNPerc = float(a)
             elif o == "--ref":
                 self.pathToPrefixRefGenome = a
             elif o == "--dict":
@@ -1129,6 +1174,12 @@ class Gbs(object):
                 sys.exit(1)
             if not os.path.exists(self.adpFile):
                 msg = "ERROR: can't find file %s" % self.adpFile
+                sys.stderr.write("%s\n\n" % msg)
+                self.help()
+                sys.exit(1)
+            if self.maxNPerc < 0 or self.maxNPerc > 1:
+                msg = "ERROR: --maxNp %f should be between 0 and 1" \
+                      % self.maxNPerc
                 sys.stderr.write("%s\n\n" % msg)
                 self.help()
                 sys.exit(1)
@@ -1576,8 +1627,9 @@ class Gbs(object):
             self.makeDir(stepDir)
             iLane.setInitFastqFiles()
             iLane.makeInitFastqFileSymlinks()
-            iLane.demultiplex(stepDir, self.enzyme, self.nbSubstsAllowedDemult,
-                              self.enforceSubst, iJobGroup)
+            iLane.demultiplex(stepDir, self.enzyme, self.dmxMethod,
+                              self.nbSubstsAllowedDemult, self.enforceSubst,
+                              iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
         self.jobManager.wait(iJobGroup.id, self.verbose)
@@ -1609,7 +1661,8 @@ class Gbs(object):
             iLane.setDemultiplexedFastqFiles("%s/%s" % (iLane.dir,
                                                         self.lDirSteps[1]))
             iLane.clean(self.adapters["adpR1"], self.adapters["adpR2"],
-                        stepDir, iJobGroup)
+                        self.errTol, self.minOvl, self.minReadLen,
+                        self.minQual, self.maxNPerc, stepDir, iJobGroup)
             
         self.jobManager.submit(iJobGroup.id)
         self.jobManager.wait(iJobGroup.id, self.verbose)
