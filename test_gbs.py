@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Aim: test gbs.py
-# Copyright (C) 2015-2016 Institut National de la Recherche Agronomique
+# Copyright (C) 2015-2017 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
@@ -38,7 +38,7 @@ if sys.version_info[0] == 2:
         sys.stderr.write("%s\n\n" % msg)
         sys.exit(1)
         
-progVersion = "0.4.1" # http://semver.org/
+progVersion = "0.4.3" # http://semver.org/
 
 
 class TestGbs(object):
@@ -73,17 +73,19 @@ class TestGbs(object):
         msg += "  -n, --noclean\tkeep temporary directory with all files\n"
         msg += "\n"
         msg += "Examples:\n"
-        msg += "  %s -p ~/src/gbs.py\n" % os.path.basename(sys.argv[0])
-        msg += "  ../gbs.py --proj1 testGbs --step 1 --samples samples.txt --pird ~/src/...\n"
-        msg += "  ../gbs.py --proj1 testGbs --step 2 --samples samples.txt --pird ~/src/...\n"
-        msg += "  ../gbs.py --proj1 testGbs --step 3 --samples samples.txt --pird ~/src/... --adp adapters.txt\n"
-        msg += "  ../gbs.py --proj1 testGbs --proj2 testGbs-Atha --step 4 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2 --dict ~/src/...refgenome_Atha_v2.dict\n"
-        msg += "  ../gbs.py --proj2 testGbs-Atha --step 5 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2\n"
-        msg += "  ../gbs.py --proj2 testGbs-Atha --step 6 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2\n"
-        msg += "  ../gbs.py --proj2 testGbs-Atha --step 7 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2\n"
-        msg += "  ../gbs.py --proj2 testGbs-Atha --step 8 --samples samples_Atha_v2.txt --ref ~/src/...refgenome_Atha_v2 --jgid cohort-Atha\n"
+        msg += "  ./%s -p ~/src/.../gbs.py -n -v 2\n" % os.path.basename(sys.argv[0])
+        msg += "  cd tmp_test_...\n"
+        msg += "  ../gbs.py --proj1 testGbs --step 1 --samples samples.txt --pird ~/src/.../tmp_test_...\n"
+        msg += "  ../gbs.py --proj1 testGbs --step 2 --samples samples.txt --pird ~/src/.../tmp_test_...\n"
+        msg += "  ../gbs.py --proj1 testGbs --step 3 --samples samples.txt --pird ~/src/.../tmp_test_... --adp adapters.txt\n"
+        msg += "  ../gbs.py --proj1 testGbs --proj2 testGbs-Atha --step 4 --samples samples_Atha_v2.txt --ref ~/src/.../tmp_test_.../refgenome_Atha_v2 --dict ~/src/.../tmp_test_.../refgenome_Atha_v2.dict\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 5 --samples samples_Atha_v2.txt --ref ~/src/.../tmp_test_.../refgenome_Atha_v2\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 6 --samples samples_Atha_v2.txt --ref ~/src/.../tmp_test_.../refgenome_Atha_v2\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 7 --samples samples_Atha_v2.txt --ref ~/src/.../tmp_test_.../refgenome_Atha_v2\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 8 --samples samples_Atha_v2.txt --ref ~/src/.../tmp_test_.../refgenome_Atha_v2 --jgid cohort-Atha\n"
+        msg += "  ../gbs.py --proj2 testGbs-Atha --step 9 --samples samples_Atha_v2.txt --ref ~/src/.../tmp_test_.../refgenome_Atha_v2 --jgid cohort-Atha\n"
         msg += "\n"
-        msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
+        msg += "Report bugs to <timothee.flutre@inra.fr>."
         print(msg); sys.stdout.flush()
         
         
