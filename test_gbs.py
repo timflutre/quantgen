@@ -192,9 +192,10 @@ class TestGbs(object):
     def makeSamplesFile(self):
         """
         refgenome 1, 4 genotypes: geno1 (mother), geno2 (father), geno3 (child), geno4 (child)
-        refgenome 2, 1 genotype: geno5
+        refgenome 2, 2 genotypes: geno5, geno6
         2 lanes, 6 samples (parents present in both lanes)
-        2 extractions, and thus 2 libraries, for geno1
+        2 extractions, and thus 2 libraries, for geno1 (on different lanes)
+        2 extractions, and thus 2 libraries, for geno6 (on the same lane)
         """
         samplesFile = "samples.txt"
         samplesAthaFile = "samples_Atha_v2.txt"
@@ -224,7 +225,11 @@ class TestGbs(object):
                                        "geno4": {"refgenomeId":"Atha_v2", "gen":1,
                                                  "lib":"geno4", "tag":"AAAA"},
                                        "geno5": {"refgenomeId":"Vvin_v1", "gen":0,
-                                                 "lib":"geno5", "tag":"AATTCC"}}}
+                                                 "lib":"geno5", "tag":"AATTCC"},
+                                       "geno6": {"refgenomeId":"Vvin_v1", "gen":0,
+                                                 "lib":"geno6", "tag":"TTAATT"},
+                                       "geno6b": {"refgenomeId":"Vvin_v1", "gen":0,
+                                                  "lib":"geno6", "tag":"TCTCTA"}}}
         
         # header
         txt = "genotype"
@@ -344,6 +349,38 @@ class TestGbs(object):
         txt += "\t%s" % lane2samples["2"]["genos"]["geno5"]["refgenomeId"]
         txt += "\t%s" % lane2samples["2"]["genos"]["geno5"]["lib"]
         txt += "\t%s" % lane2samples["2"]["genos"]["geno5"]["tag"]
+        txt += "\tGenoToul"
+        txt += "\tILLUMINA"
+        txt += "\tHiSeq 2000"
+        txt += "\tF6YMDACDT"
+        txt += "\t%i" % 2
+        txt += "\t2015-01-15"
+        txt += "\t%s" % lane2samples["2"]["R1"]
+        txt += "\t%s" % lane2samples["2"]["R2"]
+        samplesHandle.write("%s\n" % txt)
+        samplesVvinHandle.write("%s\n" % txt)
+        
+        # geno6 in lane 2 (first time)
+        txt = "geno6"
+        txt += "\t%s" % lane2samples["2"]["genos"]["geno6"]["refgenomeId"]
+        txt += "\t%s" % lane2samples["2"]["genos"]["geno6"]["lib"]
+        txt += "\t%s" % lane2samples["2"]["genos"]["geno6"]["tag"]
+        txt += "\tGenoToul"
+        txt += "\tILLUMINA"
+        txt += "\tHiSeq 2000"
+        txt += "\tF6YMDACDT"
+        txt += "\t%i" % 2
+        txt += "\t2015-01-15"
+        txt += "\t%s" % lane2samples["2"]["R1"]
+        txt += "\t%s" % lane2samples["2"]["R2"]
+        samplesHandle.write("%s\n" % txt)
+        samplesVvinHandle.write("%s\n" % txt)
+        
+        # geno6 in lane 2 (second time)
+        txt = "geno6"
+        txt += "\t%s" % lane2samples["2"]["genos"]["geno6b"]["refgenomeId"]
+        txt += "\t%s" % lane2samples["2"]["genos"]["geno6b"]["lib"]
+        txt += "\t%s" % lane2samples["2"]["genos"]["geno6b"]["tag"]
         txt += "\tGenoToul"
         txt += "\tILLUMINA"
         txt += "\tHiSeq 2000"
