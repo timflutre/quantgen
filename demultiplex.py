@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Aim: demultiplex samples in fastq files
-# Copyright (C) 2014-2016 Institut National de la Recherche Agronomique
+# Copyright (C) 2014-2017 Institut National de la Recherche Agronomique
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut], Laurène Gay [ctb], Nicolas Rode [ctb]
 # Versioning: https://github.com/timflutre/quantgen
@@ -40,11 +40,34 @@ import math
 import gzip
 import re
 import itertools
+import pip
+import pkg_resources
 try:
     import regex
     regexIsImported = True
 except ImportError:
     regexIsImported = False
+
+if sys.version_info[0] == 2:
+    if sys.version_info[1] < 7:
+        msg = "ERROR: Python should be in version 2.7 or higher"
+        sys.stderr.write("%s\n\n" % msg)
+        sys.exit(1)
+
+## check dependencies
+installed_packages = pip.get_installed_distributions()
+versions = {package.key: package.version for package in installed_packages}
+deps = {"biopython": "1.64"}
+for depN,depV in deps.items():
+    msg = "ERROR: %s depends on %s in version %s or higher" % \
+          (os.path.basename(sys.argv[0]), depN, depV)
+    if depN not in versions:
+        sys.stderr.write("%s\n" % msg)
+        sys.exit(1)
+    if pkg_resources.parse_version(versions[depN]) \
+       < pkg_resources.parse_version(depV):
+        sys.stderr.write("%s\n" % msg)
+        sys.exit(1)
     
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -53,14 +76,8 @@ from Bio.Alphabet import IUPAC
 from Bio import Restriction
 from Bio.Data.IUPACData import ambiguous_dna_values
 from Bio.SeqIO.QualityIO import FastqGeneralIterator
-
-if sys.version_info[0] == 2:
-    if sys.version_info[1] < 7:
-        msg = "ERROR: Python should be in version 2.7 or higher"
-        sys.stderr.write("%s\n\n" % msg)
-        sys.exit(1)
         
-progVersion = "1.14.0" # http://semver.org/
+progVersion = "1.15.0" # http://semver.org/
 
 
 class Demultiplex(object):
@@ -77,16 +94,24 @@ class Demultiplex(object):
         self.outPrefix = None
         self.method = None
         self.dist = -1
-        self.restrictEnzyme = None
+        self.restrictEnzyme = None # object from Biopython
         self.findChimeras = "1"
         self.clipIdx = True
-        self.tags = {} # keys are individuals and values are sequences (as string)
-        self.cutMotif = ""
-        self.regexpCutMotif = "" # used if findChimeras != 0
-        self.regexpCompilCutMotif = "" # used if findChimeras != 0
-        self.lenRemainMotif = -1
-        self.regexpRemainMotif = "" # remaining motif (as uncompiled regexp)
-        self.patterns = {} # keys are individuals and values are tag+motif (as compiled regexp)
+        
+        self.dTags = {}
+        # keys are tag sequences as string from the input file
+        # values are dictionaries:
+        #   key "sample" contains the sample identifier as string
+        #   key "re" contains the pattern as compiled regexp
+        # e.g. with method 4c:
+        # self.dTags["AATAG"] = {"sample": "ind32",
+        #                        "re": <object>}
+        
+        self.cutMotif = "" # e.g. "G^CWG_C"
+        self.regexpCutMotif = "" # used if findChimeras != 0; e.g. "GC[AT]GC"
+        self.regexpCompilCutMotif = "" # used if findChimeras != 0; object
+        self.lenRemainMotif = -1 # e.g. 4
+        self.regexpRemainMotif = "" # regexp of remain motif as string; e.g. "C[AT]GC"
         self.dInd2NbAssigned = {}
         self.nbSubstitutionsAllowed = 0 # requires module "regex"
         self.enforceSubst = "lenient"
@@ -138,8 +163,11 @@ class Demultiplex(object):
         msg += "\t\t fasta: put sample names in the fasta headers\n"
         msg += "\t\t table: 2 columns, header line should be 'id\\ttag'\n"
         msg += "\t\talways compulsory\n"
+        msg += "\t\tonly 'table' allows to have multiple tags for the same sample\n"
         msg += "      --ofqp\tprefix for the output fastq files\n"
-        msg += "\t\t2 per ind, 1 for unassigned, 1 for chimeras\n"
+        msg += "\t\t2 for assigned reads per sample if paired-ends, 1 otherwise\n"
+        msg += "\t\t1 for unassigned reads\n"
+        msg += "\t\t1 for chimeras\n"
         msg += "\t\tsuffix will be \".fastq.gz\" (not \".fq\" because of FastQC)\n"
         msg += "\t\twill be compressed with gzip\n"
         msg += "\t\tthis prefix will also be used for a gzipped text file\n"
@@ -152,7 +180,7 @@ class Demultiplex(object):
         msg += "\t\t   requires --ifq2\n"
         msg += "\t\t2: assign pair if at least one read starts with the tag\n"
         msg += "\t\t   requires --ifq2\n"
-        msg += "\t\t3: same as 2 but count if one or both reads start with the tag\n"
+        msg += "\t\t3: same as 2, and also count if one or both reads start with the tag\n"
         msg += "\t\t   requires --ifq2\n"
         msg += "\t\t4a: assign pair if first read starts with tag\n"
         msg += "\t\t    ignore second read for assignment, but save it if --ifq2 is present\n"
@@ -174,6 +202,7 @@ class Demultiplex(object):
         msg += "\t\t'lenient' starts from the value given via '--subst'\n"
         msg += "\t\tand decreases it until all tags are distinguishable\n"
         msg += "      --dist\tdistance from the read start to search for the tag (in bp)\n"
+        msg += "\t\tany value > 0 is incompatible with --met 1/2/3/4a\n"
         msg += "\t\tany value <= 0 disables it for --met 4b/4c/4d\n"
         msg += "      --re\tname of the restriction enzyme (e.g. 'ApeKI')\n"
         msg += "      --chim\tsearch if full restriction site found in R1 and/or R2\n"
@@ -188,7 +217,10 @@ class Demultiplex(object):
         msg += "Examples:\n"
         msg += "  %s --ifq1 reads1.fastq.gz --ifq2 reads2.fastq.gz --ifat tags.fa --ofqp test --met 3\n" % os.path.basename(sys.argv[0])
         msg += "\n"
-        msg += "Report bugs to <timothee.flutre@supagro.inra.fr>."
+        msg += "Dependencies:\n"
+        msg += "Python >= 2.7; Biopython\n"
+        msg += "\n"
+        msg += "Report bugs to <timothee.flutre@inra.fr>."
         print(msg); sys.stdout.flush()
         
         
@@ -200,7 +232,7 @@ class Demultiplex(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2014-2016 Institut National de la Recherche Agronomique (INRA).\n"
+        msg += "Copyright (C) 2014-2017 Institut National de la Recherche Agronomique (INRA).\n"
         msg += "License GPL-3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut], Laurène Gay [ctb], Nicolas Rode [ctb]."
@@ -343,6 +375,12 @@ class Demultiplex(object):
             sys.exit(1)
         if self.dist <= 0:
             self.dist = -1
+        if self.method in ["1","2","3","4a"] and self.dist > 0:
+            msg = "ERROR: --dist %i is incompatible with --met %s" \
+                  % (self.dist, self.method)
+            sys.stderr.write("%s\n\n" % msg)
+            self.help()
+            sys.exit(1)
         if self.nbSubstitutionsAllowed > 0 and not regexIsImported:
             msg = "ERROR: --subst > 0 but module 'regex' can't be imported"
             sys.stderr.write("%s\n\n" % msg)
@@ -378,7 +416,8 @@ class Demultiplex(object):
                 sys.stderr.write("%s\n" % msg)
                 tagFileFormat = "table"
             else:
-                msg = "ERROR: tag file seem to be neither in 'fasta' nor 'table' format"
+                msg = "ERROR: tag file seems to be neither in 'fasta' nor 'table' format"
+                msg += "\n%s" % line
                 sys.stderr.write("%s\n" % msg)
                 sys.exit(1)
         return tagFileFormat
@@ -403,39 +442,58 @@ class Demultiplex(object):
             print(msg); sys.stdout.flush()
             
         if tagFileFormat == "fasta":
+            ## can't handle one individual with multiple tags
             tmp = SeqIO.to_dict(SeqIO.parse(self.tagFile, "fasta",
                                             alphabet=IUPAC.unambiguous_dna))
             for tag in tmp:
-                self.tags[tmp[tag].id] = str(tmp[tag].seq)
+                tagSeq = str(tmp[tag].seq)
+                tagId = tmp[tag].id
+                if tagSeq in self.dTags:
+                    msg = "ERROR: tag sequence '%s' is present several times" \
+                          % tagSeq
+                    sys.stderr.write("%s\n" % msg)
+                    sys.exit(1)
+                self.dTags[tagSeq] = {"sample":tagId}
+                
         elif tagFileFormat == "table":
             tagHandle = open(self.tagFile)
             line = tagHandle.readline()
-            tokens = line.split()
-            if tokens == ["id", "tag"]:
+            if line == "id\ttag\n":
                 line = tagHandle.readline()
-                tokens = line.split()
             while True:
                 if line == "":
                     break
-                if tokens[0] in self.tags:
-                    msg = "ERROR: id '%s' is present several times" % tokens[0]
+                tokens = line.split()
+                tagId = tokens[0]
+                tagSeq = tokens[1]
+                if tagSeq in self.dTags:
+                    msg = "ERROR: tag sequence '%s' is present several times" \
+                          % tagSeq
                     sys.stderr.write("%s\n" % msg)
                     sys.exit(1)
-                self.tags[tokens[0]] = tokens[1]
+                if not all([l in "GATC" for l in set(tagSeq)]):
+                    msg = "ERROR: tag sequence '%s' has ambiguous DNA letters" \
+                          % tagSeq
+                    sys.stderr.write("%s\n" % msg)
+                    sys.exit(1)
+                self.dTags[tagSeq] = {"sample":tagId}
                 line = tagHandle.readline()
-                tokens = line.split()
             tagHandle.close()
             
-        for ind in self.tags:
-            self.dInd2NbAssigned[ind] = 0
+        for tagSeq in self.dTags:
+            tagId = self.dTags[tagSeq]["sample"]
+            self.dInd2NbAssigned[tagId] = 0
             
         if self.verbose > 0:
-            msg = "nb of tags: %i" % len(self.tags)
+            msg = "nb of tag sequences: %i" % len(self.dTags)
+            msg += "\nnb of samples: %i" % len(self.dInd2NbAssigned)
             print(msg); sys.stdout.flush()
             
             
     def retrieveRestrictionEnzyme(self):
         """
+        Set self.cutMotif and, if self.findChimeras != 0, self.regexpCutMotif and self.regexpCompilCutMotif.
+        
         >>> i = Demultiplex()
         >>> i.verbose = 0
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
@@ -448,7 +506,7 @@ class Demultiplex(object):
         if self.verbose > 0:
             print("retrieve restriction enzyme from Biopython...")
             
-        self.cutMotif = u"%s" % self.restrictEnzyme.elucidate()
+        self.cutMotif = u"%s" % self.restrictEnzyme.elucidate() # e.g. "G^CWG_C"
         if self.verbose > 0:
             print("enzyme %s: motif=%s" % (self.restrictEnzyme, self.cutMotif))
             
@@ -459,7 +517,9 @@ class Demultiplex(object):
                 elif nt in ["^", "_"]:
                     continue
                 else: # ambiguous letter from IUPAC code, e.g. W
-                    self.regexpCutMotif += "[" + ambiguous_dna_values[nt] + "]" # eg. [AT] for W
+                    self.regexpCutMotif += "[" \
+                                           + ambiguous_dna_values[nt] \
+                                           + "]" # e.g. [AT] for W
             if self.verbose > 0:
                 print("regexp of full motif: %s" % self.regexpCutMotif)
                 
@@ -469,6 +529,8 @@ class Demultiplex(object):
             
     def prepareRemainingMotif(self):
         """
+        Set self.regexpRemainMotif and self.lenRemainMotif.
+        
         >>> i = Demultiplex()
         >>> i.verbose = 0
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
@@ -483,25 +545,63 @@ class Demultiplex(object):
             print("prepare remaining motif..."); sys.stdout.flush()
             
         coordCutSense = self.cutMotif.find("^")
-        remainMotifAmbig = self.restrictEnzyme.site[coordCutSense:len(self.restrictEnzyme.site)]
+        # e.g. self.restrictEnzyme.site == "GCWGC"
+        remainMotifAmbig = self.restrictEnzyme.site[
+            coordCutSense:len(self.restrictEnzyme.site)] # e.g. "CWGC"
         self.lenRemainMotif = len(remainMotifAmbig)
         for nt in list(remainMotifAmbig):
             if nt in ["A", "T", "G", "C"]:
                 self.regexpRemainMotif += nt
             else: # ambiguous letter from IUPAC code, e.g. W
-                self.regexpRemainMotif += "[" + ambiguous_dna_values[nt] + "]" # eg. [AT] for W
+                self.regexpRemainMotif += "[" \
+                                          + ambiguous_dna_values[nt] \
+                                          + "]" # e.g. [AT] for W
                 
         if self.verbose > 0:
             print("regexp of remaining motif: %s" % self.regexpRemainMotif)
             
             
-    def checkDist(self):
+    def getPatternLength(self, pattern):
         """
-        Check that length of tag (+ remaining motif) <= self.dist.
+        Return the length of a pattern, dealing with possible degenerate sequences.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.getPatternLength(u'AAA')
+        3
+        >>> i.getPatternLength(u'AAAC[AT]GC')
+        7
+        >>> i.getPatternLength(u'AAAC[AT]G[AT]C')
+        8
+        >>> i.getPatternLength(u'AAAC[AT][AT]GC')
+        8
+        """
+        patLen = 0
+        if "[" not in pattern:
+            patLen = len(pattern)
+        else:
+            isInsideAmbig = False
+            for i in list(pattern):
+                if i not in ["[", "]"]:
+                    if not isInsideAmbig:
+                        patLen += 1
+                elif i == "[":
+                    patLen += 1
+                    isInsideAmbig = True
+                elif i == "]":
+                    isInsideAmbig = False
+        return patLen
+    
+    
+    def checkDist(self):
+        """
+        Check that the length of the whole sequence to be search for (tag or tag + remain cut site) is less than or equal to self.dist.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'}}
+        >>> i.method = u'1'
         >>> i.dist = 4
         >>> i.checkDist()
         >>> i.method = u'4c'
@@ -510,70 +610,112 @@ class Demultiplex(object):
         >>> i.prepareRemainingMotif()
         >>> i.checkDist()
         Traceback (most recent call last):
-        ValueError: --dist 4 is too short for tag ind1
-        because the whole pattern is AAAC[AT]GC
+        ValueError: --dist 4 is too short for sample ind1
+        with tag AAA and method 4c
+        because the whole sequence AAAC[AT]GC
+        has length 7
         """
         if self.verbose > 0:
-            msg = "check that '--dist' is compatible with pattern lengths..."
+            if self.method not in ["4c", "4d"]:
+                msg = "check that '--dist' is compatible with tag lengths..."
+            else:
+                msg = "check that '--dist' is compatible with tag lengths" \
+                      + " and remaining of cut site..."
             print(msg); sys.stdout.flush()
             
-        for tagId in self.tags:
-            pattern = self.tags[tagId]
+        for tagSeq in self.dTags:
+            tmpSeq = tagSeq
+            tmpLen = len(tagSeq)
             if self.method in ["4c", "4d"]:
-                pattern += self.regexpRemainMotif
-            if self.dist > 0 and len(pattern) > self.dist:
-                msg = "--dist %i is too short for tag %s" % (self.dist,
-                                                             tagId)
-                msg += "\nbecause the whole pattern is %s" % pattern
+                tmpSeq += self.regexpRemainMotif
+                tmpLen += self.lenRemainMotif
+            if self.dist > 0 and tmpLen > self.dist:
+                msg = "--dist %i is too short for sample %s" \
+                      % (self.dist, self.dTags[tagSeq]["sample"])
+                msg += "\nwith tag %s and method %s" \
+                       % (tagSeq, self.method)
+                msg += "\nbecause the whole sequence %s" % tmpSeq
+                msg += "\nhas length %i" % tmpLen
                 raise ValueError(msg)
             
             
     def compilePatterns(self):
         """
-        Compile patterns, that is each tag (+ remaining right of cut site, depending on self.method) as regular expression for quicker searches.
+        Compile patterns, that is each tag (+ remaining right of cut site, depending on self.method) and possibly substitutions, as regular expression for quicker searches.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA'}
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'}}
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
         >>> i.retrieveRestrictionEnzyme()
         >>> i.prepareRemainingMotif()
+        >>> # test --met 1 --subst 0 ---------------------------------
         >>> i.method = u'1'
+        >>> i.nbSubstitutionsAllowed = 0
         >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
+        >>> i.dTags[u'AAA'][u're'].pattern
         u'^AAA'
-        >>> i.method = u'2'
-        >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
-        u'^AAA'
-        >>> i.method = u'3'
-        >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
-        u'^AAA'
-        >>> i.method = u'4a'
-        >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
-        u'^AAA'
-        >>> i.method = u'4b'
-        >>> i.dist = 20
-        >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
-        u'AAA'
-        >>> i.method = u'4c'
-        >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
-        u'AAAC[AT]GC'
-        >>> i.method = u'4d'
-        >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
-        u'AAAC[AT]GC'
+        >>> # test --met 1 --subst 1 ---------------------------------
+        >>> i.method = u'1'
         >>> i.nbSubstitutionsAllowed = 1
         >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'^(AAA){s<=1}'
+        >>> # test --met 2 --subst 0 ---------------------------------
+        >>> i.method = u'2'
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'^AAA'
+        >>> # test --met 3 --subst 0 ---------------------------------
+        >>> i.method = u'3'
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'^AAA'
+        >>> # test --met 4a --subst 0 --------------------------------
+        >>> i.method = u'4a'
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'^AAA'
+        >>> # test --met 4a --subst 1 --------------------------------
+        >>> i.method = u'4a'
+        >>> i.nbSubstitutionsAllowed = 1
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'^(AAA){s<=1}'
+        >>> # test --met 4b --subst 0 --------------------------------
+        >>> i.method = u'4b'
+        >>> i.dist = 20
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'AAA'
+        >>> # test --met 4c --subst 0 --------------------------------
+        >>> i.method = u'4c'
+        >>> i.dist = 20
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'AAAC[AT]GC'
+        >>> # test --met 4d --subst 0 --------------------------------
+        >>> i.method = u'4d'
+        >>> i.dist = 20
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
+        u'AAAC[AT]GC'
+        >>> # test --met 4d --subst 1 --------------------------------
+        >>> i.method = u'4d'
+        >>> i.dist = 20
+        >>> i.nbSubstitutionsAllowed = 1
+        >>> i.compilePatterns()
+        >>> i.dTags[u'AAA'][u're'].pattern
         u'(AAAC[AT]GC){s<=1}'
         >>> i.dist = 0
         >>> i.compilePatterns()
-        >>> i.patterns["ind1"].pattern
+        >>> i.dTags[u'AAA'][u're'].pattern
         u'^(AAAC[AT]GC){s<=1}'
         """
         if self.verbose > 0:
@@ -586,12 +728,12 @@ class Demultiplex(object):
             msg += " allowed)..."
             print(msg); sys.stdout.flush()
             
-        for tagId in self.tags:
+        for tagSeq in self.dTags:
             
             ## build the pattern
-            pattern = self.tags[tagId]
+            pattern = tagSeq # e.g. "AAA"
             if self.method in ["4c", "4d"]:
-                pattern += self.regexpRemainMotif
+                pattern += self.regexpRemainMotif # e.g. += "C[AT]GC"
             if self.nbSubstitutionsAllowed > 0:
                 pattern = "(%s){s<=%i}" % (pattern,
                                            self.nbSubstitutionsAllowed)
@@ -600,16 +742,16 @@ class Demultiplex(object):
                 
             ## compile the pattern
             if self.nbSubstitutionsAllowed > 0:
-                self.patterns[tagId] = regex.compile(pattern,
-                                                     flags=regex.IGNORECASE)
+                self.dTags[tagSeq]["re"] \
+                    = regex.compile(pattern, flags=regex.IGNORECASE)
             else:
-                self.patterns[tagId] = re.compile(pattern,
-                                                  flags=re.IGNORECASE)
+                self.dTags[tagSeq]["re"] \
+                    = re.compile(pattern, flags=re.IGNORECASE)
                 
                 
-    def makeSeqsToCompareTwoTags(self, tag2):
+    def makeSeqsToCompareTwoTags(self, tagSeq):
         """
-        Return a list of DNA sequence(s) as string(s) to which "patseq" should be matched against.
+        Return a list of DNA sequence(s) as they can appear in a read as string(s) so that they can be compared to another sequence.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
@@ -617,9 +759,10 @@ class Demultiplex(object):
         >>> i.makeSeqsToCompareTwoTags("AAA")
         [u'AAA']
         >>> i.method = "4c"
-        >>> i.regexpRemainMotif = "CAGC"
+        >>> i.regexpRemainMotif = "TTGC"
+        >>> i.lenRemainMotif = 4
         >>> i.makeSeqsToCompareTwoTags("AAA")
-        [u'AAACAGC']
+        [u'AAATTGC']
         >>> i.regexpRemainMotif = "C[AT]GC"
         >>> i.lenRemainMotif = 4
         >>> i.makeSeqsToCompareTwoTags("AAA")
@@ -627,16 +770,16 @@ class Demultiplex(object):
         """
         seqs = []
         if self.method not in ["4c", "4d"]:
-            seqs.append(tag2)
+            seqs.append(tagSeq)
         else:
             if re.search("^[ATGCN]+$", self.regexpRemainMotif) is not None:
-                seqs.append(tag2 + self.regexpRemainMotif)
+                seqs.append(tagSeq + self.regexpRemainMotif)
             elif re.search("^[ATGCN\[\]]+$", self.regexpRemainMotif) is not None:
                 idx1 = self.regexpRemainMotif.find("[")
                 idx2 = self.regexpRemainMotif.find("]")
                 nbSeqs = idx2 - (idx1 + 1)
                 for idxSeq in range(nbSeqs):
-                    seqs.append(tag2)
+                    seqs.append(tagSeq)
                     idxNt = 0
                     while True:
                         if idxNt >= len(self.regexpRemainMotif):
@@ -655,30 +798,30 @@ class Demultiplex(object):
         return seqs
     
     
-    def comparePatternsTwoTags(self, tagId1, tagId2, seqs):
+    def comparePatternsTwoTags(self, tagSeq1, tagId1, tagSeq2, tagId2):
         """
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'TTAC', u'ind2': u'TTAGCTT'}
-        >>> i.method = u'4c'
-        >>> i.dist = 20
-        >>> i.nbSubstitutionsAllowed = 2
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
         >>> i.retrieveRestrictionEnzyme()
         >>> i.prepareRemainingMotif()
+        >>> i.dTags = {u'TTAC':{"sample":u'ind1'},
+        ...            u'TTAGCTT':{"sample":u'ind2'}}
+        >>> i.method = u'4c'
+        >>> i.dist = 20
+        >>> i.nbSubstitutionsAllowed = 2
         >>> i.compilePatterns()
-        >>> seqs = [u'TTAGCTTCAGC', u'TTAGCTTCTGC']
-        >>> i.comparePatternsTwoTags(u'ind1', u'ind2', seqs)
+        >>> i.comparePatternsTwoTags(u'TTAC', u'ind1', u'TTAGCTT', u'ind2')
         Traceback (most recent call last):
         ValueError: with 2 allowed substitutions, tag TTAC corresponding to ind1
         is indistinguishable from tag TTAGCTT corresponding to ind2
         pattern: (TTACC[AT]GC){s<=2}
         string: TTAGCTTCAGC
         start-end: 0-8
-        >>> i.tags = {u'ind1': u'GTGGA', u'ind2': u'TTGCAGGA'}
+        >>> i.dTags = {u'GTGGA':{"sample":u'ind1'},
+        ...            u'TTGCAGGA':{"sample":u'ind2'}}
         >>> i.compilePatterns()
-        >>> seqs = [u'TTGCAGGACAGC', u'TTGCAGGACTGC']
-        >>> i.comparePatternsTwoTags(u'ind1', u'ind2', seqs)
+        >>> i.comparePatternsTwoTags(u'GTGGA', u'ind1', u'TTGCAGGA', u'ind2')
         Traceback (most recent call last):
         ValueError: with 2 allowed substitutions, tag GTGGA corresponding to ind1
         is indistinguishable from tag TTGCAGGA corresponding to ind2
@@ -687,20 +830,27 @@ class Demultiplex(object):
         start-end: 3-12
         >>> i.dist = 0
         >>> i.compilePatterns()
-        >>> i.comparePatternsTwoTags(u'ind1', u'ind2', seqs)
+        >>> i.comparePatternsTwoTags(u'GTGGA', u'ind1', u'TTGCAGGA', u'ind2')
+        >>> i.dTags = {u'AAAA':{"sample":u'ind1'},
+        ...            u'ATAA':{"sample":u'ind1'}}
+        >>> i.nbSubstitutionsAllowed = 1
+        >>> i.compilePatterns()
+        >>> i.comparePatternsTwoTags(u'AAAA', u'ind1', u'ATAA', u'ind1')
         """
-        for seq in seqs:
-            tmpRe = self.patterns[tagId1].search(seq)
-            if tmpRe:
-                msg = "with %i allowed substitution" % \
-                      self.nbSubstitutionsAllowed
-                if self.nbSubstitutionsAllowed > 1:
-                    msg += "s"
-                    msg += ", tag %s" % self.tags[tagId1]
+        if tagId2 != tagId1:
+            seqs = self.makeSeqsToCompareTwoTags(tagSeq2)
+            for seq in seqs:
+                tmpRe = self.dTags[tagSeq1]["re"].search(seq)
+                if tmpRe:
+                    msg = "with %i allowed substitution" % \
+                          self.nbSubstitutionsAllowed
+                    if self.nbSubstitutionsAllowed > 1:
+                        msg += "s"
+                    msg += ", tag %s" % tagSeq1
                     msg += " corresponding to %s" % tagId1
-                    msg += "\nis indistinguishable from tag %s" % self.tags[tagId2]
+                    msg += "\nis indistinguishable from tag %s" % tagSeq2
                     msg += " corresponding to %s" % tagId2
-                    msg += "\npattern: %s" % self.patterns[tagId1].pattern
+                    msg += "\npattern: %s" % self.dTags[tagSeq1]["re"].pattern
                     msg += "\nstring: %s" % seq
                     msg += "\nstart-end: %i-%i" % (tmpRe.start(), tmpRe.end())
                     raise ValueError(msg)
@@ -708,17 +858,46 @@ class Demultiplex(object):
                 
     def comparePatterns(self):
         """
-        Raise an exception if two patterns of the same length are indistinguishable when allowing substitutions.
+        Raise an exception if, when allowing substitutions, two patterns (for different samples) are indistinguishable.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'TTAC', u'ind2': u'TTAGCTT'}
-        >>> i.method = u'4c'
-        >>> i.dist = 20
-        >>> i.nbSubstitutionsAllowed = 2
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
         >>> i.retrieveRestrictionEnzyme()
         >>> i.prepareRemainingMotif()
+        >>> # test --met 1 --subst 0 ---------------------------------
+        >>> i.dTags = {u'TTAC':{"sample":u'ind1'},
+        ...            u'TTAG':{"sample":u'ind2'}}
+        >>> i.method = u'1'
+        >>> i.nbSubstitutionsAllowed = 0
+        >>> i.compilePatterns()
+        >>> i.comparePatterns()
+        >>> # test --met 1 --subst 1 ; diff samples ------------------
+        >>> i.dTags = {u'TTAC':{"sample":u'ind1'},
+        ...            u'TTAG':{"sample":u'ind2'}}
+        >>> i.method = u'1'
+        >>> i.nbSubstitutionsAllowed = 1
+        >>> i.compilePatterns()
+        >>> i.comparePatterns()
+        Traceback (most recent call last):
+        ValueError: with 1 allowed substitution, tag TTAG corresponding to ind2
+        is indistinguishable from tag TTAC corresponding to ind1
+        pattern: ^(TTAG){s<=1}
+        string: TTAC
+        start-end: 0-4
+        >>> # test --met 1 --subst 1 ; same sample -------------------
+        >>> i.dTags = {u'TTAC':{"sample":u'ind1'},
+        ...            u'TTAG':{"sample":u'ind1'}}
+        >>> i.method = u'1'
+        >>> i.nbSubstitutionsAllowed = 1
+        >>> i.compilePatterns()
+        >>> i.comparePatterns()
+        >>> # test --met 4c --subst 2 --------------------------------
+        >>> i.dTags = {u'TTAC':{"sample":u'ind1'},
+        ...            u'TTAGCTT':{"sample":u'ind2'}}
+        >>> i.method = u'4c'
+        >>> i.dist = 20
+        >>> i.nbSubstitutionsAllowed = 2
         >>> i.compilePatterns()
         >>> i.comparePatterns()
         Traceback (most recent call last):
@@ -730,34 +909,49 @@ class Demultiplex(object):
         """
         if self.nbSubstitutionsAllowed > 0:
             if self.verbose > 0:
-                print("check that searched patterns are distinguishable...")
+                msg = "check that searched patterns are distinguishable"
+                msg += "\nwith %i substitution" % self.nbSubstitutionsAllowed
+                if self.nbSubstitutionsAllowed > 1:
+                    msg += "s"
+                msg += " allowed..."
+                print(msg)
                 sys.stdout.flush()
                 
-            lTagIds = self.tags.keys()
-            lTagIds.sort()
-            
-            for i in range(0, len(lTagIds)):
-                patseq = self.patterns[lTagIds[i]].pattern.split(")")[0].replace("(","")
-                
-                for j in range(0, len(lTagIds)):
+            for i in range(len(self.dTags)):
+                tagSeq1 = self.dTags.keys()[i]
+                tagId1 = self.dTags[tagSeq1]["sample"]
+                lenSeq1 = len(tagSeq1)
+                if self.method in ["4c", "4d"]:
+                    lenSeq1 += self.lenRemainMotif
+                    
+                for j in range(len(self.dTags)):
                     if j == i:
                         continue
                     
-                    lenSeq = len(self.tags[lTagIds[j]])
-                    if self.method in ["4c", "4d"]:
-                        lenSeq += self.lenRemainMotif
-                    if len(patseq) > lenSeq:
+                    tagSeq2 = self.dTags.keys()[j]
+                    tagId2 = self.dTags[tagSeq2]["sample"]
+                    if tagId2 == tagId1:
                         continue
                     
-                    seqs = self.makeSeqsToCompareTwoTags(self.tags[lTagIds[j]])
+                    lenSeq2 = len(tagSeq2)
+                    if self.method in ["4c", "4d"]:
+                        lenSeq2 += self.lenRemainMotif
+                    if lenSeq1 > lenSeq2:
+                        continue
                     
-                    self.comparePatternsTwoTags(lTagIds[i], lTagIds[j], seqs)
+                    self.comparePatternsTwoTags(tagSeq1, tagId1,
+                                                tagSeq2, tagId2)
                     
                     
     def flexCompileComparePatterns(self):
         """
         Run compilePatterns() and comparePatterns() by decreasing the number of substitutions allowed, until it doesn't raise any exception, if possible.
         """
+        if self.verbose > 0:
+            msg = "compile and compare patterns by automatically decreasing"
+            msg += "\nthe number of substitutions if they are indistinguishable..."
+            print(msg); sys.stdout.flush()
+            
         for nbSubsts in range(self.nbSubstitutionsAllowed, -1, -1):
             self.nbSubstitutionsAllowed = nbSubsts
             
@@ -769,17 +963,19 @@ class Demultiplex(object):
                 if nbSubsts > 0:
                     continue
                 else:
-                    msg = "some tags are indistinguishable even when no substitution is allowed"
+                    msg = "some tags are indistinguishable even when" \
+                          + " no substitution is allowed"
                     e.args += (msg,)
                     raise e
                 
             if self.verbose > 0:
-                msg = "nb of substitutions allowed: %i" % self.nbSubstitutionsAllowed
+                msg = "nb of substitutions allowed: %i" \
+                      % self.nbSubstitutionsAllowed
                 print(msg); sys.stdout.flush()
-                
+
             break
-
-
+        
+        
     def prepareInReads(self):
         """
         Open input fastq file(s) and return iterator(s)
@@ -809,6 +1005,9 @@ class Demultiplex(object):
         
         
     def identifyChimeras(self, read1_seq, read2_seq):
+        """
+        Return True if the cut motif is found in read1 (and/or read2 when paired-end).
+        """
         chimera = False
         
         if read2_seq: # paired-end reads
@@ -820,15 +1019,16 @@ class Demultiplex(object):
                 chimera = True
                 
         return chimera
-        
-        
+    
+    
     def identifyIndividual_1(self, read1_seq, read2_seq):
         """
         If both reads start with the tag, return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and "idx" as the position at which both reads should be saved.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'}}
         >>> i.method = u'1'
         >>> i.compilePatterns()
         >>> i.clipIdx = False
@@ -844,14 +1044,14 @@ class Demultiplex(object):
         ind = None
         idx = 0
         
-        for tagId in self.tags:
+        for tagSeq in self.dTags:
             
-            if self.patterns[tagId].search(read1_seq) \
-               and self.patterns[tagId].search(read2_seq):
+            if self.dTags[tagSeq]["re"].search(read1_seq) \
+               and self.dTags[tagSeq]["re"].search(read2_seq):
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
-                    idx = len(self.tags[tagId])
+                    idx = len(tagSeq)
                 break
             
         return assigned, ind, idx, idx
@@ -863,7 +1063,8 @@ class Demultiplex(object):
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'}}
         >>> i.method = u'2'
         >>> i.compilePatterns()
         >>> i.clipIdx = False
@@ -882,22 +1083,22 @@ class Demultiplex(object):
         idx1 = 0
         idx2 = 0
         
-        for tagId in self.tags:
+        for tagSeq in self.dTags:
             
-            if self.patterns[tagId].search(read1_seq):
+            if self.dTags[tagSeq]["re"].search(read1_seq):
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
-                    idx1 = len(self.tags[tagId])
-                    if self.patterns[tagId].search(read2_seq):
-                        idx2 = len(self.tags[tagId])
+                    idx1 = len(tagSeq)
+                    if self.dTags[tagSeq]["re"].search(read2_seq):
+                        idx2 = len(tagSeq)
                 break
             
-            if self.patterns[tagId].search(read2_seq):
+            if self.dTags[tagSeq]["re"].search(read2_seq):
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
-                    idx2 = len(self.tags[tagId])
+                    idx2 = len(tagSeq)
                 break
             
         return assigned, ind, idx1, idx2
@@ -909,7 +1110,8 @@ class Demultiplex(object):
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'}}
         >>> i.method = u'3'
         >>> i.compilePatterns()
         >>> i.clipIdx = False
@@ -930,26 +1132,26 @@ class Demultiplex(object):
         nbAssignedPairsTwoTags = 0
         nbAssignedPairsOneTag = 0
         
-        for tagId in self.tags:
+        for tagSeq in self.dTags:
             
-            if self.patterns[tagId].search(read1_seq):
+            if self.dTags[tagSeq]["re"].search(read1_seq):
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
-                    idx1 = len(self.tags[tagId])
-                if self.patterns[tagId].search(read2_seq):
+                    idx1 = len(tagSeq)
+                if self.dTags[tagSeq]["re"].search(read2_seq):
                     if self.clipIdx:
-                        idx2 = len(self.tags[tagId])
+                        idx2 = len(tagSeq)
                     nbAssignedPairsTwoTags += 1
                 else:
                     nbAssignedPairsOneTag += 1
                 break
             
-            if self.patterns[tagId].search(read2_seq):
+            if self.dTags[tagSeq]["re"].search(read2_seq):
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
-                    idx2 = len(self.tags[tagId])
+                    idx2 = len(tagSeq)
                 nbAssignedPairsOneTag += 1
                 break
             
@@ -963,7 +1165,8 @@ class Demultiplex(object):
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'}}
         >>> i.method = u'4a'
         >>> i.compilePatterns()
         >>> i.clipIdx = False
@@ -979,13 +1182,13 @@ class Demultiplex(object):
         ind = None
         idx1 = 0
         
-        for tagId in self.tags:
+        for tagSeq in self.dTags:
             
-            if self.patterns[tagId].search(read1_seq):
+            if self.dTags[tagSeq]["re"].search(read1_seq):
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
-                    idx1 = len(self.tags[tagId])
+                    idx1 = len(tagSeq)
                 break
             
         return assigned, ind, idx1, 0
@@ -994,32 +1197,34 @@ class Demultiplex(object):
     def identifyIndividual_4b(self, read1_seq):
         """
         If the first read has a tag in its first N bases (specified via self.dist), return "assign" as True, "ind" as the identifier of the individual to which reads are assigned, and idx1 as the position at which the first read should be saved. Note that the second read is ignored, thus idx2 = 0.
+        TODO: add tests
         """
         assigned = False
         ind = None
         idx1 = 0
         
-        for tagId in self.tags:
+        for tagSeq in self.dTags:
             
-            tmpRe = self.patterns[tagId].search(read1_seq[:self.dist])
+            tmpRe = self.dTags[tagSeq]["re"].search(read1_seq[:self.dist])
             if tmpRe != None:
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
                     idx1 = tmpRe.end()
                 break
             
         return assigned, ind, idx1, 0
-        
-        
+    
+    
     def identifyIndividual_4c(self, read1_seq):
         """
         Assign pair if first read has tag and remaining cut site in its first
-        N bases (ignore second read, use self.dist and self.patterns).
+        N bases (specified via self.dist). The second read is ignored.
         
         >>> i = Demultiplex()
         >>> i.verbose = 0
-        >>> i.tags = {u'ind1': u'AAA', u'ind2': u'TTT'}
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'}}
         >>> i.restrictEnzyme = Restriction.__dict__["ApeKI"]
         >>> i.retrieveRestrictionEnzyme()
         >>> i.prepareRemainingMotif()
@@ -1040,12 +1245,12 @@ class Demultiplex(object):
         ind = None
         idx1 = 0
         
-        for tagId in self.patterns:
+        for tagSeq in self.dTags:
             
-            tmpRe = self.patterns[tagId].search(read1_seq[:self.dist])
+            tmpRe = self.dTags[tagSeq]["re"].search(read1_seq[:self.dist])
             if tmpRe != None:
                 assigned = True
-                ind = tagId
+                ind = self.dTags[tagSeq]["sample"]
                 if self.clipIdx:
                     idx1 = tmpRe.end() - self.lenRemainMotif
                 break
@@ -1055,8 +1260,8 @@ class Demultiplex(object):
     
     def identifyIndividual_4d(self, read1_seq, read2_seq):
         """
-        Assign pair if first and/or second read has tag and remaining cut site in its first
-        N bases (use self.dist and self.patterns). PCR chimeras are handled.
+        Assign pair if first and/or second read has tag and remaining cut site in its first N bases (specified via self.dist). PCR chimeras are handled when occurring between different individuals.
+        TODO: add tests
         """
         assigned = False
         ind = None
@@ -1066,26 +1271,28 @@ class Demultiplex(object):
         AssignedPairsOneTag = 0
         chimera = False
         
-        lTagIds = self.patterns.keys()
-        lTagIds.sort()
-        for i in range(0, len(lTagIds)): # for each tag
-            tagId = lTagIds[i]
-            tmpRe1 = self.patterns[tagId].search(read1_seq[:self.dist])
-            tmpRe2 = self.patterns[tagId].search(read2_seq[:self.dist])
+        for i in range(len(self.dTags)): # for each tag
+            tagSeq = self.dTags.keys()[i]
+            tagId = self.dTags[tagSeq]["sample"]
+            tmpRe1 = self.dTags[tagSeq]["re"].search(read1_seq[:self.dist])
+            tmpRe2 = self.dTags[tagSeq]["re"].search(read2_seq[:self.dist])
             
-            if tmpRe1 != None: # if first read has the pattern
+            if tmpRe1: # if first read has the pattern
                 ind = tagId
                 idx1 = tmpRe1.end() - self.lenRemainMotif
-                if tmpRe2 != None: # if second read also has the pattern
+                if tmpRe2: # if second read also has the pattern
                     assigned = True
                     idx2 = tmpRe2.end() - self.lenRemainMotif
                     AssignedPairsTwoTags += 1
                 else: # if only the first read has the pattern
-                    for tagId2 in self.patterns:
-                        if tagId2 == tagId:
+                    for j in range(len(self.dTags)): # for each other tag
+                        tagSeq2 = self.dTags.keys()[j]
+                        tagId2 = self.dTags[tagSeq2]["sample"]
+                        if tagId2 == tagId: # skip if same individual
                             continue
-                        tmpRe2chim = self.patterns[tagId2].search(read2_seq[:self.dist])
-                        if tmpRe2chim != None: # if the first and second read have different tags 
+                        tmpRe2chim = self.dTags[tagSeq2]["re"].search(
+                            read2_seq[:self.dist])
+                        if tmpRe2chim: # if first and second reads have different tags 
                             chimera = True
                             break
                     if not chimera:
@@ -1097,16 +1304,18 @@ class Demultiplex(object):
             elif tmpRe2 != None: # if only the second read has the pattern
                 ind = tagId
                 idx2 = tmpRe2.end() - self.lenRemainMotif
-                for j in range(i+1, len(lTagIds)):
-                    tagId2 = lTagIds[j]
-                    tmpRe1chim =  self.patterns[tagId2].search(read1_seq[:self.dist])
-                    if tmpRe1chim != None: # if the first and second read have different tags
+                for j in range(i+1, len(self.dTags)): # for each other tag
+                    tagSeq2 = self.dTags.keys()[j]
+                    tagId2 = self.dTags[tagSeq2]["sample"]
+                    tmpRe1chim =  self.dTags[tagSeq2]["re"].search(
+                        read1_seq[:self.dist])
+                    if tmpRe1chim: # if first and second read have different tags
                         chimera = True
                         break
                 if not chimera:
                     assigned = True
-                    AssignedPairsOneTag += 1
                     idx1 = idx2
+                    AssignedPairsOneTag += 1
                 break
             
         if not self.clipIdx:
@@ -1114,7 +1323,27 @@ class Demultiplex(object):
             
         return assigned, ind, idx1, idx2, AssignedPairsTwoTags, \
             AssignedPairsOneTag, chimera
-    
+
+
+    def getTagsForInd(self, ind):
+        """
+        Return a list with tag sequence(s) corresponding to assignment to the given sample.
+        
+        >>> i = Demultiplex()
+        >>> i.verbose = 0
+        >>> i.dTags = {u'AAA':{"sample":u'ind1'},
+        ...            u'TTT':{"sample":u'ind2'},
+        ...            u'CCC':{"sample":u'ind1'}}
+        >>> i.getTagsForInd(u'ind1')
+        [u'AAA', u'CCC']
+        >>> i.getTagsForInd(u'ind2')
+        [u'TTT']
+        """
+        lTags = []
+        for tagSeq in self.dTags:
+            if self.dTags[tagSeq]["sample"] == ind:
+                lTags.append(tagSeq)
+        return lTags
     
     def saveStatsPerInd(self):
         outFile = "%s_stats-demultiplex.txt.gz" % self.outPrefix
@@ -1125,11 +1354,11 @@ class Demultiplex(object):
         txt += "\tassigned"
         outHandle.write("%s\n" % txt)
         
-        lInds = self.tags.keys()
+        lInds = self.dInd2NbAssigned.keys()
         lInds.sort()
         for ind in lInds:
             txt = "%s" % ind
-            txt += "\t%s" % self.tags[ind]
+            txt += "\t%s" % "_".join(self.getTagsForInd(ind))
             txt += "\t%i" % self.dInd2NbAssigned[ind]
             outHandle.write("%s\n" % txt)
             
