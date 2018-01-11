@@ -1,19 +1,22 @@
 ## R script for the game master
 ## https://github.com/timflutre/atelier-prediction-genomique
 ## Authors: Timothée Flutre, Jacques David
-## Copyright 2016-2017 INRA, Montpellier SupAgro
+## Copyright 2016-2018 INRA, Montpellier SupAgro
 ## License: AGPL-3+
 
 library(rutilstimflutre)
+stopifnot(compareVersion("0.156.3",
+                         as.character(packageVersion("rutilstimflutre")))
+          != 1)
 
-root.dir <- "~/work2/atelier-prog-selection-2017"
+root.dir <- "~/src/PlantSelBreedGame/data"
 setup <- getBreedingGameSetup(root.dir)
 
 breeder <- "test"
 stopifnot(breeder %in% setup$breeders)
 
 ## 1. cross the two controls once
-f <- paste0(setup$init.dir, "/temoins.txt")
+f <- paste0(setup$init.dir, "/controls.txt")
 controls <- read.table(f, stringsAsFactors=FALSE)[,1]
 F1.todo <- data.frame(parent1=controls[1],
                       parent2=controls[2],
@@ -22,7 +25,7 @@ F1.todo <- data.frame(parent1=controls[1],
 f <- paste0(setup$breeder.dirs[[breeder]], "/F1.txt")
 write.table(x=F1.todo, file=f, append=FALSE, quote=FALSE, sep="\t",
             na="", row.names=FALSE, col.names=TRUE)
-## use 'game-master_cross.R'
+## Shiny app -> request plant material
 
 ## 2. make several haplodiploidizations
 nb.HDs <- 500
@@ -38,10 +41,10 @@ str(HD.todo)
 f <- paste0(setup$breeder.dirs[[breeder]], "/HD.txt")
 write.table(x=HD.todo, file=f, append=FALSE, quote=FALSE, sep="\t",
             na="", row.names=FALSE, col.names=TRUE)
-## use 'game-master_cross.R'
+## Shiny app -> request plant material
 
 ## 3. assess the breeding value of these HDs versus the controls
-f <- paste0(setup$breeder.dirs[[breeder]], "/inscription.txt")
+f <- paste0(setup$breeder.dirs[[breeder]], "/registration.txt")
 write.table(x=c("F1", paste0("F1.", 1:nb.HDs)),
             file=f, append=FALSE, quote=FALSE, row.names=FALSE,
             col.names=FALSE)
@@ -56,4 +59,4 @@ data.todo <- data.frame(ind=c("F1", "F1", "F1.1", "F1.2"),
 f <- paste0(setup$breeder.dirs[[breeder]], "/data_todo.txt")
 write.table(x=data.todo, file=f, append=FALSE, quote=FALSE, sep="\t",
             row.names=FALSE, col.names=TRUE)
-## use 'game-master_pheno-geno.R'
+## Shiny app -> request phenotyping and genotyping

@@ -33,7 +33,7 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 * https://github.com/timflutre/atelier-prediction-genomique
 
-* Copyright 2016-2017 INRA, Montpellier SupAgro, AgroParisTech
+* Copyright 2016-2018 INRA, Montpellier SupAgro, AgroParisTech
 
 * License: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
@@ -47,20 +47,23 @@ t0 <- proc.time()
 
 Load the packages:
 ```{r load_pkg}
-library(rutilstimflutre)
 library(RSQLite)
+library(digest)
 library(MASS)
 ## library(LDheatmap) # optionnal
+library(rutilstimflutre)
+stopifnot(compareVersion("0.156.3",
+                         as.character(packageVersion("rutilstimflutre")))
+          != 1)
 ```
 
 Set up directories:
 ```{r setup_dir}
-root.dir <- "~/work2/atelier-prog-selection-2018"
+root.dir <- "~/work2/atelier-prog-selection-2018/data"
 if(! dir.exists(root.dir))
   dir.create(root.dir)
-shared.dir <- NULL #"~/Dropbox/atelier-prog-selection-2018"
-setup <- setUpBreedingGame(root.dir=root.dir, shared.dir=shared.dir,
-                           nb.breeders=4, lang="fr")
+setup <- setUpBreedingGame(root.dir=root.dir,
+                           nb.breeders=1)
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
 init.dir <- setup$init.dir
@@ -141,7 +144,7 @@ if(! file.exists(f)){
                         nb.pops=1,
                         get.trees=FALSE,
                         get.tmrca=FALSE,
-                        rnd.choice.ref.all=FALSE,
+                        permute.alleles=FALSE,
                         verbose=1)
   save(g0, file=f)
 } else
@@ -286,22 +289,18 @@ if(! file.exists(paste0(init.dir, "/snp_coords_hd.txt.gz"))){
 Make collection of lines via haplodiploidization:
 ```{r coll_lines}
 f <- paste0(truth.dir, "/coll.Rdata")
-if(! file.exists(f)){
-  coll <- list()
-  crosses <- data.frame(parent1=ind.ids,
-                        parent2=NA,
-                        child=sprintf(fmt=paste0("Coll%0", floor(log10(I))+1, "i"),
-                                      1:I),
-                        stringsAsFactors=FALSE)
-  loc.crossovers <- drawLocCrossovers(crosses, sapply(g0$haplos, ncol))
-  coll$haplos <- makeCrosses(g0$haplos, crosses, loc.crossovers)
-  coll$genos <- segSites2allDoses(seg.sites=coll$haplos, ind.ids=crosses$child,
-                                  snp.ids=colnames(g0$genos),
-                                  rnd.choice.ref.all=FALSE)
-  coll$snp.coords <- g0$snp.coords
-  save(coll, file=f)
-} else
-  load(f)
+coll <- list()
+crosses <- data.frame(parent1=ind.ids,
+                      parent2=NA,
+                      child=sprintf(fmt=paste0("Coll%0", floor(log10(I))+1, "i"),
+                                    1:I),
+                      stringsAsFactors=FALSE)
+loc.crossovers <- drawLocCrossovers(crosses, sapply(g0$haplos, ncol))
+coll$haplos <- makeCrosses(g0$haplos, crosses, loc.crossovers)
+coll$genos <- segSites2allDoses(seg.sites=coll$haplos, ind.ids=crosses$child,
+                                snp.ids=colnames(g0$genos))
+coll$snp.coords <- g0$snp.coords
+save(coll, file=f)
 tools::md5sum(path.expand(f))
 ```
 
@@ -542,7 +541,7 @@ legend("topleft", legend=c("resistant", "sensitive"), pch=c(19,17),
 
 Save controls for the players:
 ```{r savel_controls, eval=TRUE}
-f <- paste0(init.dir, "/temoins.txt")
+f <- paste0(init.dir, "/controls.txt")
 write.table(x=controls, file=f, quote=FALSE, sep="\t", row.names=FALSE, col.names=FALSE)
 ```
 
@@ -603,23 +602,60 @@ gc()
 
 # Set up database and example files
 
-Create a database with a table for logging, as well as a table of plant material per breeder:
+Create a database:
 ```{r setup_db}
 db <- dbConnect(SQLite(), dbname=dbname)
 dbListTables(db)
+```
+
+Create the table for logging:
+```{r create_table_log}
 tbl <- "log"
 if(tbl %in% dbListTables(db)){
   query <- paste0("DROP TABLE ", tbl)
   res <- dbGetQuery(conn=db, query)
 }
 query <- paste0("CREATE TABLE ", tbl,
-                "(breeder TEXT",
+                " (breeder TEXT",
                 ", year INT",
                 ", task TEXT",
                 ", quantity INT",
                 ", time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)")
 res <- dbGetQuery(conn=db, query)
 dbListFields(db, tbl)
+```
+
+Create the table for breeder information, and insert the breeder(s):
+```{r create_table_breeders}
+tbl <- "breeders"
+if(tbl %in% dbListTables(db)){
+  query <- paste0("DROP TABLE ", tbl)
+  res <- dbGetQuery(conn=db, query)
+}
+query <- paste0("CREATE TABLE ", tbl,
+                " (name TEXT",
+                ", status TEXT",
+                ", h_psw TEXT)")
+res <- dbGetQuery(conn=db, query)
+dbListFields(db, tbl)
+hashed.psw <- digest("", "md5", serialize=FALSE)
+for(breeder in breeders){
+  query <- paste0("INSERT INTO ", tbl, " VALUES",
+                  " ('", breeder)
+  if(breeder == "test"){
+    query <- paste0(query,
+                    "', 'game master",
+                    "', '", hashed.psw, "')")
+  } else
+    query <- paste0(query,
+                    "', 'player",
+                    "', '", hashed.psw, "')")
+  res <- dbGetQuery(conn=db, query)
+}
+```
+
+Create one table per breeder for their plant material:
+```{r create_tables_plant_material}
 for(breeder in breeders){
   tbl <- paste0("plant_material_", breeder)
   if(tbl %in% dbListTables(db)){
@@ -650,7 +686,7 @@ for(i in 1:length(ind.ids)){
       file.symlink(f, fto)
     tbl <- paste0("plant_material_", breeder)
     query <- paste0("INSERT INTO ", tbl, " VALUES",
-                    "('", tmp.ids[i],
+                    " ('", tmp.ids[i],
                     "', '", NA,
                     "', '", ind.id, "')")
     res <- dbGetQuery(conn=db, query)
@@ -666,6 +702,17 @@ Make an example of a "plant material" file:
 Make an example of an "data" file:
 ```{r ex_data}
 (data.examples <- makeExampleDataFile(init.dir))
+```
+
+Make a zip archive of the whole directory:
+```{r make_zip}
+cwd <- getwd()
+setwd(dirname(setup$root.dir))
+system.time(
+    zip(zipfile="data.zip",
+        files=list.files(path="data", full.names=TRUE, recursive=TRUE,
+                         include.dirs=TRUE)))
+setwd(cwd)
 ```
 
 
