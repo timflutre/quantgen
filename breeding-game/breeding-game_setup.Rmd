@@ -133,22 +133,19 @@ Simulate genotypes via the coalescent:
 ```{r simul_geno_coalescent}
 set.seed(65291)
 f <- paste0(truth.dir, "/g0.RData")
-if(! file.exists(f)){
-  g0 <- simulCoalescent(nb.inds=I,
-                        ind.ids=ind.ids,
-                        nb.reps=nb.chrs,
-                        pop.mut.rate=theta,
-                        pop.recomb.rate=rho,
-                        chrom.len=L,
-                        other=cmd,
-                        nb.pops=1,
-                        get.trees=FALSE,
-                        get.tmrca=FALSE,
-                        permute.alleles=FALSE,
-                        verbose=1)
-  save(g0, file=f)
-} else
-  load(f)
+g0 <- simulCoalescent(nb.inds=I,
+                      ind.ids=ind.ids,
+                      nb.reps=nb.chrs,
+                      pop.mut.rate=theta,
+                      pop.recomb.rate=rho,
+                      chrom.len=L,
+                      other=cmd,
+                      nb.pops=1,
+                      get.trees=FALSE,
+                      get.tmrca=FALSE,
+                      permute.alleles=TRUE,
+                      verbose=1)
+save(g0, file=f)
 tools::md5sum(path.expand(f))
 head(g0$snp.coords)
 g0$haplos$chr1[1:4, 1:6]
@@ -160,10 +157,10 @@ g0$genos[1:2, 1:6]
 Look at the AFs and MAFs:
 ```{r look_mafs}
 afs <- estimSnpAf(X=g0$genos)
-hist(x=afs, xlab="Allele frequency", ylab="Number of markers",
-     main=paste0(ncol(g0$genos), " SNPs"), col="grey", border="white",
-     las=1, breaks="FD")
-mafs <- estimSnpMaf(X=g0$genos)
+summary(afs)
+plotHistAllelFreq(afs=afs,
+                  main=paste0(length(afs), " SNPs"))
+mafs <- estimSnpMaf(afs=afs)
 summary(mafs)
 sum(mafs >= 0.01) # nb of non-rare SNPs
 plotHistMinAllelFreq(maf=mafs,
@@ -186,9 +183,9 @@ min.maf <- 0.2
 min.pos <- 0
 max.pos <- L
 (length(snps.tokeep <- rownames(g0$snp.coords[mafs >= min.maf &
-                                               g0$snp.coords$chr == chr &
-                                               g0$snp.coords$pos >= min.pos &
-                                               g0$snp.coords$pos <= max.pos,])))
+                                              g0$snp.coords$chr == chr &
+                                              g0$snp.coords$pos >= min.pos &
+                                              g0$snp.coords$pos <= max.pos,])))
 ## snps.tokeep <- snps.tokeep[sort(sample(snps.tokeep, 100))]
 (nrow(ld <- estimLd(X=g0$genos[,snps.tokeep],
                     snp.coords=g0$snp.coords[snps.tokeep,],
@@ -204,7 +201,8 @@ plotLd(snp.dist,
        use.density=TRUE,
        span=1/20,
        sample.size=2*I,
-       Ne=Ne0, c=c)
+       Ne=Ne0, c=c,
+       add.ohta.kimura=TRUE)
 abline(v=500, lty=2)
 ## LDheatmap(gdat=cor(g0$genos[,snps.tokeep])^2,
 ##           genetic.distances=snp.dist, distances="physical",
