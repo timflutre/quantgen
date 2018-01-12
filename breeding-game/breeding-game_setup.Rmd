@@ -47,11 +47,11 @@ t0 <- proc.time()
 
 Load the packages:
 ```{r load_pkg}
-library(RSQLite)
-library(digest)
-library(MASS)
+suppressPackageStartupMessages(library(RSQLite))
+suppressPackageStartupMessages(library(digest))
+suppressPackageStartupMessages(library(MASS))
 ## library(LDheatmap) # optionnal
-library(rutilstimflutre)
+suppressPackageStartupMessages(library(rutilstimflutre))
 stopifnot(compareVersion("0.156.3",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
@@ -254,10 +254,10 @@ Ascertain SNPs for the genotyping arrays (high and low density):
 * hyp: mimick de novo sequencing of a few individuals
 
 ```{r ascertain_snps}
+nb.inds.denovo <- 20
+nb.snps.hd <- 10*10^3
+nb.snps.ld <- 5*10^3
 if(! file.exists(paste0(init.dir, "/snp_coords_hd.txt.gz"))){
-  nb.inds.denovo <- 20
-  nb.snps.hd <- 10*10^3
-  nb.snps.ld <- 5*10^3
   subset.inds <- sort(sample(rownames(g0$genos), nb.inds.denovo))
   mafs.subset <- estimSnpMaf(g0$genos[subset.inds,])
   summary(mafs.subset)
@@ -347,9 +347,13 @@ Simulate phenotypes of initial lines:
 
 Make data.frame for initial phenotypes given to players:
 ```{r init_pheno}
+nb.lines.per.year <- 150
+nb.plots.per.line.per.year <- 2
+nb.years <- 10
+nb.plots <- nb.lines.per.year * nb.plots.per.line.per.year
 line.ids <- getIndNamesFromHaplos(coll$haplos)[1:(150 + (10-1) * 75)]
-p0.df <- makeDfInitPhenos(nb.lines.per.year=150, nb.years=10,
-                          nb.plots.per.line.per.year=2,
+p0.df <- makeDfInitPhenos(nb.lines.per.year=nb.lines.per.year, nb.years=nb.years,
+                          nb.plots.per.line.per.year=nb.plots.per.line.per.year,
                           first.year=2005, line.ids)
 head(p0.df)
 str(p0.df)
@@ -387,7 +391,8 @@ snp.effects12 <- simulSnpEffectsTraits12(snp.ids=thin.snps,
 
 Make phenotypes for traits 1 and 2 jointly:
 ```{r make_phenos_trait1_trait2}
-p0 <- simulTraits12(dat=p0.df, mu=c(trait1=40, trait2=14),
+mu.traits12 <- c(trait1=40, trait2=14)
+p0 <- simulTraits12(dat=p0.df, mu=mu.traits12,
                     sigma.alpha2=c(trait1=1.5^2, trait2=1^2),
                     X=coll$genos[levels(p0.df$ind), thin.snps],
                     Beta=snp.effects12$Beta,
@@ -594,7 +599,7 @@ write.table(x=phectls.df, file=gzfile(fout), quote=FALSE,
 ```
 
 Free some memory:
-```{r free_mem_phenos}
+```{r free_mem_phenos, eval=TRUE}
 rm(p0)
 gc()
 ```
@@ -606,6 +611,70 @@ Create a database:
 ```{r setup_db}
 db <- dbConnect(SQLite(), dbname=dbname)
 dbListTables(db)
+```
+
+Create the table with the constants (average phenotypes, unitary costs, etc):
+```{r}
+tbl <- "constants"
+if(tbl %in% dbListTables(db)){
+  query <- paste0("DROP TABLE ", tbl)
+  res <- dbGetQuery(conn=db, query)
+}
+query <- paste0("CREATE TABLE ", tbl,
+                " (item TEXT",
+                ", value INT)")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait1', '", mu.traits12[1], "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait2', '", mu.traits12[2], "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.chrs', '", nb.chrs, "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.inds.denovo', '", nb.inds.denovo, "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.snps.hd', '", nb.snps.hd, "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.snps.ld', '", nb.snps.ld, "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.plots', '", nb.plots, "')")
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.plot', '", 50, "')") # in Mendels
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.cross', '", 1/2, "')") # compare to one plot
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.autof', '", 1/25, "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.dh', '", 1/5, "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.geno.hd', '", 1, "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.geno.ld', '", ceiling(1/3), "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.geno.single', '", 1/50, "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.register', '", 4, "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('min.trait1', '", 1.03, "')") # compare to the controls
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('min.trait2', '", 14, "')") # idem
+res <- dbGetQuery(conn=db, query)
 ```
 
 Create the table for logging:
