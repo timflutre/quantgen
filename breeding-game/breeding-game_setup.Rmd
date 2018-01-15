@@ -52,7 +52,7 @@ suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
 ## library(LDheatmap) # optionnal
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.3",
+stopifnot(compareVersion("0.156.4",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -672,6 +672,12 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
 res <- dbGetQuery(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('min.trait2', '", 14, "')") # idem
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.years.per.ctl', '", nb.years.per.ctl, "')") # additional phenos of controls
+res <- dbGetQuery(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.plots.per.ctl', '", nb.plots.per.ctl, "')") # idem
 res <- dbGetQuery(conn=db, query)
 ```
 
