@@ -33,7 +33,7 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 * https://github.com/timflutre/atelier-prediction-genomique
 
-* Copyright 2016-2017 INRA, Montpellier SupAgro, AgroParisTech
+* Copyright 2016-2018 INRA, Montpellier SupAgro, AgroParisTech
 
 * License: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
@@ -47,17 +47,22 @@ t0 <- proc.time()
 
 Load the packages:
 ```{r load_pkg}
-library(rutilstimflutre)
-library(QTLRel)
-library(qqman)
-library(lme4)
-library(sommer)
-library(rrBLUP)
+suppressPackageStartupMessages(library(lattice))
+suppressPackageStartupMessages(library(QTLRel))
+suppressPackageStartupMessages(library(qqman))
+suppressPackageStartupMessages(library(lme4))
+suppressPackageStartupMessages(library(sommer))
+suppressPackageStartupMessages(library(breedR))
+suppressPackageStartupMessages(library(rrBLUP))
+suppressPackageStartupMessages(library(rutilstimflutre))
+stopifnot(compareVersion("0.156.4",
+                         as.character(packageVersion("rutilstimflutre")))
+          != 1)
 ```
 
 Retrieve the directory paths:
 ```{r setup_dir}
-root.dir <- "~/work2/atelier-prog-selection-2018"
+root.dir <- "~/work2/atelier-prog-selection-2018/data"
 setup <- getBreedingGameSetup(root.dir)
 ```
 
@@ -70,7 +75,7 @@ setup <- getBreedingGameSetup(root.dir)
 
 * quality (trait2)
 
-* presence of disease symptoms (trait3)
+* presence of disease symptoms (trait3=1)
 
 Collection:
 ```{r}
@@ -102,7 +107,7 @@ genos[1:3, 1:4]
 snp.density <- "hd"
 f <- paste0(setup$init.dir, "/snp_coords_", snp.density, ".txt.gz")
 snp.coords <- read.table(f, header=TRUE, stringsAsFactors=FALSE)
-nrow(snp.coords) == ncol(genos)
+stopifnot(nrow(snp.coords) == ncol(genos))
 snp.coords <- snp.coords[colnames(genos),]
 head(snp.coords)
 ```
@@ -127,12 +132,14 @@ Summarize each trait:
 ```{r}
 summary(phenos$trait1)
 summary(phenos$trait2)
+summary(phenos$trait1 * phenos$trait2 / 1000)
+table(phenos$trait3[phenos$pathogen])
 table(phenos$trait3[phenos$pathogen])
 ```
 
 * large variation for trait1 and trait2
 
-* several varieties have no symptoms the years with the pathogen, indicating that they are resistant
+* several varieties have no symptoms (trait3=0) the years with the pathogen, indicating that they are resistant
 
 Plot the raw phenotypic data with no subsetting:
 ```{r}
@@ -153,7 +160,7 @@ abline(h=mean(phenos$trait2), lty=2)
 * clear `year` effect on the mean of each trait, but same variance
 
 Plot the raw phenotypic data of trait1 and trait2 vs trait3 for the years at which the pathogen was observed:
-```{r}
+```{r, fig.width=14, fig.height=9}
 par(mfrow=c(1,2))
 plot(jitter(phenos$trait3[phenos$pathogen]), phenos$trait1[phenos$pathogen],
      xlab="trait3", ylab="trait1", las=1)
@@ -161,23 +168,54 @@ plot(jitter(phenos$trait3[phenos$pathogen]), phenos$trait2[phenos$pathogen],
      xlab="trait3", ylab="trait2", las=1)
 ```
 
-* left plot: the mean product yield (trait1) decreases strongly for individuals showing disease symptoms (i.e. the sensible varieties)
+* left plot: product yield (trait1) decreases strongly for individuals showing disease symptoms (trait3=1)
 
-* right plot: whether or not individuals have symptoms (trait3), the mean product quality (trait2) doesn't change.
+* right plot: product quality (trait2) doesn't change whether individuals have symptoms or not
 
 Plot the raw phenotypic data of trait1 vs trait2:
-```{r}
+```{r, fig.width=14, fig.height=9}
+par(mfrow=c(1,2))
 plot(phenos$trait1, phenos$trait2, xlab="trait1", ylab="trait2",
      main="All years", las=1)
 plot(phenos$trait1[! phenos$pathogen], phenos$trait2[! phenos$pathogen],
      xlab="trait1", ylab="trait2", main="Years without pathogen", las=1)
 ```
 
-Subset per year:
-```{r, eval=FALSE}
-for(year in levels(phenos$year))
-  plot(phenos$trait1[phenos$year == year], phenos$trait2[phenos$year == year],
-       xlab="trait1", ylab="trait2", main=year, las=1)
+## Raw data subsetted per year
+
+```{r, eval=TRUE}
+for(year in levels(phenos$year)){
+  x <- phenos$trait1[phenos$year == year]
+  y <- phenos$trait2[phenos$year == year]
+  ## plot(x, y, xlab="trait1", ylab="trait2", las=1,
+  ##      main=paste0(year, ifelse(year %in% years.patho, " (pathogen)", "")))
+  ## abline(lm(y ~ x), col="red")
+  ## legend("bottomright", legend=paste0("cor=", format(cor(x, y), digits=2)),
+  ##        col="red", lty=1, bty="n")
+  regplot(x, y, xlab="trait1", ylab="trait2",
+          main=paste0(year, ifelse(year %in% years.patho, " (pathogen)", "")))
+}
+```
+
+## Averaged data subsetted per year
+
+```{r, eval=TRUE}
+for(year in levels(phenos$year)){
+  x <- droplevels(phenos[phenos$year == year, c("ind","trait1")])
+  x <- tapply(x$trait1, list(x$ind), mean)
+  x <- setNames(x, names(x))
+  y <- droplevels(phenos[phenos$year == year, c("ind","trait2")])
+  y <- tapply(y$trait2, list(y$ind), mean)
+  y <- setNames(y, names(y))
+  ## plot(x, y, xlab="trait1", ylab="trait2", las=1,
+  ##      main=paste0(year, ifelse(year %in% years.patho, " (pathogen)", "")))
+  ## abline(lm(y ~ x), col="red")
+  ## legend("bottomright", legend=paste0("cor=", format(cor(x, y), digits=2)),
+  ##        col="red", lty=1, bty="n")
+  regplot(x, y, xlab="trait1 averaged per ind",
+          ylab="trait2 averaged per ind",
+          main=paste0(year, ifelse(year %in% years.patho, " (pathogen)", "")))
+}
 ```
 
 
@@ -185,33 +223,143 @@ for(year in levels(phenos$year))
 
 Extract the data of the latest year for which genotypes and phenotypes are available:
 ```{r}
-str(dat <- droplevels(phenos[phenos$year == 2014,]))
+last.year <- "2014"
+dat <- droplevels(phenos[phenos$year == last.year,])
+str(dat)
 ```
 
-Retrieve the BLUP of the genotypic values of each line, as each line was phenotyped on two plots:
-```{r, eval=TRUE}
-(fit3 <- lmer(formula=trait3 ~ 1 + (1|ind), data=dat))
-blups3 <- setNames(ranef(fit3)$ind[,"(Intercept)"],
-                   rownames(ranef(fit3)$ind))
-```
+## Linear model
 
-Find the true causal SNP of trait3 to highlight it in Manhattan plot:
+### Model fitting
+
 ```{r}
-true.qtl3 <- p0$trait3$qtn.id
+fit.i <- lm(formula=trait3 ~ 1 + ind, data=dat)
 ```
+
+TODO
+
+## Linear mixed model
+
+### Model fitting
+
+```{r}
+fit.i <- lmer(formula=trait3 ~ 1 + (1|ind), data=dat, REML=FALSE)
+```
+
+TODO: check if presence of spatial heterogeneity?
+
+### Model comparison
+
+```{r}
+AIC(fit.i)
+BIC(fit.i)
+```
+
+### Model selection
+
+```{r}
+bestmod <- fit.i
+```
+
+### Diagnostics
+
+Prepare to diagnose the best model:
+```{r}
+fit.all <- cbind(dat,
+                 response=dat$trait3,
+                 cond.res=residuals(bestmod),
+                 scl.cond.res=residuals(bestmod) / sigma(bestmod),
+                 fitted=fitted(bestmod))
+ind.cond.mode <- ranef(bestmod, condVar=TRUE, drop=TRUE)$ind
+var.ind.cond.mode <- setNames(attr(ind.cond.mode, "postVar"),
+                              names(ind.cond.mode))
+```
+
+Check the homoscedasticity of the errors:
+```{r}
+low.bound.norm.95 <- qnorm(p=0.025, mean=0, sd=1, lower.tail=TRUE)
+x.lim <- max(abs(fit.all$scl.cond.res), na.rm=TRUE)
+plot(x=jitter(fit.all$scl.cond.res), y=jitter(fit.all$fitted), las=1,
+     xlim=c(-x.lim, x.lim), main=paste0("trait3 in ", last.year))
+abline(v=0, lty=2)
+abline(v=c(low.bound.norm.95, abs(low.bound.norm.95)), lty=3)
+```
+
+Check the normality of the errors:
+```{r}
+shapiro.test(fit.all$scl.cond.res)
+qqnorm(y=fit.all$scl.cond.res,
+       main=paste0("trait3 in ", last.year, ": Normal Q-Q plot of scl.cond.res"))
+qqline(y=fit.all$scl.cond.res, col="red")
+```
+
+Check the absence of outlying individuals:
+```{r}
+x.lim <- max(abs(ind.cond.mode))
+par(mar=c(5,6,4,1))
+plot(x=ind.cond.mode, y=1:length(ind.cond.mode),
+     xlim=c(-x.lim, x.lim), main=paste0("trait3 in ", last.year),
+     yaxt="n", ylab="")
+axis(side=2, at=1:length(ind.cond.mode), labels=names(ind.cond.mode), las=1)
+abline(v=0, lty=2)
+idx <- which.max(ind.cond.mode)
+text(x=ind.cond.mode[idx], y=idx, labels=names(idx), pos=2)
+idx <- which.min(ind.cond.mode)
+text(x=ind.cond.mode[idx], y=idx, labels=names(idx), pos=4)
+```
+
+Check the normality of the random variables:
+```{r}
+qqnorm(y=ind.cond.mode, main="Normal Q-Q plot of ind.cond.mode", asp=1)
+qqline(y=ind.cond.mode, col="red")
+```
+
+Check the independence between errors and random variables:
+```{r}
+x.lim <- max(abs(fit.all$scl.cond.res))
+dotplot(ind ~ scl.cond.res, data=fit.all,
+        xlim=c(-x.lim, x.lim), main=paste0("trait3 in ", last.year),
+        panel=function(x,y,...){
+          panel.abline(v=0, lty=2)
+          panel.abline(v=c(low.bound.norm.95, abs(low.bound.norm.95)), lty=3)
+          panel.dotplot(x,y,...)
+        })
+```
+
+### Inference
+
+Estimate variance components by REML:
+```{r}
+bestmod <- lmer(formula=formula(bestmod),
+                data=dat, na.action=na.exclude, REML=TRUE)
+summary(bestmod)
+```
+
+Compute the confidence interval for variance components:
+```{r}
+prof <- stats::profile(fitted=bestmod, signames=FALSE)
+(ci <- stats::confint(object=prof, level=0.95))
+```
+
+Retrieve the true causal SNP of trait3 to highlight it in the Manhattan plot:
+```{r}
+(true.qtl3 <- p0$trait3$qtn.id)
+```
+
+### QTL detection with GEMMA
 
 Launch [GEMMA](https://github.com/xiangzhou/GEMMA) (better and quicker than QTLRel, but only on Linux), if available:
 ```{r, eval=TRUE}
 if(file.exists(Sys.which("gemma"))){
   print(system.time(
       res3.gemma <- gemma(model="ulmm",
-                          y=blups3,
-                          X=genos[names(blups3),],
+                          y=ind.cond.mode,
+                          X=genos[names(ind.cond.mode),],
                           snp.coords=snp.coords,
                           ## chr.ids=snp.coords[true.qtl3, "chr"],
-                          W=matrix(rep(1, length(blups3))),
+                          W=matrix(rep(1, length(ind.cond.mode))),
                           out.dir=setup$truth.dir,
-                          task.id="asso-coll-2014",
+                          task.id=paste0("asso-coll-", last.year),
                           clean="all", verbose=1)))
   tmp <- data.frame(BP=snp.coords[rownames(res3.gemma$tests), "pos"],
                     CHR=as.numeric(gsub("chr", "",
@@ -219,48 +367,74 @@ if(file.exists(Sys.which("gemma"))){
                                                    "chr"])),
                     P=res3.gemma$tests$p_wald,
                     SNP=rownames(res3.gemma$tests))
+  print(best.snp <- as.character(tmp$SNP[which.min(tmp$P)]))
+  print(tmp[tmp$SNP %in% c(true.qtl3, best.snp),])
   qqman::manhattan(x=tmp,
                    chrlabs=paste0("chr",
                                   sort(unique(as.numeric(gsub("chr", "",
                                                               snp.coords$chr))))),
                    main="GEMMA on BLUPs of trait3",
                    suggestiveline=FALSE, genomewideline=FALSE, highlight=true.qtl3)
-  print(table(genos[names(blups3), true.qtl3]))
-  print(median(blups3[genos[names(blups3), true.qtl3] == 0]))
-  print(median(blups3[genos[names(blups3), true.qtl3] == 2]))
-  print(length(resist.varieties <- rownames(genos)[genos[names(blups3),
+  print(table(genos[names(ind.cond.mode), true.qtl3]))
+  print(median(ind.cond.mode[genos[names(ind.cond.mode), true.qtl3] == 0]))
+  print(median(ind.cond.mode[genos[names(ind.cond.mode), true.qtl3] == 2]))
+  print(length(resist.varieties <- rownames(genos)[genos[names(ind.cond.mode),
                                                          true.qtl3] == 2]))
 
-  betterSummary(phenos$trait1[phenos$year == "2014"])
-  betterSummary(phenos$trait1[phenos$year == "2014" & ! phenos$ind %in% resist.varieties])
-  betterSummary(phenos$trait1[phenos$year == "2014" & phenos$ind %in% resist.varieties])
+  betterSummary(phenos$trait1[phenos$year == last.year])
+  betterSummary(phenos$trait1[phenos$year == last.year &
+                              ! phenos$ind %in% resist.varieties])
+  betterSummary(phenos$trait1[phenos$year == last.year &
+                              phenos$ind %in% resist.varieties])
+
+  boxplotCandidateQtl(y=ind.cond.mode,
+                      X=genos[names(ind.cond.mode),],
+                      snp=best.snp,
+                      xlab=paste0("genotypes at ", best.snp),
+                      ylab="BLUPs",
+                      main="BLUPs of trait3",
+                      show.points=TRUE)
 }
 ```
+
+### QTL detection with QTLRel
 
 Launch QTLRel (if available):
 ```{r, eval=TRUE}
 if(! file.exists(Sys.which("gemma"))){
   afs <- colMeans(genos) / 2
   A.mark <- genos %*% t(genos) / (2 * sum(afs * (1 - afs)))
-  A.mark <- A.mark[names(blups3), names(blups3)]
+  A.mark <- A.mark[names(ind.cond.mode), names(ind.cond.mode)]
   res3 <- list()
-  res3$vc <- estVC(y=blups3,
+  res3$vc <- estVC(y=ind.cond.mode,
                    v=list(AA=A.mark, DD=NULL, HH=NULL,
-                          AD=NULL, MH=NULL, EE=diag(length(blups3))))
+                          AD=NULL, MH=NULL, EE=diag(length(ind.cond.mode))))
   idx.snps <- 1:ncol(genos)
-  res3$scan <- scanOne(y=blups3, gdat=genos[names(blups3), idx.snps],
+  ## TODO: see how to specify the nb of threads
+  ## TODO: scan only the chr with the causal SNP
+  res3$scan <- scanOne(y=ind.cond.mode, gdat=genos[names(ind.cond.mode), idx.snps],
                        vc=res3$vc, test="F", numGeno=TRUE)
   stopifnot(all(names(res3$scan$p) == rownames(snp.coords)))
   tmp <- data.frame(BP=snp.coords$pos,
                     CHR=as.numeric(gsub("chr", "", snp.coords$chr)),
                     P=res3$scan$p,
                     SNP=rownames(snp.coords))
+  print(best.snp <- as.character(tmp$SNP[which.min(tmp$P)]))
+  print(tmp[tmp$SNP %in% c(true.qtl3, best.snp),])
   qqman::manhattan(x=tmp,
                    chrlabs=paste0("chr",
                                   sort(unique(as.numeric(gsub("chr", "",
                                                               snp.coords$chr))))),
                    main="QTLRel on BLUPs of trait3",
                    suggestiveline=FALSE, genomewideline=FALSE, highlight=true.qtl3)
+
+  boxplotCandidateQtl(y=ind.cond.mode,
+                      X=genos[names(ind.cond.mode),],
+                      snp=best.snp,
+                      xlab=paste0("genotypes at ", best.snp),
+                      ylab="BLUPs",
+                      main="BLUPs of trait3",
+                      show.points=TRUE)
 }
 ```
 
@@ -345,7 +519,7 @@ blups1 <- setNames(ranef(fit1$merMod)$ind[,"(Intercept)"],
                    rownames(ranef(fit1$merMod)$ind))
 cor(blups1, p0$G.A[,1])
 regplot(p0$G.A[,1], blups1, xlab="Breeding values of trait1",
-        ylab="Expected breeding values of trait1")
+        ylab="BLUPs of breeding values of trait1")
 ```
 
 ### Trait2
@@ -370,7 +544,7 @@ blups2 <- setNames(ranef(fit2$merMod)$ind[,"(Intercept)"],
                    rownames(ranef(fit2$merMod)$ind))
 cor(blups2, p0$G.A[,2])
 regplot(p0$G.A[,2], blups2, xlab="Breeding values of trait2",
-        ylab="Expected breeding values of trait2")
+        ylab="BLUPs of breeding values of trait2")
 ```
 
 ### Compare BLUPs for both traits
@@ -380,12 +554,14 @@ Compare BLUPs for both traits:
 all(names(blups1) == names(blups2))
 cor(blups1, blups2)
 regplot(blups1, blups2, main="Univariate LMM",
-        xlab="Expected breeding values of trait1",
-        ylab="Expected breeding values of trait2")
+        xlab="BLUPs of breeding values of trait1",
+        ylab="BLUPs of breeding values of trait2")
 ```
 
 
 ## Jointly
+
+TODO: try `breedR`
 
 Remove known confounders for both traits simultaneously (slow):
 ```{r, eval=FALSE}
