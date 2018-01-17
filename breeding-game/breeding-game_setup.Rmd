@@ -47,19 +47,27 @@ t0 <- proc.time()
 
 Load the packages:
 ```{r load_pkg}
+suppressPackageStartupMessages(library(DBI))
 suppressPackageStartupMessages(library(RSQLite))
+stopifnot(compareVersion("2.0",
+                         as.character(packageVersion("RSQLite")))
+          != 1)
 suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
 ## library(LDheatmap) # optionnal
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.4",
+stopifnot(compareVersion("0.156.5",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
 
 Set up directories:
 ```{r setup_dir}
-root.dir <- "~/work2/atelier-prog-selection-2018/data"
+if(Sys.info()["user"] == "tflutre"){
+  root.dir <- "~/work2/atelier-prog-selection-2018/data"
+} else{
+  stop("you need to add your path to this Rmd!")
+}
 if(! dir.exists(root.dir))
   dir.create(root.dir)
 setup <- setUpBreedingGame(root.dir=root.dir,
@@ -245,6 +253,10 @@ hist(coancestries[upper.tri(coancestries)], breaks="Sturges")
 abline(v=0, lty=2, col="red")
 ```
 
+## Structure into families
+
+TODO: panmixia with 40 genotypes for 3 generations
+
 ## Choose SNPs for genotyping
 
 Ascertain SNPs for the genotyping arrays (high and low density):
@@ -350,9 +362,10 @@ nb.plots.per.line.per.year <- 2
 nb.years <- 10
 nb.plots <- nb.lines.per.year * nb.plots.per.line.per.year
 line.ids <- getIndNamesFromHaplos(coll$haplos)[1:(150 + (10-1) * 75)]
+first.year <- 2005
 p0.df <- makeDfInitPhenos(nb.lines.per.year=nb.lines.per.year, nb.years=nb.years,
                           nb.plots.per.line.per.year=nb.plots.per.line.per.year,
-                          first.year=2005, line.ids)
+                          first.year=first.year, line.ids)
 head(p0.df)
 str(p0.df)
 ```
@@ -611,82 +624,137 @@ db <- dbConnect(SQLite(), dbname=dbname)
 dbListTables(db)
 ```
 
+## Constants
+
 Create the table with the constants (average phenotypes, unitary costs, etc):
 ```{r}
 tbl <- "constants"
 if(tbl %in% dbListTables(db)){
   query <- paste0("DROP TABLE ", tbl)
-  res <- dbGetQuery(conn=db, query)
+  res <- dbExecute(conn=db, query)
 }
 query <- paste0("CREATE TABLE ", tbl,
                 " (item TEXT",
-                ", value INT)")
-res <- dbGetQuery(conn=db, query)
-query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('mu.trait1', '", mu.traits12[1], "')")
-res <- dbGetQuery(conn=db, query)
-query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('mu.trait2', '", mu.traits12[2], "')")
-res <- dbGetQuery(conn=db, query)
+                ", value TEXT)")
+res <- dbExecute(conn=db, query)
+```
+
+Fill the table with the constants used for the data simulation:
+```{r}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.chrs', '", nb.chrs, "')")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('chr.length', '", L, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait1', '", mu.traits12[1], "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait2', '", mu.traits12[2], "')")
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.inds.denovo', '", nb.inds.denovo, "')")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.snps.hd', '", nb.snps.hd, "')")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.snps.ld', '", nb.snps.ld, "')")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.plots', '", nb.plots, "')")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('cost.plot', '", 50, "')") # in Mendels
-res <- dbGetQuery(conn=db, query)
+                " ('nb.controls', '", nb.controls, "')")
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('cost.cross', '", 1/2, "')") # compare to one plot
-res <- dbGetQuery(conn=db, query)
+                " ('nb.years.per.ctl', '", nb.years.per.ctl, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.plots.per.ctl', '", nb.plots.per.ctl, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('register.min.trait1', '", 1.03, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('register.min.trait2', '", 14, "')")
+res <- dbExecute(conn=db, query)
+```
+
+Fill the table with the constants specifying the time delays (in months):
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('first.year', '", first.year, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('max.upload.pheno.field', '", "05-31", "')") # May 31 of each year
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.pheno.field', '", 4, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.pheno.patho', '", 3, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.allof', '", 4, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.autof', '", 4, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.haplodiplo', '", 12, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.geno.hd', '", 1, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.geno.ld', '", 1, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('duration.geno.single', '", 1, "')")
+res <- dbExecute(conn=db, query)
+```
+
+Fill the table with the constants specifying the costs:
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.pheno.field', '", 50, "')") # in Mendels
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.pheno.patho', '", 1/10, "')") # compare to one plot
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('cost.allof', '", 1/10, "')") # idem
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('cost.autof', '", 1/25, "')") # idem
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('cost.dh', '", 1/5, "')") # idem
-res <- dbGetQuery(conn=db, query)
+                " ('cost.haplodiplo', '", 1, "')") # idem
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('cost.geno.hd', '", 1, "')") # idem
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('cost.geno.ld', '", ceiling(1/3), "')") # idem
-res <- dbGetQuery(conn=db, query)
+                " ('cost.geno.ld', '", 1/3, "')") # idem
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('cost.geno.single', '", 1/50, "')") # idem
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('cost.register', '", 4, "')") # idem
-res <- dbGetQuery(conn=db, query)
-query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('min.trait1', '", 1.03, "')") # compare to the controls
-res <- dbGetQuery(conn=db, query)
-query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('min.trait2', '", 14, "')") # idem
-res <- dbGetQuery(conn=db, query)
-query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('nb.years.per.ctl', '", nb.years.per.ctl, "')") # additional phenos of controls
-res <- dbGetQuery(conn=db, query)
-query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('nb.plots.per.ctl', '", nb.plots.per.ctl, "')") # idem
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 ```
+
+## Log
 
 Create the table for logging:
 ```{r create_table_log}
 tbl <- "log"
 if(tbl %in% dbListTables(db)){
   query <- paste0("DROP TABLE ", tbl)
-  res <- dbGetQuery(conn=db, query)
+  res <- dbExecute(conn=db, query)
 }
 query <- paste0("CREATE TABLE ", tbl,
                 " (breeder TEXT",
@@ -694,22 +762,24 @@ query <- paste0("CREATE TABLE ", tbl,
                 ", task TEXT",
                 ", quantity INT",
                 ", time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 dbListFields(db, tbl)
 ```
+
+## Breeders
 
 Create the table for breeder information, and insert the breeder(s):
 ```{r create_table_breeders}
 tbl <- "breeders"
 if(tbl %in% dbListTables(db)){
   query <- paste0("DROP TABLE ", tbl)
-  res <- dbGetQuery(conn=db, query)
+  res <- dbExecute(conn=db, query)
 }
 query <- paste0("CREATE TABLE ", tbl,
                 " (name TEXT",
                 ", status TEXT",
                 ", h_psw TEXT)")
-res <- dbGetQuery(conn=db, query)
+res <- dbExecute(conn=db, query)
 dbListFields(db, tbl)
 hashed.psw <- digest("", "md5", serialize=FALSE)
 for(breeder in breeders){
@@ -723,9 +793,11 @@ for(breeder in breeders){
     query <- paste0(query,
                     "', 'player",
                     "', '", hashed.psw, "')")
-  res <- dbGetQuery(conn=db, query)
+  res <- dbExecute(conn=db, query)
 }
 ```
+
+## Plant material
 
 Create one table per breeder for their plant material:
 ```{r create_tables_plant_material}
@@ -733,11 +805,14 @@ for(breeder in breeders){
   tbl <- paste0("plant_material_", breeder)
   if(tbl %in% dbListTables(db)){
     query <- paste0("DROP TABLE ", tbl)
-    res <- dbGetQuery(conn=db, query)
+    res <- dbExecute(conn=db, query)
   }
   query <- paste0("CREATE TABLE ", tbl,
-                  " (parent1 TEXT, parent2 TEXT, child TEXT PRIMARY KEY)")
-  res <- dbGetQuery(conn=db, query)
+                  " (parent1 TEXT",
+                  ", parent2 TEXT",
+                  ", child TEXT PRIMARY KEY",
+                  ", avail_from TEXT)")
+  res <- dbExecute(conn=db, query)
 }
 dbListTables(db)
 ```
@@ -759,13 +834,16 @@ for(i in 1:length(ind.ids)){
       file.symlink(f, fto)
     tbl <- paste0("plant_material_", breeder)
     query <- paste0("INSERT INTO ", tbl, " VALUES",
-                    " ('", tmp.ids[i],
-                    "', '", NA,
-                    "', '", ind.id, "')")
-    res <- dbGetQuery(conn=db, query)
+                    " ('", tmp.ids[i], "'",
+                    ", '", NA, "'",
+                    ", '", ind.id, "'",
+                    ", '", first.year, "-01-01 00:00:00')") # ISO-8601
+    res <- dbExecute(conn=db, query)
   }
 }
 ```
+
+## Example files
 
 Make an example of a "plant material" file:
 ```{r ex_cross}
@@ -776,6 +854,9 @@ Make an example of an "data" file:
 ```{r ex_data}
 (data.examples <- makeExampleDataFile(init.dir))
 ```
+
+
+# Export ZIP archive
 
 Make a zip archive of the whole directory:
 ```{r make_zip}
