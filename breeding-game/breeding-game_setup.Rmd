@@ -66,7 +66,7 @@ Set up directories:
 if(Sys.info()["user"] == "tflutre"){
   root.dir <- "~/work2/atelier-prog-selection-2018/data"
 } else{
-  stop("you need to add your path to this Rmd!")
+  root.dir <- "C:/<...>/data"
 }
 if(! dir.exists(root.dir))
   dir.create(root.dir)
@@ -267,31 +267,23 @@ Ascertain SNPs for the genotyping arrays (high and low density):
 nb.inds.denovo <- 20
 nb.snps.hd <- 10*10^3
 nb.snps.ld <- 5*10^3
-if(! file.exists(paste0(init.dir, "/snp_coords_hd.txt.gz"))){
-  subset.inds <- sort(sample(rownames(g0$genos), nb.inds.denovo))
-  mafs.subset <- estimSnpMaf(g0$genos[subset.inds,])
-  summary(mafs.subset)
-  sum(mafs.subset >= 0.1)
-  subset.snps <- list()
-  subset.snps[["hd"]] <- sample(names(mafs.subset[mafs.subset >= 0.1]), nb.snps.hd)
-  subset.snps[["ld"]] <- sample(subset.snps[["hd"]], nb.snps.ld)
-  summary(mafs[subset.snps[["hd"]]])
-  summary(mafs[subset.snps[["ld"]]])
-  f <- paste0(init.dir, "/snp_coords_hd.txt.gz")
-  write.table(x=g0$snp.coords[subset.snps[["hd"]],],
-              file=gzfile(f), quote=FALSE,
-              sep="\t", row.names=TRUE, col.names=TRUE)
-  f <- paste0(init.dir, "/snp_coords_ld.txt.gz")
-  write.table(x=g0$snp.coords[subset.snps[["ld"]],],
-              file=gzfile(f), quote=FALSE,
-              sep="\t", row.names=TRUE, col.names=TRUE)
-} else{
-  subset.snps <- list()
-  f <- paste0(init.dir, "/snp_coords_hd.txt.gz")
-  subset.snps[["hd"]] <- rownames(read.table(f))
-  f <- paste0(init.dir, "/snp_coords_ld.txt.gz")
-  subset.snps[["ld"]] <- rownames(read.table(f))
-}
+subset.inds <- sort(sample(rownames(g0$genos), nb.inds.denovo))
+mafs.subset <- estimSnpMaf(g0$genos[subset.inds,])
+summary(mafs.subset)
+sum(mafs.subset >= 0.1)
+subset.snps <- list()
+subset.snps[["hd"]] <- sample(names(mafs.subset[mafs.subset >= 0.1]), nb.snps.hd)
+subset.snps[["ld"]] <- sample(subset.snps[["hd"]], nb.snps.ld)
+summary(mafs[subset.snps[["hd"]]])
+summary(mafs[subset.snps[["ld"]]])
+f <- paste0(init.dir, "/snp_coords_hd.txt.gz")
+write.table(x=g0$snp.coords[subset.snps[["hd"]],],
+            file=gzfile(f), quote=FALSE,
+            sep="\t", row.names=TRUE, col.names=TRUE)
+f <- paste0(init.dir, "/snp_coords_ld.txt.gz")
+write.table(x=g0$snp.coords[subset.snps[["ld"]],],
+            file=gzfile(f), quote=FALSE,
+            sep="\t", row.names=TRUE, col.names=TRUE)
 ```
 
 ## Make lines
@@ -763,7 +755,45 @@ query <- paste0("CREATE TABLE ", tbl,
                 ", quantity INT",
                 ", time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)")
 res <- dbExecute(conn=db, query)
-dbListFields(db, tbl)
+```
+
+## Sessions
+
+Create the table describing the game sessions:
+```{r}
+tbl <- "sessions"
+if(tbl %in% dbListTables(db)){
+  query <- paste0("DROP TABLE ", tbl)
+  res <- dbExecute(conn=db, query)
+}
+query <- paste0("CREATE TABLE ", tbl,
+                " (num INT",
+                ", start TEXT",
+                ", end TEXT",
+                ", year_time INT)") # in minutes
+res <- dbExecute(conn=db, query)
+```
+
+Fill the table:
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('1'",
+                ", '2018-02-15 09:00:00'",
+                ", '2018-02-15 12:00:00'",
+                ", '60')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('2'",
+                ", '2018-02-15 14:00:00'",
+                ", '2018-02-15 17:00:00'",
+                ", '60')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('3'",
+                ", '2018-02-16 09:00:00'",
+                ", '2018-02-16 11:40:00'",
+                ", '40')")
+res <- dbExecute(conn=db, query)
 ```
 
 ## Breeders
@@ -780,7 +810,6 @@ query <- paste0("CREATE TABLE ", tbl,
                 ", status TEXT",
                 ", h_psw TEXT)")
 res <- dbExecute(conn=db, query)
-dbListFields(db, tbl)
 hashed.psw <- digest("", "md5", serialize=FALSE)
 for(breeder in breeders){
   query <- paste0("INSERT INTO ", tbl, " VALUES",
