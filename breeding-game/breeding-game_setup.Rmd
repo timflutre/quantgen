@@ -56,7 +56,7 @@ suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
 ## library(LDheatmap) # optionnal
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.5",
+stopifnot(compareVersion("0.156.6",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -655,6 +655,12 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.snps.ld', '", nb.snps.ld, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.phenotyped.coll', '", nlevels(p0.df$ind), "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.genotyped.coll', '", length(subset.coll), "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.plots', '", nb.plots, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
@@ -750,7 +756,7 @@ if(tbl %in% dbListTables(db)){
 }
 query <- paste0("CREATE TABLE ", tbl,
                 " (breeder TEXT",
-                ", year INT",
+                ", request_date TEXT", # ISO-8601
                 ", task TEXT",
                 ", quantity INT",
                 ", time TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)")
