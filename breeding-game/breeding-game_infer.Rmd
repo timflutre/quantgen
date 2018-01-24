@@ -808,7 +808,7 @@ call <- call("rr", y=blups1[rownames(genos)], Z=genos)
 ```
 
 Perform cross-validation:
-```{r, eval=FALSE}
+```{r trait1_crossval, eval=TRUE}
 system.time(
     fit.cv <- cvTool(call=call, x=genos, y=blups1[rownames(genos)],
                      names=c("Z", "y"), cost=rmspe, folds=folds))
@@ -862,7 +862,7 @@ call <- call("rr", y=blups2[rownames(genos)], Z=genos)
 ```
 
 Perform cross-validation:
-```{r, eval=FALSE}
+```{r trait2_crossval, eval=TRUE}
 system.time(
     fit.cv <- cvTool(call=call, x=genos, y=blups2[rownames(genos)],
                      names=c("Z", "y"), cost=rmspe, folds=folds))
@@ -872,6 +872,7 @@ fit.cv <- cvTool(call=call, x=genos, y=blups2[rownames(genos)],
                  names=c("Z", "y"), cost=cor, folds=folds)
 fit.cv
 summary(fit.cv)
+sd(fit.cv[,2])
 ```
 
 
