@@ -1,14 +1,14 @@
 #!/usr/bin/env Rscript
 
-# Aim: convert an Rmd file into html or pdf
-# Copyright (C) 2016 Timothée Flutre
+# Aim: convert an Rmd file into html or pdf from the command-line
+# Copyright (C) 2016,2018 Timothée Flutre
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
 
 rm(list=ls())
 prog.name <- "rmd2out.R"
-prog.version <- "0.1.0" # http://semver.org/
+prog.version <- "0.2.0" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -118,48 +118,41 @@ checkParams <- function(params){
   library(rmarkdown)
 }
 
-run <- function(params){
-  rmarkdown::render(params$in.file, paste0(params$out.format, "_document"))
+params <- list(verbose=1,
+               in.file=NULL,
+               out.format="html")
+
+params <- parseCmdLine(params)
+
+checkParams(params)
+
+if(params$verbose > 0){
+  start.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  write(paste0("START ", prog.name, " ", prog.version, " ", start.time),
+        stdout())
+  args <- commandArgs(trailingOnly=TRUE)
+  write(paste("cmd-line:", prog.name, paste(args, collapse=" ")), stdout())
+  write(paste0("cwd: ", getwd()), stdout())
 }
 
-main <- function(){
-  params <- list(verbose=1,
-                 in.file=NULL,
-                 out.format="html")
+system.time(
+    rmarkdown::render(params$in.file, paste0(params$out.format, "_document"))
+)
 
-  params <- parseCmdLine(params)
-
-  checkParams(params)
-
-  if(params$verbose > 0){
-    start.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    write(paste0("START ", prog.name, " ", prog.version, " ", start.time),
-          stdout())
-    args <- commandArgs(trailingOnly=TRUE)
-    write(paste("cmd-line:", prog.name, paste(args, collapse=" ")), stdout())
-    write(paste0("cwd: ", getwd()), stdout())
-  }
-
-  system.time(run(params))
-
-  if(params$verbose > 0){
-    end.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    difft <- as.numeric(
-        difftime(as.POSIXct(end.time, format="%Y-%m-%d %H:%M:%S"),
-                 as.POSIXct(start.time, format="%Y-%m-%d %H:%M:%S"),
-                 units="days"))
-    ## difft <- 1 + 2/24 + 3/(24*60) + 3/(24*3600) # 1d 2h 3m 4s in days
-    difft.d <- floor(difft)
-    difft.h <- floor(((difft - difft.d) * 24) %% 24)
-    difft.m <- floor(((difft - difft.d - difft.h/24) * 24*60) %% (24 * 60))
-    difft.s <- floor(((difft - difft.d - difft.h/24 - difft.m/(24*60)) *
-                      24*60*60) %% (24 * 60 * 60))
-    run.length <- sprintf("%02i:%02i:%02i", difft.h, difft.m, difft.s)
-    write(paste0("END ", prog.name, " ", prog.version, " ", end.time,
-                 " (", run.length, ")"), stdout())
-    ## print(object.size(x=lapply(ls(), get)), units="Kb") # return an error I don't understand
-  }
+if(params$verbose > 0){
+  end.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  difft <- as.numeric(
+      difftime(as.POSIXct(end.time, format="%Y-%m-%d %H:%M:%S"),
+               as.POSIXct(start.time, format="%Y-%m-%d %H:%M:%S"),
+               units="days"))
+  ## difft <- 1 + 2/24 + 3/(24*60) + 3/(24*3600) # 1d 2h 3m 4s in days
+  difft.d <- floor(difft)
+  difft.h <- floor(((difft - difft.d) * 24) %% 24)
+  difft.m <- floor(((difft - difft.d - difft.h/24) * 24*60) %% (24 * 60))
+  difft.s <- floor(((difft - difft.d - difft.h/24 - difft.m/(24*60)) *
+                    24*60*60) %% (24 * 60 * 60))
+  run.length <- sprintf("%02i:%02i:%02i", difft.h, difft.m, difft.s)
+  write(paste0("END ", prog.name, " ", prog.version, " ", end.time,
+               " (", run.length, ")"), stdout())
+  ## print(object.size(x=lapply(ls(), get)), units="Kb") # return an error I don't understand
 }
-
-if(! interactive())
-    main()
