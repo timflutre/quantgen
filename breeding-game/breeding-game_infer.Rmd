@@ -6,12 +6,12 @@ colorlinks: true
 output:
   html_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     toc_float: true
     number_sections: TRUE
   pdf_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     number_sections: TRUE
 ---
 
@@ -51,9 +51,13 @@ suppressPackageStartupMessages(library(lattice))
 suppressPackageStartupMessages(library(QTLRel))
 suppressPackageStartupMessages(library(qqman))
 suppressPackageStartupMessages(library(lme4))
-suppressPackageStartupMessages(library(sommer))
-suppressPackageStartupMessages(library(breedR))
+## suppressPackageStartupMessages(library(sommer))
+## suppressPackageStartupMessages(library(breedR))
 suppressPackageStartupMessages(library(rrBLUP))
+stopifnot(compareVersion("4.5",
+                         as.character(packageVersion("rrBLUP")))
+          != 1)
+suppressPackageStartupMessages(library(cvTools))
 suppressPackageStartupMessages(library(rutilstimflutre))
 stopifnot(compareVersion("0.156.4",
                          as.character(packageVersion("rutilstimflutre")))
@@ -62,7 +66,11 @@ stopifnot(compareVersion("0.156.4",
 
 Retrieve the directory paths:
 ```{r setup_dir}
-root.dir <- "~/work2/atelier-prog-selection-2018/data"
+if(Sys.info()["user"] == "tflutre"){
+  root.dir <- "~/work2/atelier-prog-selection-2018/data"
+} else{
+  stop("you need to add your path to this Rmd!")
+}
 setup <- getBreedingGameSetup(root.dir)
 ```
 
@@ -71,11 +79,11 @@ setup <- getBreedingGameSetup(root.dir)
 
 ## Phenotypes
 
-* yield (trait1)
+* `trait1`: flower in kg/ha (quantity)
 
-* quality (trait2)
+* `trait2`: sepmetin in g/kg of flower (quality)
 
-* presence of disease symptoms (trait3=1)
+* `trait3=1`: presence of disease symptoms
 
 Collection:
 ```{r}
@@ -103,12 +111,14 @@ str(phectls)
 f <- paste0(setup$init.dir, "/genos_subset-coll.txt.gz")
 tools::md5sum(path.expand(f))
 genos <- as.matrix(read.table(f, header=TRUE))
+dim(genos)
 genos[1:3, 1:4]
 snp.density <- "hd"
 f <- paste0(setup$init.dir, "/snp_coords_", snp.density, ".txt.gz")
 snp.coords <- read.table(f, header=TRUE, stringsAsFactors=FALSE)
 stopifnot(nrow(snp.coords) == ncol(genos))
 snp.coords <- snp.coords[colnames(genos),]
+dim(snp.coords)
 head(snp.coords)
 ```
 
@@ -123,6 +133,8 @@ load(f)
 
 # Explore the data
 
+## Numerically
+
 Years with the presence of the pathogen on the site:
 ```{r}
 (years.patho <- as.character(unique(phenos$year[phenos$pathogen])))
@@ -134,12 +146,49 @@ summary(phenos$trait1)
 summary(phenos$trait2)
 summary(phenos$trait1 * phenos$trait2 / 1000)
 table(phenos$trait3[phenos$pathogen])
-table(phenos$trait3[phenos$pathogen])
 ```
 
 * large variation for trait1 and trait2
 
 * several varieties have no symptoms (trait3=0) the years with the pathogen, indicating that they are resistant
+
+Effects of trait3 on the others:
+```{r}
+summary(phenos$trait1[! phenos$pathogen])
+summary(phenos$trait1[phenos$pathogen])
+summary(phenos$trait2[! phenos$pathogen])
+summary(phenos$trait2[phenos$pathogen])
+```
+
+* the pathogen seems to have an effect on both traits
+
+Correlations between traits:
+```{r}
+cor(phenos$trait1, phenos$trait2, method="pearson")
+cor(phenos$trait1, phenos$trait2, method="spearman")
+cor(phenos$trait1[! phenos$pathogen], phenos$trait2[! phenos$pathogen],
+    method="pearson")
+cor(phenos$trait1[phenos$pathogen], phenos$trait2[phenos$pathogen],
+    method="spearman")
+```
+
+* hard to interpret
+
+Maybe there is a strong year effect:
+```{r}
+do.call(rbind, tapply(phenos$trait1, list(phenos$year), summary))
+do.call(rbind, tapply(phenos$trait1[! phenos$pathogen],
+                      list(droplevels(phenos$year[! phenos$pathogen])),
+                      summary))
+do.call(rbind, tapply(phenos$trait2, list(phenos$year), summary))
+do.call(rbind, tapply(phenos$trait2[! phenos$pathogen],
+                      list(droplevels(phenos$year[! phenos$pathogen])),
+                      summary))
+```
+
+* indeed the year effect is quite strong
+
+## Graphically
 
 Plot the raw phenotypic data with no subsetting:
 ```{r}
@@ -168,18 +217,47 @@ plot(jitter(phenos$trait3[phenos$pathogen]), phenos$trait2[phenos$pathogen],
      xlab="trait3", ylab="trait2", las=1)
 ```
 
-* left plot: product yield (trait1) decreases strongly for individuals showing disease symptoms (trait3=1)
+* left plot: trait1 decreases strongly for individuals showing disease symptoms (`trait3=1`)
 
-* right plot: product quality (trait2) doesn't change whether individuals have symptoms or not
+* right plot: trait2 doesn't change whether individuals have symptoms or not
 
 Plot the raw phenotypic data of trait1 vs trait2:
-```{r, fig.width=14, fig.height=9}
-par(mfrow=c(1,2))
+```{r}
 plot(phenos$trait1, phenos$trait2, xlab="trait1", ylab="trait2",
      main="All years", las=1)
+abline(lm(trait2 ~ trait1, data=phenos), col="red")
 plot(phenos$trait1[! phenos$pathogen], phenos$trait2[! phenos$pathogen],
      xlab="trait1", ylab="trait2", main="Years without pathogen", las=1)
+abline(lm(trait2 ~ trait1, data=phenos[! phenos$pathogen,]), col="red")
 ```
+
+Same but distinguish each year by different colors:
+```{r}
+plot(phenos$trait1, phenos$trait2, xlab="trait1", ylab="trait2",
+     main="All years", las=1, type="n")
+for(j in 1:nlevels(phenos$year)){
+  year <- levels(phenos$year)[j]
+  idx <- which(phenos$year == year)
+  points(phenos$trait1[idx], phenos$trait2[idx], col=j)
+  abline(lm(trait2 ~ trait1, data=phenos[idx,]), col=j)
+}
+```
+
+Same but only the years without pathogen:
+```{r}
+plot(phenos$trait1, phenos$trait2, xlab="trait1", ylab="trait2",
+     main="Years without pathogen", las=1, type="n")
+for(j in 1:nlevels(phenos$year)){
+  year <- levels(phenos$year)[j]
+  if(year %in% years.patho)
+    next
+  idx <- which(phenos$year == year)
+  points(phenos$trait1[idx], phenos$trait2[idx], col=j)
+  abline(lm(trait2 ~ trait1, data=phenos[idx,]), col=j)
+}
+```
+
+* negative correlation between trait1 and trait2, especially visible the years without pathogen
 
 ## Raw data subsetted per year
 
@@ -456,106 +534,186 @@ regplot(p0$G.A[,1], p0$G.A[,2], xlab="Breeding values of trait1",
 
 ## Separately
 
+We want to study the "year" and "pathogen" effects on trait1 (fixed effects), and the extent to which genotypes vary in their responses (random effects, variance components).
+
 ### Trait1
 
-Predict genotypic BLUPs for trait1 by fitting different models:
+#### Model fitting
+
+Fixed-effect models:
 ```{r}
-fit1.yi <- list(merMod=lmer(trait1 ~ 1 + year + (1|ind) + (1|year:ind),
-                            data=phenos))
-extractAIC(fit1.yi$merMod)
-anova(fit1.yi$merMod)
-as.data.frame(VarCorr(fit1.yi$merMod))
-fit1.yi$ci <- confint.merMod(fit1.yi$merMod, level=0.95,
-                             method="profile", oldNames=FALSE)
-fit1.yi$ci[1:3,]
-
-fit1.pi <- list(merMod=lmer(trait1 ~ 1 + pathogen + (1|ind) + (1|pathogen:ind),
-                            data=phenos))
-extractAIC(fit1.pi$merMod)
-anova(fit1.pi$merMod)
-as.data.frame(VarCorr(fit1.pi$merMod))
-fit1.pi$ci <- confint.merMod(fit1.pi$merMod, level=0.95,
-                             method="profile", oldNames=FALSE)
-fit1.pi$ci[1:3,]
-
-fit1.yi.nopath <- list(merMod=lmer(trait1 ~ 1 + year + (1|ind) + (1|ind:year),
-                                   data=droplevels(phenos[! phenos$pathogen,])))
-(vc1.yi.nopath <- as.data.frame(VarCorr(fit1.yi.nopath$merMod)))
-vc1.yi.nopath[2, "vcov"] / (vc1.yi.nopath[2, "vcov"] + vc1.yi.nopath[3, "vcov"])
-anova(fit1.yi.nopath$merMod)
-fit1.yi.nopath$ci <- confint.merMod(fit1.yi.nopath$merMod, level=0.95,
-                                    method="profile", oldNames=FALSE)
-fit1.yi.nopath$ci[1:3,]
-
-fit1.yi.path <- list(merMod=lmer(trait1 ~ 1 + year + trait3 + (1|ind),
-                                 data=droplevels(phenos[phenos$pathogen,])))
-(vc1.yi.path <- as.data.frame(VarCorr(fit1.yi.path$merMod)))
-vc1.yi.path[1, "vcov"] / (vc1.yi.path[1, "vcov"] + vc1.yi.path[2, "vcov"])
-anova(fit1.yi.path$merMod)
-fit1.yi.path$ci <- confint.merMod(fit1.yi.path$merMod, level=0.95,
-                                  method="profile", oldNames=FALSE)
-fit1.yi.path$ci
-
-fit1.y.t3.i <- list(merMod=lmer(trait1 ~ 1 + year + trait3 + (1|ind),
-                                data=phenos))
-extractAIC(fit1.y.t3.i$merMod)
-anova(fit1.y.t3.i$merMod)
-(vc1.y.t3.i <- as.data.frame(VarCorr(fit1.y.t3.i$merMod)))
-vc1.y.t3.i[1, "vcov"] / (vc1.y.t3.i[1, "vcov"] + vc1.y.t3.i[2, "vcov"])
-fit1.y.t3.i$ci <- confint.merMod(fit1.y.t3.i$merMod, level=0.95,
-                                 method="profile", oldNames=FALSE)
-fit1.y.t3.i$ci
+system.time(
+    fit1f.i <- lm(trait1 ~ 1 + ind,
+                  data=phenos))
+system.time(
+    fit1f.y.i <- lm(trait1 ~ 1 + year + ind,
+                    data=phenos))
+## system.time(
+##     fit1f.yi <- lm(trait1 ~ 1 + year + ind + year:ind,
+##                    data=phenos)) # slow
+system.time(
+    fit1f.y.p.i <- lm(trait1 ~ 1 + year + pathogen + ind,
+                      data=phenos))
+system.time(
+    fit1f.y.3.i <- lm(trait1 ~ 1 + year + trait3 + ind,
+                      data=phenos))
 ```
 
-Choose the best model, and check it:
+Mixed models (use `REML=FALSE` to compare fixed-effect parts):
 ```{r}
-fit1 <- fit1.y.t3.i
-summary(fit1$merMod)
-hist(residuals(fit1$merMod) / sigma(fit1$merMod))
+fit1m.i <- lmer(trait1 ~ 1 + (1|ind),
+                data=phenos, REML=FALSE)
+fit1m.y.i <- lmer(trait1 ~ 1 + year + (1|ind),
+                  data=phenos, REML=FALSE)
+fit1m.y.3.i <- lmer(trait1 ~ 1 + year + trait3 + (1|ind),
+                    data=phenos, REML=FALSE)
+```
+
+#### Model comparison
+
+Fixed-effect models:
+```{r}
+anova(fit1f.i,
+      fit1f.y.i,
+      fit1f.y.3.i)
+AIC(fit1f.i)
+AIC(fit1f.y.i)
+AIC(fit1f.y.3.i)
+```
+
+Mixed models:
+```{r}
+anova(fit1m.i,
+      fit1m.y.i,
+      fit1m.y.3.i)
+```
+
+#### Model selection
+
+```{r}
+fit1 <- fit1m.y.3.i
+```
+
+#### Diagnostics
+
+```{r}
+hist(residuals(fit1) / sigma(fit1), col="grey", border="white",
+     main="Scaled residuals")
 abline(v=c(-2,0,2), lty=2)
-plot(residuals(fit1$merMod) / sigma(fit1$merMod), fitted(fit1$merMod))
+plot(residuals(fit1) / sigma(fit1), fitted(fit1))
 abline(v=c(-2,0,2), lty=2)
-blups1 <- setNames(ranef(fit1$merMod)$ind[,"(Intercept)"],
-                   rownames(ranef(fit1$merMod)$ind))
-cor(blups1, p0$G.A[,1])
+qqnorm(residuals(fit1) / sigma(fit1))
+qqline(residuals(fit1) / sigma(fit1), col="red")
+```
+
+#### Inference
+
+Parameters:
+```{r}
+fit1 <- lmer(formula(fit1), data=phenos, REML=TRUE)
+summary(fit1)
+(vc1 <- as.data.frame(VarCorr(fit1)))
+vc1[vc1$grp == "ind", "vcov"] / sum(vc1[, "vcov"])
+vc1[vc1$grp == "ind", "vcov"] / (vc1[vc1$grp == "ind", "vcov"] +
+                                 vc1[vc1$grp == "Residual", "vcov"] /
+                                 nlevels(phenos$year))
+(ci1 <- confint(fit1, level=0.95, method="profile", oldNames=FALSE))
+```
+
+BLUPs of random variables:
+```{r}
+blups1 <- setNames(ranef(fit1)$ind[,"(Intercept)"],
+                   rownames(ranef(fit1)$ind))
+qqnorm(blups1, main="blups1"); qqline(blups1, col="red")
+```
+
+Compare to true values:
+```{r}
+cor(blups1, p0$G.A[,1], method="pearson")
+cor(blups1, p0$G.A[,1], method="spearman")
 regplot(p0$G.A[,1], blups1, xlab="Breeding values of trait1",
-        ylab="BLUPs of breeding values of trait1")
+        ylab="BLUPs of genotypic values of trait1")
 ```
 
 ### Trait2
 
-Predict genotypic BLUPs for trait2:
-```{r}
-fit2.y.i <- list(merMod=lmer(trait2 ~ 1 + year + (1|ind), data=phenos))
-anova(fit2.y.i$merMod)
-(vc2.y.i <- as.data.frame(VarCorr(fit2.y.i$merMod)))
-vc2.y.i[1, "vcov"] / (vc2.y.i[1, "vcov"] + vc2.y.i[2, "vcov"])
-fit2.y.i$ci <- confint.merMod(fit2.y.i$merMod, level=0.95,
-                              method="profile", oldNames=FALSE)
-fit2.y.i$ci
+#### Model fitting
 
-fit2 <- fit2.y.i
-summary(fit2$merMod)
-hist(residuals(fit2$merMod) / sigma(fit2$merMod))
-abline(v=c(-2,0,2), lty=2)
-plot(residuals(fit2$merMod) / sigma(fit2$merMod), fitted(fit2$merMod))
-abline(v=c(-2,0,2), lty=2)
-blups2 <- setNames(ranef(fit2$merMod)$ind[,"(Intercept)"],
-                   rownames(ranef(fit2$merMod)$ind))
-cor(blups2, p0$G.A[,2])
-regplot(p0$G.A[,2], blups2, xlab="Breeding values of trait2",
-        ylab="BLUPs of breeding values of trait2")
+Mixed models (use `REML=FALSE` to compare fixed-effect parts):
+```{r}
+fit2m.i <- lmer(trait2 ~ 1 + (1|ind),
+                data=phenos, REML=FALSE)
+fit2m.y.i <- lmer(trait2 ~ 1 + year + (1|ind),
+                  data=phenos, REML=FALSE)
+fit2m.y.3.i <- lmer(trait2 ~ 1 + year + trait3 + (1|ind),
+                    data=phenos, REML=FALSE)
 ```
+
+#### Model comparison
+
+Mixed models:
+```{r}
+anova(fit2m.i,
+      fit2m.y.i,
+      fit2m.y.3.i)
+```
+
+#### Model selection
+
+```{r}
+fit2 <- fit2m.y.i
+```
+
+#### Diagnostics
+
+```{r}
+hist(residuals(fit2) / sigma(fit2), col="grey", border="white",
+     main="Scaled residuals")
+abline(v=c(-2,0,2), lty=2)
+plot(residuals(fit2) / sigma(fit2), fitted(fit2))
+abline(v=c(-2,0,2), lty=2)
+qqnorm(residuals(fit2) / sigma(fit2))
+qqline(residuals(fit2) / sigma(fit2), col="red")
+```
+
+#### Inference
+
+```{r}
+fit2 <- lmer(formula(fit2), data=phenos, REML=TRUE)
+summary(fit2)
+(vc2 <- as.data.frame(VarCorr(fit2)))
+vc2[vc2$grp == "ind", "vcov"] / sum(vc2[, "vcov"])
+vc2[vc2$grp == "ind", "vcov"] / (vc2[vc2$grp == "ind", "vcov"] +
+                                 vc2[vc2$grp == "Residual", "vcov"] /
+                                 nlevels(phenos$year))
+(ci2 <- confint(fit2, level=0.95, method="profile", oldNames=FALSE))
+```
+
+BLUPs of random variables:
+```{r}
+blups2 <- setNames(ranef(fit2)$ind[,"(Intercept)"],
+                   rownames(ranef(fit2)$ind))
+qqnorm(blups2, main="blups2"); qqline(blups2, col="red")
+```
+
+Compare to true values:
+```{r}
+cor(blups2, p0$G.A[,2], method="pearson")
+cor(blups2, p0$G.A[,2], method="spearman")
+regplot(p0$G.A[,2], blups2, xlab="Breeding values of trait2",
+        ylab="BLUPs of genotypic values of trait2")
+```
+
 
 ### Compare BLUPs for both traits
 
 Compare BLUPs for both traits:
 ```{r}
 all(names(blups1) == names(blups2))
-cor(blups1, blups2)
+cor(blups1, blups2, method="pearson")
 regplot(blups1, blups2, main="Univariate LMM",
-        xlab="BLUPs of breeding values of trait1",
-        ylab="BLUPs of breeding values of trait2")
+        xlab="BLUPs of genotypic values of trait1",
+        ylab="BLUPs of genotypic values of trait2")
 ```
 
 
@@ -580,6 +738,140 @@ cor(fit12$u.hat$ind[,1], fit12$u.hat$ind[,2])
 regplot(fit12$u.hat$ind[,1], fit12$u.hat$ind[,2], main="Multivariate LMM",
         xlab="Expected breeding values of trait1",
         ylab="Expected breeding values of trait2")
+```
+
+
+# Genomic prediction
+
+## Generic functions
+
+The `cvTools` package requires the called function to return a `S3` class with a `predict` method.
+So here it is for the ridge regression as implemented in the `rrBLUP` package:
+```{r}
+rr <- function(y, Z, K=NULL, X=NULL, method="REML"){
+  out <- mixed.solve(y=y, Z=Z, K=K, X=X, method=method)
+  return(structure(out, class="rr"))
+}
+predict.rr <- function(object, newZ){
+  out <- as.vector(newZ %*% object$u)
+  if(! is.null(rownames(newZ)))
+    names(out) <- rownames(newZ)
+  return(out)
+}
+```
+
+Set up the folds:
+```{r}
+set.seed(1859)
+folds <- cvFolds(n=nrow(genos), K=5, R=10)
+dim(folds$subsets)
+head(folds$subsets)
+```
+
+## Trait1
+
+### Ridge regression on the full data set
+
+Fit the ridge regression model:
+```{r, eval=TRUE}
+fit <- mixed.solve(y=blups1[rownames(genos)], Z=genos)
+fit$Vu
+fit$Ve
+## TODO: calc PVE
+```
+
+Compare estimated SNP effects with their true values:
+```{r, eval=TRUE}
+cor(p0$Beta[colnames(genos), "trait1"], fit$u)
+regplot(x=p0$Beta[colnames(genos), "trait1"], y=fit$u,
+        xlab="true SNP effects", ylab="estimated SNP effects",
+        main="Ridge regression for BLUPs of trait1")
+```
+
+Compare GEBVs (predicted BLUPs of breeding values) with EBVs (true BLUPs of genotypic values) and with BVs (breeding values, i.e. additive genotypic values):
+```{r, eval=TRUE}
+cor(blups1[rownames(genos)], genos %*% fit$u)
+regplot(x=blups1[rownames(genos)], y=genos %*% fit$u,
+        xlab="BLUPs of genotypic values", ylab="predicted GBLUPs",
+        main="Ridge regression for BLUPs of trait1")
+cor(p0$G.A[rownames(genos), "trait1"], genos %*% fit$u)
+regplot(x=p0$G.A[rownames(genos), "trait1"], y=genos %*% fit$u,
+        xlab="true genotypic values", ylab="predicted GBLUPs",
+        main="Ridge regression for BLUPs of trait1")
+```
+
+### Cross-validation
+
+Set up the function call:
+```{r, eval=TRUE}
+call <- call("rr", y=blups1[rownames(genos)], Z=genos)
+```
+
+Perform cross-validation:
+```{r, eval=FALSE}
+system.time(
+    fit.cv <- cvTool(call=call, x=genos, y=blups1[rownames(genos)],
+                     names=c("Z", "y"), cost=rmspe, folds=folds))
+fit.cv
+summary(fit.cv)
+sd(fit.cv[,1])
+fit.cv <- cvTool(call=call, x=genos, y=blups1[rownames(genos)],
+                 names=c("Z", "y"), cost=cor, folds=folds)
+fit.cv
+summary(fit.cv)
+sd(fit.cv[,1])
+```
+
+
+## Trait2
+
+### Ridge regression on the full data set
+
+Fit the ridge regression model:
+```{r, eval=TRUE}
+fit <- mixed.solve(y=blups2[rownames(genos)], Z=genos)
+fit$Vu
+fit$Ve
+## TODO: calc PVE
+```
+
+Compare estimated SNP effects with their true values:
+```{r, eval=TRUE}
+cor(p0$Beta[colnames(genos), "trait2"], fit$u)
+regplot(x=p0$Beta[colnames(genos), "trait2"], y=fit$u,
+        xlab="true SNP effects", ylab="estimated SNP effects",
+        main="Ridge regression for BLUPs of trait2")
+```
+
+Compare GEBVs (predicted BLUPs of breeding values) with EBVs (true BLUPs of genotypic values) and with BVs (breeding values, i.e. additive genotypic values):
+```{r, eval=TRUE}
+cor(blups2[rownames(genos)], genos %*% fit$u)
+regplot(x=blups2[rownames(genos)], y=genos %*% fit$u,
+        xlab="BLUPs of genotypic values", ylab="predicted GBLUPs",
+        main="Ridge regression for BLUPs of trait2")
+regplot(x=p0$G.A[rownames(genos), "trait2"], y=genos %*% fit$u,
+        xlab="true genotypic values", ylab="predicted GBLUPs",
+        main="Ridge regression for BLUPs of trait2")
+```
+
+### Cross-validation
+
+Set up the function call:
+```{r, eval=TRUE}
+call <- call("rr", y=blups2[rownames(genos)], Z=genos)
+```
+
+Perform cross-validation:
+```{r, eval=FALSE}
+system.time(
+    fit.cv <- cvTool(call=call, x=genos, y=blups2[rownames(genos)],
+                     names=c("Z", "y"), cost=rmspe, folds=folds))
+fit.cv
+summary(fit.cv)
+fit.cv <- cvTool(call=call, x=genos, y=blups2[rownames(genos)],
+                 names=c("Z", "y"), cost=cor, folds=folds)
+fit.cv
+summary(fit.cv)
 ```
 
 
