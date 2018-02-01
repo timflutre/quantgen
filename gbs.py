@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Aim: perform the computational aspects of genotyping-by-sequencing
-# Copyright (C) 2015-2017 Institut National de la Recherche Agronomique
+# Copyright (C) 2015-2018 Institut National de la Recherche Agronomique
 # License: AGPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
@@ -1001,7 +1001,7 @@ class Gbs(object):
         """
         msg = "%s %s\n" % (os.path.basename(sys.argv[0]), progVersion)
         msg += "\n"
-        msg += "Copyright (C) 2015-2017 Institut National de la Recherche Agronomique.\n"
+        msg += "Copyright (C) 2015-2018 Institut National de la Recherche Agronomique.\n"
         msg += "License AGPLv3+: GNU AGPL version 3 or later <http://gnu.org/licenses/agpl.html>\n"
         msg += "\n"
         msg += "Written by Timothée Flutre [cre,aut]."
@@ -1441,7 +1441,6 @@ class Gbs(object):
             iSample = GbsSample(geno, flowcell, laneNum, barcode,
                                 "before" if int(self.lSteps[0]) < 3 \
                                 else "after")
-            ## at this stage: iSample.id = genotype_flowcell_lane_barcode
             iSample.refGenome = tokens[self.samplesCol2idx["ref_genome"]]
             iSample.library = tokens[self.samplesCol2idx["library"]]
             iSample.seqCenter = tokens[self.samplesCol2idx["seq_center"]]
@@ -1455,7 +1454,8 @@ class Gbs(object):
                 iSample.initFastqFile2 \
                     = "%s/%s" % (self.pathToInReadsDir,
                                  tokens[self.samplesCol2idx["fastq_file_R2"]])
-            self.dSamples[iSample.id] = iSample
+            if iSample.id not in self.dSamples:
+                self.dSamples[iSample.id] = iSample
             refgenome.add(iSample.refGenome)
 
             if flowcell not in self.dFlowcells:
