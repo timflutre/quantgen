@@ -78,22 +78,24 @@ from Bio.Data.IUPACData import ambiguous_dna_values
 from pyutilstimflutre import Utils, ProgVersion, Job, JobGroup, JobManager, \
     Fastqc, SamtoolsFlagstat
         
-progVersion = "0.11.4" # http://semver.org/
+progVersion = "0.11.5" # http://semver.org/
 
 
 class GbsSample(object):
     """
     A GbsSample corresponds to a unique quadruplet (genotype,flowcell,lane,barcode),
     given that the 'genotype' is the focus of the analysis.
+    Caution, in some rare cases, the same genotype can be present with multiple barcodes in the same lane: see the method below to get the sample identifier, with (before demultiplexing) or without barcode (after demultiplexing).
     """
     
-    def __init__(self, geno, flowcell, laneNum, barcode):
+    def __init__(self, geno, flowcell, laneNum, barcode, demult="before"):
         self.genotype = geno
         self.flowcell = flowcell
         self.lane = laneNum
         self.barcode = barcode
-        self.id = "%s_%s_%s_%s" % (self.genotype, self.flowcell, self.lane,
-                                   self.barcode)
+        self.id = "%s_%s_%s" % (self.genotype, self.flowcell, self.lane)
+        if demult == "before":
+            self.id += "_%s" % self.barcode
         self.refGenome = ""
         self.library = ""
         self.seqCenter = ""
@@ -121,7 +123,7 @@ class GbsSample(object):
         txt += ";initFastqFile1=%s" %self.initFastqFile1
         txt += ";initFastqFile2=%s" %self.initFastqFile2
         return txt
-    
+        
     def setDemultiplexedFastqFiles(self, pathToDir):
         # set R1 file:
         lFilesR1 = glob.glob("%s/*_%s_R1.fastq.gz" % (pathToDir,
@@ -401,11 +403,15 @@ class GbsLane(object):
                                   # values: [init, symlink]
         
     def insert(self, iSample):
-        if iSample.id in self.dSamples:
-            msg = "sample '%s' already in lane '%s'" % (iSample.id, self.id)
-            raise ValueError(msg)
-        self.dSamples[iSample.id] = iSample
-        
+        if iSample.id not in self.dSamples:
+            self.dSamples[iSample.id] = iSample
+            
+    def nbGenos(self):
+        genos = set()
+        for sampleId,iSample in self.dSamples.items():
+            genos.add(iSample.genotype)
+        return len(genos)
+    
     def setInitFastqFiles(self):
         for sampleId,iSample in self.dSamples.items():
             if "R1" not in self.dInitFastqFiles:
@@ -512,7 +518,7 @@ class GbsLane(object):
     def setDemultiplexedFastqFiles(self, pathToDir):
         for sampleId,iSample in self.dSamples.items():
             iSample.setDemultiplexedFastqFiles(pathToDir)
-            
+                
     def clean(self, adpR1, adpR2, errTol, minOvl, minReadLen, minQual,
               maxNPerc, outDir, iJobGroup):
         for sampleId,iSample in self.dSamples.items():
@@ -526,7 +532,7 @@ class GbsLane(object):
     def cleanQc(self, outDir, iJobGroup):
         for sampleId,iSample in self.dSamples.items():
             iSample.cleanQc(outDir, iJobGroup)
-            
+                
     def saveNbReadsFromFastqc(self, inDir, outHandle):
         lSamples = self.dSamples.keys()
         lSamples.sort()
@@ -621,11 +627,9 @@ class GbsGeno(object):
         self.realignedGenoBamFile = ""
         
     def insert(self, iSample):
-        if iSample.id in self.dSamples:
-            msg = "sample '%s' already in genotype '%s'" % (iSample.id, self.id)
-            raise ValueError(msg)
-        self.dSamples[iSample.id] = iSample
-        
+        if iSample.id not in self.dSamples:
+            self.dSamples[iSample.id] = iSample
+            
     def setRealignedSampleBamFiles(self, stepDir):
         lSamples = self.dSamples.keys()
         lSamples.sort()
@@ -827,7 +831,7 @@ class Gbs(object):
         msg += "      --queue\tname of the cluster queue (default=normal.q)\n"
         msg += "      --resou\tcluster resources (e.g. 'test' for 'qsub -l test')\n"
         msg += "      --rmvb\tremove bash scripts for jobs launched in parallel\n"
-        msg += "      --step\tstep(s) to perform (1/2/3/4/..., can be 1-2-...)\n"
+        msg += "      --step\tstep to perform (1/2/3/.../9)\n"
         msg += "\t\t1: raw read quality per lane (with FastQC v >= 0.11.2)\n"
         msg += "\t\t2: demultiplexing per lane (with demultiplex.py v >= 1.14.0)\n"
         msg += "\t\t3: cleaning per sample (with CutAdapt v >= 1.8)\n"
@@ -976,7 +980,8 @@ class Gbs(object):
         msg += "be used to set the 'SM' (sample) tag of the 'RG' (read group) header\n"
         msg += "record type of the SAM format (see http://www.htslib.org/). However,\n"
         msg += "internal to this program, the term 'sample' corresponds to the unique\n"
-        msg += "quadruplet (genotype,flowcell,lane,barcode).\n"
+        msg += "quadruplet (genotype,flowcell,lane,barcode) for steps 1 and 2, and to\n"
+        msg += "the unique triplet (genotype,flowcell,lane) for the others.\n"
         msg += "Jobs are executed in parallel (--schdlr). Their return status is\n"
         msg += "recorded in a SQLite database which is removed at the end. If a job\n"
         msg += "fails, the whole script stops with an error.\n"
@@ -1077,7 +1082,7 @@ class Gbs(object):
             elif o == "--rmvb":
                 self.rmvBash = True
             elif o == "--step":
-                self.lSteps = sorted(a.split("-"))
+                self.lSteps = [a]
             elif o == "--samples":
                  self.samplesFile = a
             elif o == "--fcln":
@@ -1152,6 +1157,21 @@ class Gbs(object):
         """
         Check the values of the command-line parameters.
         """
+        if len(self.lSteps) == 0:
+            msg = "ERROR: missing compulsory option --step"
+            sys.stderr.write("%s\n\n" % msg)
+            # self.help()
+            sys.exit(1)
+        if len(self.lSteps) > 1:
+            msg = "ERROR: --step takes a single step"
+            sys.stderr.write("%s\n\n" % msg)
+            # self.help()
+            sys.exit(1)
+        if self.lSteps[0] not in ["1","2","3","4","5","6","7","8","9"]:
+            msg = "ERROR: unknown --step %s" % self.lSteps[0]
+            sys.stderr.write("%s\n\n" % msg)
+            # self.help()
+            sys.exit(1)
         if "1" in self.lSteps or "2" in self.lSteps or "3" in self.lSteps \
            or "4" in self.lSteps:
             if not self.project1Id:
@@ -1418,7 +1438,10 @@ class Gbs(object):
             if self.fclnToKeep is not None and \
                "%s_%i" % (flowcell, laneNum) != self.fclnToKeep:
                 continue
-            iSample = GbsSample(geno, flowcell, laneNum, barcode)
+            iSample = GbsSample(geno, flowcell, laneNum, barcode,
+                                "before" if int(self.lSteps[0]) < 3 \
+                                else "after")
+            ## at this stage: iSample.id = genotype_flowcell_lane_barcode
             iSample.refGenome = tokens[self.samplesCol2idx["ref_genome"]]
             iSample.library = tokens[self.samplesCol2idx["library"]]
             iSample.seqCenter = tokens[self.samplesCol2idx["seq_center"]]
@@ -1491,6 +1514,8 @@ class Gbs(object):
                     msg += "\nflowcell %s, lane %i: %i samples" \
                            % (flowcell, laneNum,
                               len(self.dLanes[laneId].dSamples))
+                    if self.lSteps[0] in ["1","2"]:
+                        msg += ", %i genotypes" % self.dLanes[laneId].nbGenos()
             sys.stdout.write("%s\n" % msg)
             sys.stdout.flush()
             
@@ -1642,6 +1667,39 @@ class Gbs(object):
         self.endStep(1, cwd, startTime)
         
         
+    def demultiplexInputFastqFiles(self):
+        if self.verbose > 0:
+            msg = "demultiplex samples per lane..."
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+            
+        groupJobId = self.makeGroupJobId("%s_gbs-step2-demultiplex" % self.project1Id)
+        if self.verbose > 0:
+            msg = "groupJobId=%s" % groupJobId
+            sys.stdout.write("%s\n" % msg)
+            sys.stdout.flush()
+        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
+        self.jobManager.insert(iJobGroup)
+        
+        for laneId,iLane in self.dLanes.items():
+            stepDir = "%s/%s" % (iLane.dir, self.lDirSteps[1])
+            self.makeDir(stepDir)
+            iLane.setInitFastqFiles()
+            iLane.makeInitFastqFileSymlinks()
+            iLane.demultiplex(stepDir, self.enzyme, self.dmxMethod,
+                              self.nbSubstsAllowedDemult, self.enforceSubst,
+                              iJobGroup)
+            
+        self.jobManager.submit(iJobGroup.id)
+        self.jobManager.wait(iJobGroup.id, self.rmvBash, self.verbose)
+        
+        
+    def step2(self):
+        cwd, startTime = self.beginStep(2)
+        self.demultiplexInputFastqFiles()
+        self.endStep(2, cwd, startTime)
+        
+        
     def loadAdpFile(self):
         if self.verbose > 0:
             msg = "load adapter file..."
@@ -1677,39 +1735,6 @@ class Gbs(object):
             sys.stdout.flush()
             
             
-    def demultiplexInputFastqFiles(self):
-        if self.verbose > 0:
-            msg = "demultiplex samples per lane..."
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-            
-        groupJobId = self.makeGroupJobId("%s_gbs-step2-demultiplex" % self.project1Id)
-        if self.verbose > 0:
-            msg = "groupJobId=%s" % groupJobId
-            sys.stdout.write("%s\n" % msg)
-            sys.stdout.flush()
-        iJobGroup = JobGroup(groupJobId, self.queue, self.lResources)
-        self.jobManager.insert(iJobGroup)
-        
-        for laneId,iLane in self.dLanes.items():
-            stepDir = "%s/%s" % (iLane.dir, self.lDirSteps[1])
-            self.makeDir(stepDir)
-            iLane.setInitFastqFiles()
-            iLane.makeInitFastqFileSymlinks()
-            iLane.demultiplex(stepDir, self.enzyme, self.dmxMethod,
-                              self.nbSubstsAllowedDemult, self.enforceSubst,
-                              iJobGroup)
-            
-        self.jobManager.submit(iJobGroup.id)
-        self.jobManager.wait(iJobGroup.id, self.rmvBash, self.verbose)
-        
-        
-    def step2(self):
-        cwd, startTime = self.beginStep(2)
-        self.demultiplexInputFastqFiles()
-        self.endStep(2, cwd, startTime)
-        
-        
     def cleanDemultiplexedFiles(self):
         if self.verbose > 0:
             msg = "clean reads per sample..."
