@@ -640,6 +640,9 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('chr.length', '", L, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('nb.snps', '", length(thin.snps), "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('mu.trait1', '", mu.traits12[1], "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
@@ -659,6 +662,9 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.genotyped.coll', '", length(subset.coll), "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('max.nb.haplodiplos', '", 700, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.plots', '", nb.plots, "')")
