@@ -65,6 +65,8 @@ Set up directories:
 ```{r setup_dir}
 if(Sys.info()["user"] == "tflutre"){
   root.dir <- "~/work2/atelier-prog-selection-2018/data"
+} else if(Sys.info()["user"] == "Julien DIOT"){
+  root.dir <- "~/breeding-game/setup/data"
 } else{
   root.dir <- "C:/<...>/data"
 }
