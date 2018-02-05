@@ -1,6 +1,6 @@
 ---
 title: "Breeding game: setup"
-author: "Timothée Flutre, Philippe Brabant, Jacques David"
+author: "Timothée Flutre"
 date: "`r format(Sys.time(), '%d/%m/%Y %H:%M:%S')`"
 colorlinks: true
 output:
@@ -31,9 +31,11 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 # Overview
 
-* https://github.com/timflutre/atelier-prediction-genomique
+This document was conceived with the help of Jacques David (Montpellier SupAgro) and Philippe Brabant (AgroParisTech) for a master-level [workshop on genomic prediction and selection](https://github.com/timflutre/PlantSelBreedGame).
 
-* Copyright 2016-2018 INRA, Montpellier SupAgro, AgroParisTech
+It sets up a [serious game](https://github.com/timflutre/PlantSelBreedGame) to teach plant selective breeding.
+
+* Copyright 2016-2018 INRA
 
 * License: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
@@ -73,7 +75,7 @@ if(Sys.info()["user"] == "tflutre"){
 if(! dir.exists(root.dir))
   dir.create(root.dir)
 setup <- setUpBreedingGame(root.dir=root.dir,
-                           nb.breeders=1)
+                           nb.breeders=2)
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
 init.dir <- setup$init.dir
@@ -143,20 +145,24 @@ Simulate genotypes via the coalescent:
 ```{r simul_geno_coalescent}
 set.seed(65291)
 f <- paste0(truth.dir, "/g0.RData")
-g0 <- simulCoalescent(nb.inds=I,
-                      ind.ids=ind.ids,
-                      nb.reps=nb.chrs,
-                      pop.mut.rate=theta,
-                      pop.recomb.rate=rho,
-                      chrom.len=L,
-                      other=cmd,
-                      nb.pops=1,
-                      get.trees=FALSE,
-                      get.tmrca=FALSE,
-                      permute.alleles=TRUE,
-                      verbose=1)
-save(g0, file=f)
+if(! file.exists(f)){
+  g0 <- simulCoalescent(nb.inds=I,
+                        ind.ids=ind.ids,
+                        nb.reps=nb.chrs,
+                        pop.mut.rate=theta,
+                        pop.recomb.rate=rho,
+                        chrom.len=L,
+                        other=cmd,
+                        nb.pops=1,
+                        get.trees=FALSE,
+                        get.tmrca=FALSE,
+                        permute.alleles=TRUE,
+                        verbose=1)
+  save(g0, file=f)
+} else
+  load(f)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 head(g0$snp.coords)
 g0$haplos$chr1[1:4, 1:6]
 g0$genos[1:2, 1:6]
@@ -306,6 +312,7 @@ coll$genos <- segSites2allDoses(seg.sites=coll$haplos, ind.ids=crosses$child,
 coll$snp.coords <- g0$snp.coords
 save(coll, file=f)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 ```
 
 Free some memory:
@@ -362,6 +369,7 @@ p0.df <- makeDfInitPhenos(nb.lines.per.year=nb.lines.per.year, nb.years=nb.years
                           first.year=first.year, line.ids)
 head(p0.df)
 str(p0.df)
+summary(as.vector(table(p0.df$ind)))
 ```
 
 Export genotypes for the players using high-density chip, but only for a subset of lines:
@@ -375,7 +383,7 @@ write.table(x=coll$genos[subset.coll, subset.snps[["hd"]]],
             sep="\t", row.names=TRUE, col.names=TRUE)
 ```
 
-Thin to avoid LD between causal SNPs?
+Thin to avoid LD between causal SNPs? No, keep all SNPs for the moment.
 ```{r choose_causal_snps}
 ## mafs <- estimSnpMaf(X=coll$genos[levels(p0.df$ind),])
 ## thin.snps <- thinSnps(method="coord", threshold=5*10^2,
@@ -388,25 +396,37 @@ length(thin.snps <- colnames(coll$genos))
 Simulate the SNP effects for traits 1 and 2 jointly:
 ```{r simum_snp_effects_trait1_trait2}
 set.seed(39452)
+mu.traits12 <- c(trait1=40, trait2=14)
+sigma.beta2 <- c(trait1=10^(-5), trait2=10^(-5))
+(cv.traits12 <- sqrt(sigma.beta2 * (2 * sum(afs[thin.snps] * (1 - afs[thin.snps])))) / mu.traits12)
+## mu.traits12 <- c(trait1=100, trait2=30)
+## cv.traits12 <- c(trait1=0.05, trait2=0.02) # coefs of variation
+## (exp.sigma.a <- mu.traits12 * cv.traits12)
+## (sigma.beta2 <- exp.sigma.a^2 / (2 * sum(afs[thin.snps] * (1 - afs[thin.snps]))))
 snp.effects12 <- simulSnpEffectsTraits12(snp.ids=thin.snps,
-                                         sigma.beta2=c(trait1=10^(-5),
-                                                       trait2=10^(-5)),
+                                         sigma.beta2=sigma.beta2,
                                          prop.pleio=0.4, cor.pleio=-0.7)
 ```
 
 Make phenotypes for traits 1 and 2 jointly:
 ```{r make_phenos_trait1_trait2}
-mu.traits12 <- c(trait1=40, trait2=14)
+h2.traits12 <- c(trait1=0.3, trait2=0.4)
+sigma.alpha <- c(trait1=1.5, trait2=1)
+sigma.alpha / mu.traits12
+## h2.traits12 <- c(trait1=0.5, trait2=0.8)
+## (sigma.alpha <- mu.traits12 * c(0.07, 0.1))
 p0 <- simulTraits12(dat=p0.df, mu=mu.traits12,
-                    sigma.alpha2=c(trait1=1.5^2, trait2=1^2),
+                    sigma.alpha2=sigma.alpha^2,
                     X=coll$genos[levels(p0.df$ind), thin.snps],
                     Beta=snp.effects12$Beta,
-                    h2=c(trait1=0.3, trait2=0.4))
-regplot(p0$G.A[,1], p0$G.A[,2], xlab="p0$G.A[,1]", ylab="p0$G.A[,2]", las=1)
+                    h2=h2.traits12)
 ```
 
 Do some visual checks:
 ```{r plots_phenos_trait1_trait2}
+hist(p0$G.A[,1], breaks="FD", las=1, col="grey", border="white")
+hist(p0$G.A[,2], breaks="FD", las=1, col="grey", border="white")
+regplot(p0$G.A[,1], p0$G.A[,2], xlab="p0$G.A[,1]", ylab="p0$G.A[,2]", las=1)
 hist(p0$Y[,1], breaks="FD", las=1, col="grey", border="white")
 boxplot(p0$Y[,1] ~ p0.df$year, las=1, main="p0$Y[,1]")
 abline(h=mean(p0$Y[,1]), lty=2)
@@ -468,6 +488,7 @@ Save data:
 f <- paste0(truth.dir, "/p0.RData")
 save(p0, file=f)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 ```
 
 Export "phenotype" data.frame for players:
@@ -860,7 +881,7 @@ for(breeder in breeders){
 dbListTables(db)
 ```
 
-For each individual initially given to the players, save it into the table, and save its haplotypes into a file (slow, especially the first time):
+For each individual initially given to the players, save it into the table, and save its haplotypes into a file (slow):
 ```{r fill_table}
 f <- paste0(truth.dir, "/coll.Rdata")
 load(f)
