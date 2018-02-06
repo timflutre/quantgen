@@ -31,9 +31,10 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 # Overview
 
-* https://github.com/timflutre/atelier-prediction-genomique
+This document was conceived with the help of Jacques David (Montpellier SupAgro) and Philippe Brabant (AgroParisTech) for a master-level [workshop on genomic prediction and selection](https://github.com/timflutre/atelier-prediction-genomique).
+It sets up a [serious game](https://github.com/timflutre/PlantSelBreedGame) to teach plant selective breeding.
 
-* Copyright 2016-2018 INRA, Montpellier SupAgro, AgroParisTech
+* Copyright 2016-2018 INRA
 
 * License: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
@@ -59,7 +60,7 @@ stopifnot(compareVersion("4.5",
           != 1)
 suppressPackageStartupMessages(library(cvTools))
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.4",
+stopifnot(compareVersion("0.156.9",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -67,9 +68,11 @@ stopifnot(compareVersion("0.156.4",
 Retrieve the directory paths:
 ```{r setup_dir}
 if(Sys.info()["user"] == "tflutre"){
-  root.dir <- "~/work2/atelier-prog-selection-2018/data"
+  root.dir <- "~/src/quantgen/breeding-game/data"
+} else if(Sys.info()["user"] == "Julien DIOT"){
+  root.dir <- "~/breeding-game/setup/data"
 } else{
-  stop("you need to add your path to this Rmd!")
+  root.dir <- "C:/<...>/data"
 }
 setup <- getBreedingGameSetup(root.dir)
 ```
@@ -299,22 +302,13 @@ for(year in levels(phenos$year)){
 
 # Analysis of trait3
 
-Extract the data of the latest year for which genotypes and phenotypes are available:
+Extract the data of the latest year with pathogen, for which genotypes and phenotypes are available:
 ```{r}
-last.year <- "2014"
+(last.year <- sort(unique(phenos$year[phenos$pathogen]),
+                   decreasing=TRUE)[1])
 dat <- droplevels(phenos[phenos$year == last.year,])
 str(dat)
 ```
-
-## Linear model
-
-### Model fitting
-
-```{r}
-fit.i <- lm(formula=trait3 ~ 1 + ind, data=dat)
-```
-
-TODO
 
 ## Linear mixed model
 
@@ -323,8 +317,6 @@ TODO
 ```{r}
 fit.i <- lmer(formula=trait3 ~ 1 + (1|ind), data=dat, REML=FALSE)
 ```
-
-TODO: check if presence of spatial heterogeneity?
 
 ### Model comparison
 
@@ -540,25 +532,6 @@ We want to study the "year" and "pathogen" effects on trait1 (fixed effects), an
 
 #### Model fitting
 
-Fixed-effect models:
-```{r}
-system.time(
-    fit1f.i <- lm(trait1 ~ 1 + ind,
-                  data=phenos))
-system.time(
-    fit1f.y.i <- lm(trait1 ~ 1 + year + ind,
-                    data=phenos))
-## system.time(
-##     fit1f.yi <- lm(trait1 ~ 1 + year + ind + year:ind,
-##                    data=phenos)) # slow
-system.time(
-    fit1f.y.p.i <- lm(trait1 ~ 1 + year + pathogen + ind,
-                      data=phenos))
-system.time(
-    fit1f.y.3.i <- lm(trait1 ~ 1 + year + trait3 + ind,
-                      data=phenos))
-```
-
 Mixed models (use `REML=FALSE` to compare fixed-effect parts):
 ```{r}
 fit1m.i <- lmer(trait1 ~ 1 + (1|ind),
@@ -570,16 +543,6 @@ fit1m.y.3.i <- lmer(trait1 ~ 1 + year + trait3 + (1|ind),
 ```
 
 #### Model comparison
-
-Fixed-effect models:
-```{r}
-anova(fit1f.i,
-      fit1f.y.i,
-      fit1f.y.3.i)
-AIC(fit1f.i)
-AIC(fit1f.y.i)
-AIC(fit1f.y.3.i)
-```
 
 Mixed models:
 ```{r}
@@ -608,23 +571,38 @@ qqline(residuals(fit1) / sigma(fit1), col="red")
 
 #### Inference
 
-Parameters:
+Parameters (use `REML=TRUE` to get unbiased estimates of variance components):
 ```{r}
 fit1 <- lmer(formula(fit1), data=phenos, REML=TRUE)
 summary(fit1)
 (vc1 <- as.data.frame(VarCorr(fit1)))
-vc1[vc1$grp == "ind", "vcov"] / sum(vc1[, "vcov"])
+(ci1 <- confint(fit1, level=0.95, method="profile", oldNames=FALSE))
+```
+
+Intra-annual, individual-plant heritability:
+```{r}
+vc1[vc1$grp == "ind", "vcov"] / (vc1[vc1$grp == "ind", "vcov"] +
+                                 vc1[vc1$grp == "Residual", "vcov"])
+```
+
+Heritability of the design:
+```{r}
 vc1[vc1$grp == "ind", "vcov"] / (vc1[vc1$grp == "ind", "vcov"] +
                                  vc1[vc1$grp == "Residual", "vcov"] /
-                                 nlevels(phenos$year))
-(ci1 <- confint(fit1, level=0.95, method="profile", oldNames=FALSE))
+                                 mean(as.vector(table(phenos$ind))))
+```
+
+Estimate of the genetic coef of variation:
+```{r}
+vc1[vc1$grp == "ind", "sdcor"] / fixef(fit1)["(Intercept)"]
 ```
 
 BLUPs of random variables:
 ```{r}
 blups1 <- setNames(ranef(fit1)$ind[,"(Intercept)"],
                    rownames(ranef(fit1)$ind))
-qqnorm(blups1, main="blups1"); qqline(blups1, col="red")
+qqnorm(blups1, main="BLUPs of genotypic values of trait1")
+qqline(blups1, col="red")
 ```
 
 Compare to true values:
@@ -682,18 +660,33 @@ qqline(residuals(fit2) / sigma(fit2), col="red")
 fit2 <- lmer(formula(fit2), data=phenos, REML=TRUE)
 summary(fit2)
 (vc2 <- as.data.frame(VarCorr(fit2)))
-vc2[vc2$grp == "ind", "vcov"] / sum(vc2[, "vcov"])
+(ci2 <- confint(fit2, level=0.95, method="profile", oldNames=FALSE))
+```
+
+Intra-annual, individual-plant heritability:
+```{r}
+vc2[vc2$grp == "ind", "vcov"] / (vc2[vc1$grp == "ind", "vcov"] +
+                                 vc2[vc1$grp == "Residual", "vcov"])
+```
+
+Heritability of the design:
+```{r}
 vc2[vc2$grp == "ind", "vcov"] / (vc2[vc2$grp == "ind", "vcov"] +
                                  vc2[vc2$grp == "Residual", "vcov"] /
-                                 nlevels(phenos$year))
-(ci2 <- confint(fit2, level=0.95, method="profile", oldNames=FALSE))
+                                 mean(as.vector(table(phenos$ind))))
+```
+
+Estimate of the genetic coef of variation:
+```{r}
+vc2[vc2$grp == "ind", "sdcor"] / fixef(fit2)["(Intercept)"]
 ```
 
 BLUPs of random variables:
 ```{r}
 blups2 <- setNames(ranef(fit2)$ind[,"(Intercept)"],
                    rownames(ranef(fit2)$ind))
-qqnorm(blups2, main="blups2"); qqline(blups2, col="red")
+qqnorm(blups2, main="BLUPs of genotypic values of trait2")
+qqline(blups2, col="red")
 ```
 
 Compare to true values:
@@ -715,6 +708,10 @@ regplot(blups1, blups2, main="Univariate LMM",
         xlab="BLUPs of genotypic values of trait1",
         ylab="BLUPs of genotypic values of trait2")
 ```
+
+### Save individuals to cross
+
+TODO
 
 
 ## Jointly
@@ -741,7 +738,7 @@ regplot(fit12$u.hat$ind[,1], fit12$u.hat$ind[,2], main="Multivariate LMM",
 ```
 
 
-# Genomic prediction
+# Genomic prediction for traits 1 and 2
 
 ## Generic functions
 
@@ -775,9 +772,11 @@ head(folds$subsets)
 Fit the ridge regression model:
 ```{r, eval=TRUE}
 fit <- mixed.solve(y=blups1[rownames(genos)], Z=genos)
-fit$Vu
-fit$Ve
-## TODO: calc PVE
+fit$Vu # variance of SNP effects
+fit$Ve # variance of errors
+afs <- estimSnpAf(genos)
+(Va <- fit$Vu * 2 * sum(afs * (1 - afs)))
+Va / (Va + fit$Ve)
 ```
 
 Compare estimated SNP effects with their true values:
@@ -830,9 +829,11 @@ sd(fit.cv[,1])
 Fit the ridge regression model:
 ```{r, eval=TRUE}
 fit <- mixed.solve(y=blups2[rownames(genos)], Z=genos)
-fit$Vu
-fit$Ve
-## TODO: calc PVE
+fit$Vu # variance of SNP effects
+fit$Ve # variance of errors
+afs <- estimSnpAf(genos)
+(Va <- fit$Vu * 2 * sum(afs * (1 - afs)))
+Va / (Va + fit$Ve)
 ```
 
 Compare estimated SNP effects with their true values:
@@ -872,7 +873,7 @@ fit.cv <- cvTool(call=call, x=genos, y=blups2[rownames(genos)],
                  names=c("Z", "y"), cost=cor, folds=folds)
 fit.cv
 summary(fit.cv)
-sd(fit.cv[,2])
+sd(fit.cv[,1])
 ```
 
 
