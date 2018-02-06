@@ -66,7 +66,7 @@ stopifnot(compareVersion("0.156.6",
 Set up directories:
 ```{r setup_dir}
 if(Sys.info()["user"] == "tflutre"){
-  root.dir <- "~/work2/atelier-prog-selection-2018/data"
+  root.dir <- "~/src/quantgen/breeding-game/data"
 } else if(Sys.info()["user"] == "Julien DIOT"){
   root.dir <- "~/breeding-game/setup/data"
 } else{
