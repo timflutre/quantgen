@@ -31,7 +31,7 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 # Overview
 
-This document was conceived with the help of Jacques David (Montpellier SupAgro) and Philippe Brabant (AgroParisTech) for a master-level [workshop on genomic prediction and selection](https://github.com/timflutre/PlantSelBreedGame).
+This document was conceived with the help of Jacques David (Montpellier SupAgro) and Philippe Brabant (AgroParisTech) for a master-level [workshop on genomic prediction and selection](https://github.com/timflutre/atelier-prediction-genomique).
 
 It sets up a [serious game](https://github.com/timflutre/PlantSelBreedGame) to teach plant selective breeding.
 
