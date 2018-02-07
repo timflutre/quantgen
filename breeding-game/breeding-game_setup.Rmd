@@ -82,7 +82,7 @@ if(Sys.info()["user"] == "tflutre"){
 if(! dir.exists(root.dir))
   dir.create(root.dir)
 setup <- setUpBreedingGame(root.dir=root.dir,
-                           nb.breeders=2)
+                           nb.breeders=1)
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
 init.dir <- setup$init.dir
@@ -527,10 +527,12 @@ That is, $\mathbb{E}[X X^T]$ is proportional to $A$ apart from a constant.
 Thus, models RR and AM are equivalent if one replaces $A$ by $\frac{X X^T}{2 \sum_p f_p (1 - f_p)}$, assuming a large enough number of SNPs.
 Thus, knowing the additive genotypic variance, $\sigma_a^2$, we can deduce the variance of the SNP effects: $\sigma_\beta^2 = \frac{\sigma_a^2}{2 \sum_p f_p (1 - f_p)}$.
 
-TODO
-
 The constant mentioned above is the same for all genotypes, so it will end up in the intercept of the statistical model, $\hat{\mu}^\ast$.
-But in the generative model, maybe it should be included when simulating the initial phenotypes of the collection?
+
+Note that, when $\boldsymbol{g}$ is simulated as $X \boldsymbol{\beta}$ with $X$ in $\{0,1,2\}$, its mean isn't $\boldsymbol{0}$k.
+For this to be the case, the $X$ matrix should be centered using the allele frequencies from the base population.
+More details in [Vitezica et al (2013)](http://dx.doi.org/10.1534/genetics.113.155176) and [Toro et al (2011)](http://www.gsejournal.org/content/43/1/27).
+In the course of the game, it would be better to update the allele frequencies.
 
 ## Simulation procedure for trait 1
 
@@ -695,6 +697,7 @@ sigma.alpha2 <- c(trait1=params.trait1$sigma.alpha2,
 p0 <- simulTraits12(dat=p0.df, mu=mu.traits12,
                     sigma.alpha2=sigma.alpha2,
                     X=coll$genos[levels(p0.df$ind), thin.snps],
+                    afs=afs[thin.snps],
                     Beta=snp.effects12$Beta,
                     ## h2=h2.traits12)
                     sigma2=sigma.traits12)
@@ -734,7 +737,9 @@ p0.df$pathogen[p0.df$year %in% years.with.patho] <- TRUE
 
 Make trait 3:
 ```{r make_trait3}
-p0$trait3 <- simulTrait3(dat=p0.df, X=p0$X, afs=p0$afs,
+p0$trait3 <- simulTrait3(dat=p0.df,
+                         X=coll$genos[levels(p0.df$ind), thin.snps],
+                         afs=afs[thin.snps],
                          subset.snps=subset.snps[["ld"]],
                          prob.resist.no.qtl=0.02)
 table(p0$trait3$y)
@@ -798,8 +803,8 @@ Retrieve the breeding values of each line in the collection:
 ```{r rank_genos}
 BVs <- data.frame(trait1=p0$mu[1] + p0$G.A[,1],
                   trait2=p0$mu[2] + p0$G.A[,2],
-                  trait3=! p0$X[, p0$trait3$qtn.id] %in% p0$trait3$resist.genos,
-                  row.names=rownames(p0$X))
+                  trait3=! coll$genos[levels(p0.df$ind), p0$trait3$qtn.id] %in% p0$trait3$resist.genos,
+                  row.names=levels(p0.df$ind))
 summary(BVs)
 ```
 
@@ -877,9 +882,12 @@ for(j in 1:nb.years.per.ctl){
                               nlevels(p0.df$plot))
   phectl <- simulTraits12(dat=phectl.df, mu=p0$mu,
                           Alpha=p0$Alpha[as.character(year), , drop=FALSE],
-                          X=p0$X[levels(phectl.df$ind),], Beta=p0$Beta,
+                          X=coll$genos[levels(phectl.df$ind), thin.snps],
+                          afs=afs[thin.snps],
+                          Beta=p0$Beta,
                           sigma2=p0$sigma2, verbose=1)
-  phectl$trait3 <- simulTrait3(dat=phectl.df, X=p0$X[levels(phectl.df$ind),],
+  phectl$trait3 <- simulTrait3(dat=phectl.df,
+                               X=coll$genos[levels(phectl.df$ind), thin.snps],
                                qtn.id=p0$trait3$qtn.id,
                                resist.genos=p0$trait3$resist.genos,
                                prob.resist.no.qtl=p0$trait3$prob.resist.no.qtl,
@@ -1159,9 +1167,9 @@ for(breeder in breeders){
 
 ## Plant material
 
-Create one table per breeder for their plant material:
+Create one table per breeder for their plant material, as well as annother table to be easily copied if new breeders are created via the interface:
 ```{r create_tables_plant_material}
-for(breeder in breeders){
+for(breeder in c(breeders, "init")){
   tbl <- paste0("plant_material_", breeder)
   if(tbl %in% dbListTables(db)){
     query <- paste0("DROP TABLE ", tbl)
@@ -1177,7 +1185,25 @@ for(breeder in breeders){
 dbListTables(db)
 ```
 
-For each individual initially given to the players, save its haplotypes into a file (slow) and save it into the table:
+Save also the collection in the plant material table of each breeder:
+```{r fill_table}
+all.values <- paste(gsub("Coll", "Ind", ind.ids),
+                    rep(NA, length(ind.ids)),
+                    ind.ids,
+                    rep(paste0(first.year, "-01-01 00:00:00"), length(ind.ids)),
+                    sep="','",collapse = "'),('")
+for(breeder in c(breeders, "init")){
+  tbl <- paste0("plant_material_", breeder)
+  query <- paste0("INSERT INTO ", tbl,
+                  " (parent1, parent2, child, avail_from)",
+                  " VALUES",
+                  " ('", all.values, "')")
+  res <- dbExecute(conn=db, query)
+}
+dbDisconnect(db)
+```
+
+For each individual initially given to the players, save its haplotypes into a file (slow):
 ```{r save_haplos_in_files}
 stopifnot("coll" %in% ls())
 ind.ids <- rownames(coll$genos)
@@ -1193,24 +1219,6 @@ system.time(
           file.symlink(f, fto)
       }
     }, mc.cores=nb.cores))
-```
-
-Save also the collection in the plant material table of each breeder:
-```{r fill_table}
-all.values <- paste(gsub("Coll", "Ind", ind.ids),
-                    rep(NA, length(ind.ids)),
-                    ind.ids,
-                    rep(paste0(first.year, "-01-01 00:00:00"), length(ind.ids)),
-                    sep="','",collapse = "'),('")
-for(breeder in breeders){
-  tbl <- paste0("plant_material_", breeder)
-  query <- paste0("INSERT INTO ", tbl,
-                  " (parent1, parent2, child, avail_from)",
-                  " VALUES",
-                  " ('", all.values, "')")
-  res <- dbExecute(conn=db, query)
-}
-dbDisconnect(db)
 ```
 
 ## Example files

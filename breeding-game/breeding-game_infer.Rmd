@@ -1,6 +1,6 @@
 ---
 title: "Breeding game: infer"
-author: "Timothée Flutre, Philippe Brabant, Jacques David"
+author: "Timothée Flutre"
 date: "`r format(Sys.time(), '%d/%m/%Y %H:%M:%S')`"
 colorlinks: true
 output:
@@ -300,7 +300,7 @@ for(year in levels(phenos$year)){
 ```
 
 
-# Analysis of trait3
+# Analysis of trait 3
 
 Extract the data of the latest year with pathogen, for which genotypes and phenotypes are available:
 ```{r}
@@ -310,28 +310,26 @@ dat <- droplevels(phenos[phenos$year == last.year,])
 str(dat)
 ```
 
-## Linear mixed model
-
-### Model fitting
+## Model fitting
 
 ```{r}
 fit.i <- lmer(formula=trait3 ~ 1 + (1|ind), data=dat, REML=FALSE)
 ```
 
-### Model comparison
+## Model comparison
 
 ```{r}
 AIC(fit.i)
 BIC(fit.i)
 ```
 
-### Model selection
+## Model selection
 
 ```{r}
 bestmod <- fit.i
 ```
 
-### Diagnostics
+## Diagnostics
 
 Prepare to diagnose the best model:
 ```{r}
@@ -396,7 +394,7 @@ dotplot(ind ~ scl.cond.res, data=fit.all,
         })
 ```
 
-### Inference
+## Inference
 
 Estimate variance components by REML:
 ```{r}
@@ -416,7 +414,7 @@ Retrieve the true causal SNP of trait3 to highlight it in the Manhattan plot:
 (true.qtl3 <- p0$trait3$qtn.id)
 ```
 
-### QTL detection with GEMMA
+## QTL detection with GEMMA
 
 Launch [GEMMA](https://github.com/xiangzhou/GEMMA) (better and quicker than QTLRel, but only on Linux), if available:
 ```{r, eval=TRUE}
@@ -467,7 +465,7 @@ if(file.exists(Sys.which("gemma"))){
 }
 ```
 
-### QTL detection with QTLRel
+## QTL detection with QTLRel
 
 Launch QTLRel (if available):
 ```{r, eval=TRUE}
