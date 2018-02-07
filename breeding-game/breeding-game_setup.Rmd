@@ -67,7 +67,9 @@ Set the seed:
 ```{r}
 RNGkind("L'Ecuyer-CMRG") # to make mclapply reproducible
 set.seed(1859)
-nb.cores <- detectCores() - 1
+nb.cores <- 1
+if(Sys.info()["sysname"] != "Windows")
+  nb.cores <- detectCores() - 1
 ```
 
 Set up directories:
