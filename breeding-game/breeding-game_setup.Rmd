@@ -6,12 +6,12 @@ colorlinks: true
 output:
   html_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     toc_float: true
     number_sections: TRUE
   pdf_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     number_sections: TRUE
 ---
 
@@ -599,7 +599,8 @@ Based on the SNP genotypes, we can deduce the variance of the SNP effects, $\sig
 
 Save all these values in a list:
 ```{r simul_proc_t1_save_values}
-params.trait1 <- list(mu=mu, sigma.p2=sigma.p2, sigma.a2=sigma.a2,
+params.trait1 <- list(mu=mu, y.min=y.min, sigma.p2=sigma.p2,
+                      CV.g=CV.g, sigma.a2=sigma.a2,
                       h2=h2, sigma2=sigma2, sigma.alpha2=sigma.alpha2,
                       H2.design=H2.design, sigma.beta2=sigma.beta2)
 ```
@@ -667,7 +668,8 @@ Based on the SNP genotypes, we can deduce the variance of the SNP effects, $\sig
 
 Save all these values in a list:
 ```{r simul_proc_t2_save_values}
-params.trait2 <- list(mu=mu, sigma.p2=sigma.p2, sigma.a2=sigma.a2,
+params.trait2 <- list(mu=mu, y.min=y.min, sigma.p2=sigma.p2,
+                      CV.g=CV.g, sigma.a2=sigma.a2,
                       h2=h2, sigma2=sigma2, sigma.alpha2=sigma.alpha2,
                       H2.design=H2.design, sigma.beta2=sigma.beta2)
 ```
@@ -960,7 +962,12 @@ query <- paste0("CREATE TABLE ", tbl,
 res <- dbExecute(conn=db, query)
 ```
 
-Fill the table with the constants used for the data simulation:
+### Simulation parameters
+
+Fill the table with the constants used for the data simulation.
+
+#### Haplotypes and genotypes
+
 ```{r table_constants_fill_simul}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.chrs', '", nb.chrs, "')")
@@ -971,12 +978,81 @@ res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.snps', '", length(thin.snps), "')")
 res <- dbExecute(conn=db, query)
+```
+
+#### Phenotypes
+
+Trait 1:
+```{r}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('mu.trait1', '", mu.traits12[1], "')")
+                " ('mu.trait1', '", params.trait1$mu, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('mu.trait2', '", mu.traits12[2], "')")
+                " ('y.min.trait1', '", params.trait1$y.min, "')")
 res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.p2.trait1', '", params.trait1$sigma.p2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('CV.g.trait1', '", params.trait1$CV.g, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.a2.trait1', '", params.trait1$sigma.a2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('h2.trait1', '", params.trait1$h2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma2.trait1', '", params.trait1$sigma2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.alpha2.trait1', '", params.trait1$sigma.alpha2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('H2.design.trait1', '", params.trait1$H2.design, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.beta2.trait1', '", params.trait1$sigma.beta2, "')")
+res <- dbExecute(conn=db, query)
+```
+
+Trait 2:
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait2', '", params.trait2$mu, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('y.min.trait2', '", params.trait2$y.min, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.p2.trait2', '", params.trait2$sigma.p2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('CV.g.trait2', '", params.trait2$CV.g, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.a2.trait2', '", params.trait2$sigma.a2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('h2.trait2', '", params.trait2$h2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma2.trait2', '", params.trait2$sigma2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.alpha2.trait2', '", params.trait2$sigma.alpha2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('H2.design.trait2', '", params.trait2$H2.design, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.beta2.trait2', '", params.trait2$sigma.beta2, "')")
+res <- dbExecute(conn=db, query)
+```
+
+#### Initial data
+
+```{r}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.inds.denovo', '", nb.inds.denovo, "')")
 res <- dbExecute(conn=db, query)
@@ -1015,6 +1091,8 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
 res <- dbExecute(conn=db, query)
 ```
 
+### Time delays
+
 Fill the table with the constants specifying the time delays (in months):
 ```{r table_constants_fill_time}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
@@ -1048,6 +1126,8 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('duration.geno.single', '", 1, "')")
 res <- dbExecute(conn=db, query)
 ```
+
+### Costs
 
 Fill the table with the constants specifying the costs:
 ```{r table_constants_fill_costs}
