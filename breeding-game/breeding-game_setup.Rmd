@@ -58,7 +58,7 @@ suppressPackageStartupMessages(library(MASS))
 suppressPackageStartupMessages(library(parallel))
 ## library(LDheatmap) # optionnal
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.9",
+stopifnot(compareVersion("0.157.0",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -181,7 +181,7 @@ g0$genos[1:2, 1:6]
 
 Look at the AFs and MAFs:
 ```{r look_mafs}
-afs <- estimSnpAf(X=g0$genos)
+afs <- estimSnpAf(X=g0$genos, allow.updating=TRUE)
 summary(afs)
 plotHistAllelFreq(afs=afs,
                   main=paste0(length(afs), " SNPs"))
@@ -1301,6 +1301,15 @@ system.time(
           file.symlink(f, fto)
       }
     }, mc.cores=nb.cores))
+```
+
+Save also the initial allele frequencies into a file per breeder:
+```{r save_afs_in_file_per_breder}
+for(breeder in breeders){
+  f <- paste0(truth.dir, "/", breeder, "/afs.RData")
+  afs.breeder <- afs[thin.snps]
+  save(afs.breeder, file=f)
+}
 ```
 
 ## Example files
