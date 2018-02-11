@@ -531,22 +531,42 @@ Thus, knowing the additive genotypic variance, $\sigma_a^2$, we can deduce the v
 
 The constant mentioned above is the same for all genotypes, so it will end up in the intercept of the statistical model, $\hat{\mu}^\ast$.
 
-Note that, when $\boldsymbol{g}$ is simulated as $X \boldsymbol{\beta}$ with $X$ in $\{0,1,2\}$, its mean isn't $\boldsymbol{0}$k.
-For this to be the case, the $X$ matrix should be centered using the allele frequencies from the base population.
+Note that, when $\boldsymbol{g}$ is simulated as $X \boldsymbol{\beta}$ with $X$ in $\{0,1,2\}$, its mean isn't $\boldsymbol{0}$.
+For this to be the case, the $X$ matrix should be centered using the allele frequencies from the whole population.
 More details in [Vitezica et al (2013)](http://dx.doi.org/10.1534/genetics.113.155176) and [Toro et al (2011)](http://www.gsejournal.org/content/43/1/27).
-In the course of the game, it would be better to update the allele frequencies.
+In the course of the game, it would be better to update the allele frequencies each time new plant material is created.
+
+### Selection model
+
+As designer of the game, we can set the difficulty of the registration requirements by tuning the required response to selection, $R = \mu_1 - \mu$, where $\mu_1$ is the phenotypic mean (global intercept) at the final generation (just before registration) and $\mu$ is the mean of the initial collection.
+
+We can also write $R$ as $w \times \mu$ where $w$ correspond to the registration threshold compare to the mean of the initial collection, and we also have the following relations:
+
+* $R = h^2 \; i \; \sigma_p$;
+
+* $h2 = \frac{\sigma_a^2}{\sigma_p^2}$.
+
+Thus: $w \, \mu = \frac{\sigma_a^2}{\sigma_p^2} \, i \, \sigma_p \Leftrightarrow \frac{w}{i} = \frac{\sigma_a^2}{\sigma_p \, \mu}$
+
+Given the definition of the genotypic coef of variation, $\text{CV_g} = \frac{\sigma_g}{\mu}$, we get:
+
+\[
+\frac{w}{i} = \frac{\mu}{\sigma_p} \, \text{CV_g}^2
+\]
+
+Therefore, making things more or less difficult boils down to fine-tuning $i$, which will be reflected in $\text{CV_g}$ (for $\mu$ and $\sigma_p$ fixed).
 
 ## Simulation procedure for trait 1
 
 Here is the procedure for trait 1 of setting the variances required by the generative model above to sample data.
 
-We fix the initial phenotypic mean, $\mu_p$, to a global intercept which will be held constant during the whole game: $\mu_p = \mu$.
+We set the initial phenotypic mean, $\mu_p$, to a global intercept which will be held constant during the whole game: $\mu_p = \mu$.
 
 ```{r simul_proc_t1_mu}
 (mu <- 100)
 ```
 
-We deduce the individual-plant phenotypic variance so that approximately 99% of all the phenotypes are above a minimal value: $\mu - 3 \sigma_p \ge y_{\text{min}}$.
+We set the individual-plant phenotypic variance so that approximately 99% of all the phenotypes are above a minimal value: $\mu - 3 \sigma_p \ge y_{\text{min}}$.
 
 ```{r simul_proc_t1_sigma_p2}
 y.min <- 20
@@ -554,10 +574,32 @@ y.min <- 20
 sqrt(sigma.p2)
 ```
 
-We deduce the (additive) genotypic variance given that the genotypic coef of variation is set at a particular value: $\sigma_a = \text{CV}_g \times \mu$.
+We set the registration threshold to be realistic:
+
+```{r}
+register.min.trait1 <- 1.03 # compare to the phenotypic mean of the controls
+(w <- register.min.trait1 - 1)
+```
+
+We set the selection intensity, but note that the controls will be chosen (see below) so that they are among the best from the initial collection, hence the chosen selection intensity shouldn't be too large:
+
+```{r}
+i <- 1
+## i <- 2
+## i <- 3
+## i <- 4
+```
+
+We deduce the genotypic coef of variation:
+
+```{r}
+(CV.g <- sqrt((w / i) * (sqrt(sigma.p2) / mu)))
+```
+
+We deduce the (additive) genotypic variance:
 
 ```{r simul_proc_t1_sigma_a2}
-CV.g <- 0.12
+CV.g <- 0.10
 (sigma.a2 <- (CV.g * mu)^2)
 sqrt(sigma.a2)
 stopifnot(sigma.a2 < sigma.p2)
@@ -600,7 +642,7 @@ Based on the SNP genotypes, we can deduce the variance of the SNP effects, $\sig
 Save all these values in a list:
 ```{r simul_proc_t1_save_values}
 params.trait1 <- list(mu=mu, y.min=y.min, sigma.p2=sigma.p2,
-                      CV.g=CV.g, sigma.a2=sigma.a2,
+                      i=i, CV.g=CV.g, sigma.a2=sigma.a2,
                       h2=h2, sigma2=sigma2, sigma.alpha2=sigma.alpha2,
                       H2.design=H2.design, sigma.beta2=sigma.beta2)
 ```
@@ -623,7 +665,13 @@ y.min <- 5
 sqrt(sigma.p2)
 ```
 
-We deduce the (additive) genotypic variance given that the genotypic coef of variation is set at a particular value: $\sigma_a = \text{CV}_g \times \mu$.
+We set the registration threshold (for this trait, there is no need to set a target selection intensity as $w=0$):
+
+```{r}
+register.min.trait2 <- mu
+```
+
+We deduce the (additive) genotypic variance given that the genotypic coef of variation is set at a particular value:
 
 ```{r simul_proc_t2_sigma_a2}
 CV.g <- 0.06
@@ -925,19 +973,6 @@ rm(p0)
 gc()
 ```
 
-## Choose registration thresholds
-
-```{r}
-register.min.trait1 <- 1.03 # compare to the median of the controls
-register.min.trait2 <- mu.traits12[2]
-```
-
-TODO
-
-As designer of the game, we can set the difficulty of the requirements by tuning the required response to selection, and thus the number of standard deviations necessary to be registered.
-
-$R = H^2_{\text{design}} \; i \; \sigma_p^\star$
-
 
 # Set up database and example files
 
@@ -992,6 +1027,12 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('sigma.p2.trait1', '", params.trait1$sigma.p2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('w.trait1', '", params.trait1$w, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('i.trait1', '", params.trait1$i, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('CV.g.trait1', '", params.trait1$CV.g, "')")
