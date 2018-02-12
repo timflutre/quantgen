@@ -1314,6 +1314,8 @@ dbListTables(db)
 
 Save also the collection in the plant material table of each breeder:
 ```{r fill_table}
+stopifnot("coll" %in% ls())
+ind.ids <- rownames(coll$genos)
 all.values <- paste(gsub("Coll", "Ind", ind.ids),
                     rep(NA, length(ind.ids)),
                     ind.ids,
@@ -1332,8 +1334,6 @@ dbDisconnect(db)
 
 For each individual initially given to the players, save its haplotypes into a file (slow):
 ```{r save_haplos_in_files}
-stopifnot("coll" %in% ls())
-ind.ids <- rownames(coll$genos)
 system.time(
     tmp <- mclapply(1:length(ind.ids), function(i){
       ind.id <- ind.ids[i]
