@@ -1348,13 +1348,11 @@ system.time(
     }, mc.cores=nb.cores))
 ```
 
-Save also the initial allele frequencies into a file per breeder:
-```{r save_afs_in_file_per_breder}
-for(breeder in breeders){
-  f <- paste0(truth.dir, "/", breeder, "/afs.RData")
-  afs.breeder <- afs[thin.snps]
-  save(afs.breeder, file=f)
-}
+Save also the initial allele frequencies:
+```{r save_afs_in_file}
+f <- paste0(truth.dir, "/afs0.RData")
+afs0 <- afs[thin.snps]
+save(afs0, file=f)
 ```
 
 ## Example files
