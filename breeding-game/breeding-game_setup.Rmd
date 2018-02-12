@@ -84,7 +84,7 @@ if(Sys.info()["user"] == "tflutre"){
 if(! dir.exists(root.dir))
   dir.create(root.dir)
 setup <- setUpBreedingGame(root.dir=root.dir,
-                           nb.breeders=1)
+                           nb.breeders=0) # breeders will be created via the interface
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
 init.dir <- setup$init.dir
@@ -596,10 +596,14 @@ We deduce the genotypic coef of variation:
 (CV.g <- sqrt((w / i) * (sqrt(sigma.p2) / mu)))
 ```
 
+However, because the previous computations don't account for the negative correlation between traits, we still fix the CVg by hand at this point:
+```{r}
+CV.g <- 0.10
+```
+
 We deduce the (additive) genotypic variance:
 
 ```{r simul_proc_t1_sigma_a2}
-CV.g <- 0.10
 (sigma.a2 <- (CV.g * mu)^2)
 sqrt(sigma.a2)
 stopifnot(sigma.a2 < sigma.p2)
