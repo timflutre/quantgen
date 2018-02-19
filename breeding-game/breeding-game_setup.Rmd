@@ -347,6 +347,8 @@ str(p0.df)
 summary(as.vector(table(p0.df$ind)))
 ```
 
+TODO: arrange plots on a grid and return their coordinates
+
 Export genotypes for the players using high-density chip, but only for a subset of lines:
 ```{r export_geno}
 f <- paste0(init.dir, "/genos_subset-coll.txt.gz")
@@ -805,6 +807,8 @@ regplot(p0.df$trait1, p0.df$trait2, xlab="p0.df$trait1", ylab="p0.df$trait2",
         las=1)
 ```
 
+TODO: add missing data
+
 Save data:
 ```{r save_phenos}
 f <- paste0(truth.dir, "/p0.RData")
@@ -954,6 +958,8 @@ if(file.exists(fout))
 write.table(x=phectls.df, file=gzfile(fout), quote=FALSE,
             sep="\t", row.names=FALSE, col.names=TRUE)
 ```
+
+TODO: add spatial coordinates and missing data
 
 Free some memory:
 ```{r free_mem_phenos, eval=TRUE}
