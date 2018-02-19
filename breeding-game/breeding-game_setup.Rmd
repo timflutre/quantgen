@@ -56,7 +56,6 @@ stopifnot(compareVersion("2.0",
 suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
 suppressPackageStartupMessages(library(parallel))
-## library(LDheatmap) # optionnal
 suppressPackageStartupMessages(library(rutilstimflutre))
 stopifnot(compareVersion("0.157.0",
                          as.character(packageVersion("rutilstimflutre")))
@@ -78,8 +77,6 @@ if(Sys.info()["user"] == "tflutre"){
   root.dir <- "~/src/quantgen/breeding-game/data"
 } else if(Sys.info()["user"] == "Julien DIOT"){
   root.dir <- "~/breeding-game/setup/data"
-} else{
-  root.dir <- "C:/<...>/data"
 }
 if(! dir.exists(root.dir))
   dir.create(root.dir)
@@ -150,9 +147,10 @@ T2 <- T1 + 2000
                " -eN ", T2/(4*Ne0), " ", Nea/Ne0))
 ```
 
+TODO: simulate two sub-populations, quite differenciated (by crossing individuals from each, the mean performance of their offsprings will be the same as if the parents were from the same pop, but their genetic variance will be larger)
+
 Simulate genotypes via the coalescent:
 ```{r simul_geno_coalescent}
-## set.seed(65291)
 f <- paste0(truth.dir, "/g0.RData")
 if(! file.exists(f)){
   g0 <- simulCoalescent(nb.inds=I,
@@ -198,7 +196,6 @@ Look at some haplotypes:
 ```{r look_haplos}
 plotHaplosMatrix(g0$haplos$chr1[sort(sample.int(nrow(g0$haplos$chr1), 100)),
                                 mafs[1:ncol(g0$haplos$chr1)] >= 0.2])
-## calcAvgPwDiffBtwHaplos(g0$haplos$chr1) # slow
 ```
 
 Estimate and plot pairwise LD per chromosome:
@@ -211,7 +208,6 @@ max.pos <- L
                                               g0$snp.coords$chr == chr &
                                               g0$snp.coords$pos >= min.pos &
                                               g0$snp.coords$pos <= max.pos,])))
-## snps.tokeep <- snps.tokeep[sort(sample(snps.tokeep, 100))]
 system.time(ld <- estimLd(X=g0$genos[,snps.tokeep],
                           snp.coords=g0$snp.coords[snps.tokeep,],
                           use.ldcorsv=FALSE))
@@ -220,7 +216,6 @@ summary(ld$cor2)
 snp.dist <- distSnpPairs(snp.pairs=ld[, c("loc1","loc2")],
                          snp.coords=g0$snp.coords[snps.tokeep,])
 plotLd(snp.dist,
-       ## ld$cor2, estim="r2",
        sqrt(ld$cor2), estim="r",
        main=paste0(length(snps.tokeep), " SNPs with MAF >= ", min.maf,
                    " on ", chr),
@@ -230,11 +225,6 @@ plotLd(snp.dist,
        Ne=Ne0, c=c,
        add.ohta.kimura=TRUE)
 abline(v=500, lty=2)
-## LDheatmap(gdat=cor(g0$genos[,snps.tokeep])^2,
-##           genetic.distances=snp.dist, distances="physical",
-##           title=paste0(length(snps.tokeep), " SNPs with MAF >= ", min.maf,
-##                        " on ", chr),
-##           add.map=FALSE, flip=FALSE)
 ```
 
 Look at distances between consecutive SNPs:
@@ -309,7 +299,7 @@ write.table(x=g0$snp.coords[subset.snps[["ld"]],],
 
 Make collection of lines via haplodiploidization:
 ```{r coll_lines}
-f <- paste0(truth.dir, "/coll.Rdata")
+f <- paste0(truth.dir, "/coll.RData")
 coll <- list()
 crosses <- data.frame(parent1=ind.ids,
                       parent2=NA,
@@ -331,7 +321,6 @@ file.info(f)$mtime
 
 Free some memory:
 ```{r free_mem_genos}
-## sort(sapply(ls(),function(x){object.size(get(x))}), decreasing=TRUE)
 rm(g0, ld, snp.dist, mafs, loc.crossovers, mafs.subset, crosses,
    coancestries, A, A.vr)
 gc()
@@ -730,8 +719,6 @@ params.trait2 <- list(mu=mu, y.min=y.min, sigma.p2=sigma.p2,
 
 Simulate the SNP effects for traits 1 and 2 jointly:
 ```{r simul_snp_effects_trait1_trait2}
-## set.seed(39452)
-## sigma.beta2 <- c(trait1=10^(-5), trait2=10^(-5))
 (sigma.beta2 <- c(trait1=params.trait1$sigma.beta2,
                   trait2=params.trait2$sigma.beta2))
 snp.effects12 <- simulSnpEffectsTraits12(snp.ids=thin.snps,
@@ -741,11 +728,7 @@ snp.effects12 <- simulSnpEffectsTraits12(snp.ids=thin.snps,
 
 Make phenotypes for traits 1 and 2 jointly:
 ```{r make_phenos_trait1_trait2}
-## mu.traits12 <- c(trait1=40, trait2=14)
-## h2.traits12 <- c(trait1=0.3, trait2=0.4)
-## sigma.alpha2 <- c(trait1=1.5^2, trait2=1^2)
 mu.traits12 <- c(trait1=params.trait1$mu, trait2=params.trait2$mu)
-## h2.traits12 <- c(trait1=params.trait1$h2, trait2=params.trait2$h2)
 sigma.traits12 <- c(trait1=params.trait1$sigma2,
                     trait2=params.trait2$sigma2)
 sigma.alpha2 <- c(trait1=params.trait1$sigma.alpha2,
@@ -755,7 +738,6 @@ p0 <- simulTraits12(dat=p0.df, mu=mu.traits12,
                     X=coll$genos[levels(p0.df$ind), thin.snps],
                     afs=afs[thin.snps],
                     Beta=snp.effects12$Beta,
-                    ## h2=h2.traits12)
                     sigma2=sigma.traits12)
 ```
 
@@ -849,17 +831,18 @@ At the end of the game, each breeder has to submit at least one new variety.
 For them to be registered, they should be "better" than controls.
 The controls are chosen so that they have:
 
-* an "additive genotypic yield" among the 40% best lines,
+* an "additive genotypic yield" among the best lines,
 
 * an "additive genotypic quality" above the mean of all lines,
 
-* the resistant allele for some of them.
+* the resistant allele for some of them (if possible).
 
 Retrieve the breeding values of each line in the collection:
 ```{r rank_genos}
 BVs <- data.frame(trait1=p0$mu[1] + p0$G.A[,1],
                   trait2=p0$mu[2] + p0$G.A[,2],
-                  trait3=! coll$genos[levels(p0.df$ind), p0$trait3$qtn.id] %in% p0$trait3$resist.genos,
+                  trait3=! coll$genos[levels(p0.df$ind), p0$trait3$qtn.id] %in%
+                    p0$trait3$resist.genos,
                   row.names=levels(p0.df$ind))
 summary(BVs)
 ```
@@ -867,7 +850,8 @@ summary(BVs)
 Identify potential controls:
 ```{r identify_potential_controls, eval=TRUE}
 BVs <- BVs[order(BVs$trait1, decreasing=TRUE),]
-length(idx1 <- 1:ceiling(0.4 * nrow(BVs)))
+prop.best.lines <- 0.1 # to be decreased, e.g. to 10% or even 5%
+length(idx1 <- 1:ceiling(prop.best.lines * nrow(BVs)))
 summary(BVs[idx1,])
 length(idx2 <- which(BVs$trait2 >= mean(BVs$trait2)))
 potential.controls <- BVs[intersect(idx1, idx2),]
