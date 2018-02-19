@@ -57,7 +57,7 @@ suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
 suppressPackageStartupMessages(library(parallel))
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.157.0",
+stopifnot(compareVersion("0.158.3",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -1270,9 +1270,13 @@ hashed.psw <- digest("", "md5", serialize=FALSE)
 for(breeder in breeders){
   query <- paste0("INSERT INTO ", tbl, " VALUES",
                   " ('", breeder)
-  if(breeder == "test"){
+  if(breeder == "admin"){
     query <- paste0(query,
                     "', 'game master",
+                    "', '", hashed.psw, "')")
+  } else if(breeder == "test"){
+    query <- paste0(query,
+                    "', 'tester",
                     "', '", hashed.psw, "')")
   } else
     query <- paste0(query,

@@ -60,7 +60,7 @@ stopifnot(compareVersion("4.5",
           != 1)
 suppressPackageStartupMessages(library(cvTools))
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.9",
+stopifnot(compareVersion("0.158.3",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
