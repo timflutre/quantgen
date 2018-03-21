@@ -1107,6 +1107,9 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('max.nb.haplodiplos', '", 700, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('max.nb.inds', '", 1000, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.plots', '", nb.plots, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
