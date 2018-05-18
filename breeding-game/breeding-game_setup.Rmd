@@ -1,17 +1,17 @@
 ---
 title: "Breeding game: setup"
-author: "Timothée Flutre, Philippe Brabant, Jacques David"
+author: "Timothée Flutre"
 date: "`r format(Sys.time(), '%d/%m/%Y %H:%M:%S')`"
 colorlinks: true
 output:
   html_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     toc_float: true
     number_sections: TRUE
   pdf_document:
     toc: true
-    toc_depth: 3
+    toc_depth: 4
     number_sections: TRUE
 ---
 
@@ -31,9 +31,10 @@ opts_chunk$set(echo=TRUE, warning=TRUE, message=TRUE, cache=FALSE, fig.align="ce
 
 # Overview
 
-* https://github.com/timflutre/atelier-prediction-genomique
+This document was conceived with the help of Jacques David (Montpellier SupAgro) and Philippe Brabant (AgroParisTech) for a master-level [workshop on genomic prediction and selection](https://github.com/timflutre/atelier-prediction-genomique).
+It sets up a [serious game](https://github.com/timflutre/PlantSelBreedGame) to teach plant selective breeding.
 
-* Copyright 2016-2018 INRA, Montpellier SupAgro, AgroParisTech
+* Copyright 2016-2018 INRA
 
 * License: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)
 
@@ -54,24 +55,33 @@ stopifnot(compareVersion("2.0",
           != 1)
 suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
-## library(LDheatmap) # optionnal
+suppressPackageStartupMessages(library(parallel))
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.156.6",
+stopifnot(compareVersion("0.158.3",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
+```
+
+Set the seed:
+```{r}
+RNGkind("L'Ecuyer-CMRG") # to make mclapply reproducible
+set.seed(1859)
+nb.cores <- 1
+if(Sys.info()["sysname"] != "Windows")
+  nb.cores <- detectCores() - 1
 ```
 
 Set up directories:
 ```{r setup_dir}
 if(Sys.info()["user"] == "tflutre"){
-  root.dir <- "~/work2/atelier-prog-selection-2018/data"
-} else{
-  root.dir <- "C:/<...>/data"
+  root.dir <- "~/src/quantgen/breeding-game/data"
+} else if(Sys.info()["user"] == "Julien DIOT"){
+  root.dir <- "~/breeding-game/setup/data"
 }
 if(! dir.exists(root.dir))
   dir.create(root.dir)
 setup <- setUpBreedingGame(root.dir=root.dir,
-                           nb.breeders=1)
+                           nb.breeders=0) # breeders will be created via the interface
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
 init.dir <- setup$init.dir
@@ -137,24 +147,29 @@ T2 <- T1 + 2000
                " -eN ", T2/(4*Ne0), " ", Nea/Ne0))
 ```
 
+TODO: simulate two sub-populations, quite differenciated (by crossing individuals from each, the mean performance of their offsprings will be the same as if the parents were from the same pop, but their genetic variance will be larger)
+
 Simulate genotypes via the coalescent:
 ```{r simul_geno_coalescent}
-set.seed(65291)
 f <- paste0(truth.dir, "/g0.RData")
-g0 <- simulCoalescent(nb.inds=I,
-                      ind.ids=ind.ids,
-                      nb.reps=nb.chrs,
-                      pop.mut.rate=theta,
-                      pop.recomb.rate=rho,
-                      chrom.len=L,
-                      other=cmd,
-                      nb.pops=1,
-                      get.trees=FALSE,
-                      get.tmrca=FALSE,
-                      permute.alleles=TRUE,
-                      verbose=1)
-save(g0, file=f)
+if(! file.exists(f)){
+  g0 <- simulCoalescent(nb.inds=I,
+                        ind.ids=ind.ids,
+                        nb.reps=nb.chrs,
+                        pop.mut.rate=theta,
+                        pop.recomb.rate=rho,
+                        chrom.len=L,
+                        other=cmd,
+                        nb.pops=1,
+                        get.trees=FALSE,
+                        get.tmrca=FALSE,
+                        permute.alleles=TRUE,
+                        verbose=1)
+  save(g0, file=f)
+} else
+  load(f)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 head(g0$snp.coords)
 g0$haplos$chr1[1:4, 1:6]
 g0$genos[1:2, 1:6]
@@ -164,7 +179,7 @@ g0$genos[1:2, 1:6]
 
 Look at the AFs and MAFs:
 ```{r look_mafs}
-afs <- estimSnpAf(X=g0$genos)
+afs <- estimSnpAf(X=g0$genos, allow.updating=TRUE)
 summary(afs)
 plotHistAllelFreq(afs=afs,
                   main=paste0(length(afs), " SNPs"))
@@ -181,7 +196,6 @@ Look at some haplotypes:
 ```{r look_haplos}
 plotHaplosMatrix(g0$haplos$chr1[sort(sample.int(nrow(g0$haplos$chr1), 100)),
                                 mafs[1:ncol(g0$haplos$chr1)] >= 0.2])
-## calcAvgPwDiffBtwHaplos(g0$haplos$chr1) # slow
 ```
 
 Estimate and plot pairwise LD per chromosome:
@@ -194,15 +208,14 @@ max.pos <- L
                                               g0$snp.coords$chr == chr &
                                               g0$snp.coords$pos >= min.pos &
                                               g0$snp.coords$pos <= max.pos,])))
-## snps.tokeep <- snps.tokeep[sort(sample(snps.tokeep, 100))]
-(nrow(ld <- estimLd(X=g0$genos[,snps.tokeep],
-                    snp.coords=g0$snp.coords[snps.tokeep,],
-                    use.ldcorsv=FALSE)))
+system.time(ld <- estimLd(X=g0$genos[,snps.tokeep],
+                          snp.coords=g0$snp.coords[snps.tokeep,],
+                          use.ldcorsv=FALSE))
+nrow(ld)
 summary(ld$cor2)
 snp.dist <- distSnpPairs(snp.pairs=ld[, c("loc1","loc2")],
                          snp.coords=g0$snp.coords[snps.tokeep,])
 plotLd(snp.dist,
-       ## ld$cor2, estim="r2",
        sqrt(ld$cor2), estim="r",
        main=paste0(length(snps.tokeep), " SNPs with MAF >= ", min.maf,
                    " on ", chr),
@@ -212,17 +225,13 @@ plotLd(snp.dist,
        Ne=Ne0, c=c,
        add.ohta.kimura=TRUE)
 abline(v=500, lty=2)
-## LDheatmap(gdat=cor(g0$genos[,snps.tokeep])^2,
-##           genetic.distances=snp.dist, distances="physical",
-##           title=paste0(length(snps.tokeep), " SNPs with MAF >= ", min.maf,
-##                        " on ", chr),
-##           add.map=FALSE, flip=FALSE)
 ```
 
 Look at distances between consecutive SNPs:
 ```{r dist_btw_snps}
 chr <- "chr3"
-tmp <- distConsecutiveSnps(snp.coords=g0$snp.coords, only.chr=chr)
+system.time(
+    tmp <- distConsecutiveSnps(snp.coords=g0$snp.coords, only.chr=chr))
 hist(tmp[[chr]], breaks="FD", xlab="in bp", las=1,
      main="Distances between consecutive SNPs")
 abline(v=500, lty=2)
@@ -290,7 +299,7 @@ write.table(x=g0$snp.coords[subset.snps[["ld"]],],
 
 Make collection of lines via haplodiploidization:
 ```{r coll_lines}
-f <- paste0(truth.dir, "/coll.Rdata")
+f <- paste0(truth.dir, "/coll.RData")
 coll <- list()
 crosses <- data.frame(parent1=ind.ids,
                       parent2=NA,
@@ -298,17 +307,20 @@ crosses <- data.frame(parent1=ind.ids,
                                     1:I),
                       stringsAsFactors=FALSE)
 loc.crossovers <- drawLocCrossovers(crosses, sapply(g0$haplos, ncol))
-coll$haplos <- makeCrosses(g0$haplos, crosses, loc.crossovers)
+system.time(
+    coll$haplos <- makeCrosses(haplos=g0$haplos, crosses=crosses,
+                               loc.crossovers=loc.crossovers,
+                               howto.start.haplo=0, nb.cores=nb.cores))
 coll$genos <- segSites2allDoses(seg.sites=coll$haplos, ind.ids=crosses$child,
                                 snp.ids=colnames(g0$genos))
 coll$snp.coords <- g0$snp.coords
 save(coll, file=f)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 ```
 
 Free some memory:
 ```{r free_mem_genos}
-## sort(sapply(ls(),function(x){object.size(get(x))}), decreasing=TRUE)
 rm(g0, ld, snp.dist, mafs, loc.crossovers, mafs.subset, crosses,
    coancestries, A, A.vr)
 gc()
@@ -317,37 +329,9 @@ gc()
 
 # Simulate phenotypes
 
-Simulate phenotypes of initial lines:
-
-* hyp: only 3 traits are considered
-
-* hyp: trait 1 has additive infinitesimal genetic architecture (e.g. yield)
-
-* hyp: trait 2 has additive infinitesimal genetic architecture (e.g. quality)
-
-* hyp: for traits 1 and 2, all SNPs (even the rarest) have a non-zero effect
-
-* hyp: traits 1 and 2 are negatively genetically correlated (i.e. pleiotropy)
-
-* hyp: "year" effects are different for traits 1 and 2, with the same variance but no covariance between traits or plots
-
-* hyp: errors are different for traits 1 and 2, with the same variance but no covariance between traits, plots or years
-
-* hyp: pathogens present every three years
-
-* hyp: trait 3 has a single, major QTL (e.g. resistance)
-
-* hyp: "trait3=0" means "absence of symptoms" and, very likely, presence of the resistance allele (but the years with pathogen, some genotypes without the resistant allele may exceptionnally show no symptom)
-
-* hyp: the causal SNP is on the low-density chip
-
-* hyp: the resistance-confering allele is the minor one, but isn't too rare
-
-* hyp: the resistance-confering allele has a dominant effect
-
 ## Generic preparation
 
-Make data.frame for initial phenotypes given to players:
+Make data frame encoding the design for the initial phenotypes given to the players:
 ```{r init_pheno}
 nb.lines.per.year <- 150
 nb.plots.per.line.per.year <- 2
@@ -360,7 +344,10 @@ p0.df <- makeDfInitPhenos(nb.lines.per.year=nb.lines.per.year, nb.years=nb.years
                           first.year=first.year, line.ids)
 head(p0.df)
 str(p0.df)
+summary(as.vector(table(p0.df$ind)))
 ```
+
+TODO: arrange plots on a grid and return their coordinates
 
 Export genotypes for the players using high-density chip, but only for a subset of lines:
 ```{r export_geno}
@@ -373,7 +360,7 @@ write.table(x=coll$genos[subset.coll, subset.snps[["hd"]]],
             sep="\t", row.names=TRUE, col.names=TRUE)
 ```
 
-Thin to avoid LD between causal SNPs?
+Thin to avoid LD between causal SNPs? No, keep all SNPs for the moment.
 ```{r choose_causal_snps}
 ## mafs <- estimSnpMaf(X=coll$genos[levels(p0.df$ind),])
 ## thin.snps <- thinSnps(method="coord", threshold=5*10^2,
@@ -381,30 +368,388 @@ Thin to avoid LD between causal SNPs?
 length(thin.snps <- colnames(coll$genos))
 ```
 
-## Traits 1 and 2
+## Hypotheses
+
+Simulate phenotypes of initial lines:
+
+* only 3 traits are considered
+
+* trait 1 has additive infinitesimal genetic architecture (e.g. yield)
+
+* trait 2 has additive infinitesimal genetic architecture (e.g. quality)
+
+* for traits 1 and 2, all SNPs (even the rarest) have a non-zero effect
+
+* traits 1 and 2 are negatively genetically correlated (i.e. pleiotropy)
+
+* "year" effects are different for traits 1 and 2, with possibly different variances, but no covariance between traits nor plots
+
+* there is no "plot" effect, nor spatial heterogeneity
+
+* errors are different for traits 1 and 2, with possibly different variances, but no covariance between traits, plots nor years
+
+* pathogens present every three years
+
+* trait 3 has a single, major QTL (e.g. resistance)
+
+* "trait3=0" means "absence of symptoms" and, very likely, presence of the resistance allele (but the years with pathogen, some genotypes without the resistant allele may exceptionnally show no symptom)
+
+* the causal SNP is on the low-density chip
+
+* the resistance-confering allele is the minor one, but isn't too rare
+
+* the resistance-confering allele has a dominant effect
+
+## Notations
+
+* $t \in \{1,\ldots,T\}$: index of the traits, with $T = 2$
+
+* $i \in \{1,\ldots,I\}$: index of the genotypes, with $I$ = `r nlevels(p0.df$ind)`
+
+* $j \in \{1,\ldots,J\}$: index of the years, with $J$ = `r nlevels(p0.df$year)`
+
+* $k \in \{1,\ldots,K\}$: index of the plots, with $K$ = `r nlevels(p0.df$plot)`
+
+* $n \in \{1,\ldots,N\}$: index of the phenotypes, with $N$ = `r nrow(p0.df)`
+
+* $p \in \{1,\ldots,P\}$: index of the SNPs, with $P$ = `r length(thin.snps)`
+
+* $y_{ijk}^{(t)}$: phenotype of genotype $i$, year $j$ in plot $k$ for trait $t$, with variance $\sigma_p^{2 \, (t)}$
+
+* $\alpha_j^{(t)}$: effect of year $j$ on trait $t$, with variance $\sigma_\alpha^{2 \, (t)}$
+
+* $g_i^{(t)}$: genotypic value of genotype $i$ for trait $t$, with variance $\sigma_g^{2 \, (t)}$, assuming only additive contributions, that is $g_i^{(t)} = g_{A,i}^{(t)}$ with variance $\sigma_a^{2 \, (t)}$
+
+* $\epsilon_{ijk}^{(t)}$: error, with variance $\sigma^{2 \, (t)}$
+
+* $X$: $I \times P$ matrix containing the SNP genotypes coded in $\{0,1,2\}$
+
+* $\beta_p^{(t)}$: additive SNP effect of SNP $p$ on trait $t$, with variance $\sigma_\beta^{2 \, (t)}$
+
+## Models
+
+### Generative model of the phenotypes
+
+The generative model is used to simulate the data.
+Let's write it generically for a given trait, hence discarding the subscript $^{(t)}$:
+
+\[
+\forall i, j, k, \; y_{ijk} = \mu + \alpha_j + g_i + \epsilon_{ijk}
+\]
+
+with:
+
+* $\alpha_j \sim \mathcal{N}(0, \sigma_\alpha^2)$;
+
+* $g_i = g_{A,i} \sim \mathcal{N}(0, \sigma_a^2)$;
+
+* $\epsilon_{ijk} \sim \mathcal{N}(0, \sigma^2)$;
+
+so that:
+
+* $y_{ijk} \sim \mathcal{N}(\mu_p, \sigma_p^2)$;
+
+* $\mathbb{E}[y_{ijk}] = \mu_p = \mu$;
+
+* $\mathbb{V}[y_{ijk}] = \sigma_p^2 = \sigma_a^2 + \sigma_\alpha^2 + \sigma^2$.
+
+See below for the procedure aiming at choosing the variances so that several constraints are satisfied.
+
+### Statistical model of the phenotypes
+
+The statistical model is used to perform inference, i.e. estimate the parameters and predict the random variables.
+The likelihood can be written as:
+
+\[
+\forall i, j, k, \; y_{ijk} = \mu + \alpha_j + g_i + \epsilon_{ijk}
+\]
+
+with:
+
+* $\alpha_j$ modeled as fixed effects as there is no genotype-year interaction;
+
+* $g_i = g_{A,i} \sim \mathcal{N}(0, \sigma_a^2)$;
+
+* $\epsilon_{ijk} \sim \mathcal{N}(0, \sigma^2)$;
+
+so that:
+
+* $y_{ijk} \sim \mathcal{N}(\mu_p, \sigma_p^2)$;
+
+* $\mathbb{E}[y_{ijk}] = \mu_p = \mu + \alpha_j$;
+
+* $\mathbb{V}[y_{ijk}] = \sigma_p^2 = \sigma_a^2 + \sigma^2$.
+
+Assuming the design is balanced with each genotype observed in 2 plots per year, for 2 years (which is almost the case), the broad-sense/narrow-sense heritabilities of the design (i.e. heritabilities of the phenotypic means, also called "replicabilities") are defined as:
+
+* $H_{\text{design}}^2 = \frac{\sigma_g^2}{\sigma_p^{2 \star}}$ where $\sigma_p^{2 \star} = \sigma_g^2 + \frac{\sigma^2}{n^\star}$ with, here, $n^\star \approx 4$;
+
+* $h_{\text{design}}^2 = \frac{\sigma_a^2}{\sigma_p^{2 \star}}$.
+
+### Genotypic models
+
+The above generative model is parametrized in terms of genotypic values, the $\{g_i\}$'s.
+However, these values must themselves be simulated from SNP genotypes, the $X$ matrix, and SNP effects, the $\{\beta_p\}$'s (as $g_i = g_{A,i}$, only the SNP genotypes encoded additively will be considered).
+
+Hopefully, there exists an equivalence between both parametrizations, as long as certain requirements are satisfied.
+Following [Habier et al (2007)](http://dx.doi.org/10.1534/genetics.107.081190):
+
+* model RR (ridge regression): also called "RR-BLUP"
+    + $\boldsymbol{g} = \boldsymbol{1} \mu^\ast + X \boldsymbol{\beta} + \boldsymbol{\epsilon}^\ast$
+    + $\boldsymbol{\beta} \sim \mathcal{N}(\boldsymbol{0}, \sigma_\beta^2 \, \text{Id})$
+    + $\boldsymbol{\epsilon}^\ast \sim \mathcal{N}(\boldsymbol{0}, \sigma^{2\ast} \, \text{Id})$
+    + $\Rightarrow \mathbb{E}[\boldsymbol{g}] = \boldsymbol{1} \mu^\ast$
+    + $\Rightarrow \mathbb{V}[\boldsymbol{g}] = \sigma_\beta^2 \, X X^T + \sigma^{2\ast} \, \text{Id}$
+
+* model AM ("animal model"): also called "GBLUP"
+    + $\boldsymbol{g} = \boldsymbol{1} \mu^\ast + \boldsymbol{g}_A + \boldsymbol{\epsilon}^\ast$
+    + $\boldsymbol{g}_A \sim \mathcal{N}(\boldsymbol{0}, \sigma_a^2 \, A)$ where $A$ is the matrix of additive genetic relationships (from the pedigree)
+    + $\boldsymbol{\epsilon}^\ast \sim \mathcal{N}(\boldsymbol{0}, \sigma^{2\ast} \, \text{Id})$
+    + $\Rightarrow \mathbb{E}[\boldsymbol{g}] = \boldsymbol{1} \mu^\ast$
+    + $\Rightarrow \mathbb{V}[\boldsymbol{g}] = \sigma_a^2 \, A + \sigma^{2\ast} \, \text{Id}$
+
+It can be shown that:
+
+\[
+\mathbb{E}[X X^T] = A \; \left( 2 \sum_p f_p (1 - f_p) \right) + \boldsymbol{1} \boldsymbol{1}^T 4 \sum_p f_p^2
+\]
+
+where the $\{f_p\}$'s are the SNP allele frequencies.
+
+That is, $\mathbb{E}[X X^T]$ is proportional to $A$ apart from a constant.
+Thus, models RR and AM are equivalent if one replaces $A$ by $\frac{X X^T}{2 \sum_p f_p (1 - f_p)}$, assuming a large enough number of SNPs.
+Thus, knowing the additive genotypic variance, $\sigma_a^2$, we can deduce the variance of the SNP effects: $\sigma_\beta^2 = \frac{\sigma_a^2}{2 \sum_p f_p (1 - f_p)}$.
+
+The constant mentioned above is the same for all genotypes, so it will end up in the intercept of the statistical model, $\hat{\mu}^\ast$.
+
+Note that, when $\boldsymbol{g}$ is simulated as $X \boldsymbol{\beta}$ with $X$ in $\{0,1,2\}$, its mean isn't $\boldsymbol{0}$.
+For this to be the case, the $X$ matrix should be centered using the allele frequencies from the whole population.
+More details in [Vitezica et al (2013)](http://dx.doi.org/10.1534/genetics.113.155176) and [Toro et al (2011)](http://www.gsejournal.org/content/43/1/27).
+In the course of the game, it would be better to update the allele frequencies each time new plant material is created.
+
+### Selection model
+
+As designer of the game, we can set the difficulty of the registration requirements by tuning the required response to selection, $R = \mu_1 - \mu$, where $\mu_1$ is the phenotypic mean (global intercept) at the final generation (just before registration) and $\mu$ is the mean of the initial collection.
+
+We can also write $R$ as $w \times \mu$ where $w$ correspond to the registration threshold compare to the mean of the initial collection, and we also have the following relations:
+
+* $R = h^2 \; i \; \sigma_p$;
+
+* $h2 = \frac{\sigma_a^2}{\sigma_p^2}$.
+
+Thus: $w \, \mu = \frac{\sigma_a^2}{\sigma_p^2} \, i \, \sigma_p \Leftrightarrow \frac{w}{i} = \frac{\sigma_a^2}{\sigma_p \, \mu}$
+
+Given the definition of the genotypic coef of variation, $\text{CV_g} = \frac{\sigma_g}{\mu}$, we get:
+
+\[
+\frac{w}{i} = \frac{\mu}{\sigma_p} \, \text{CV_g}^2
+\]
+
+Therefore, making things more or less difficult boils down to fine-tuning $i$, which will be reflected in $\text{CV_g}$ (for $\mu$ and $\sigma_p$ fixed).
+
+## Simulation procedure for trait 1
+
+Here is the procedure for trait 1 of setting the variances required by the generative model above to sample data.
+
+We set the initial phenotypic mean, $\mu_p$, to a global intercept which will be held constant during the whole game: $\mu_p = \mu$.
+
+```{r simul_proc_t1_mu}
+(mu <- 100)
+```
+
+We set the individual-plant phenotypic variance so that approximately 99% of all the phenotypes are above a minimal value: $\mu - 3 \sigma_p \ge y_{\text{min}}$.
+
+```{r simul_proc_t1_sigma_p2}
+y.min <- 20
+(sigma.p2 <- ((mu - y.min) / 3)^2)
+sqrt(sigma.p2)
+```
+
+We set the registration threshold to be realistic:
+
+```{r}
+register.min.trait1 <- 1.03 # compare to the phenotypic mean of the controls
+(w <- register.min.trait1 - 1)
+```
+
+We set the selection intensity, but note that the controls will be chosen (see below) so that they are among the best from the initial collection, hence the chosen selection intensity shouldn't be too large:
+
+```{r}
+i <- 1
+## i <- 2
+## i <- 3
+## i <- 4
+```
+
+We deduce the genotypic coef of variation:
+
+```{r}
+(CV.g <- sqrt((w / i) * (sqrt(sigma.p2) / mu)))
+```
+
+However, because the previous computations don't account for the negative correlation between traits, we still fix the CVg by hand at this point:
+```{r}
+CV.g <- 0.10
+```
+
+We deduce the (additive) genotypic variance:
+
+```{r simul_proc_t1_sigma_a2}
+(sigma.a2 <- (CV.g * mu)^2)
+sqrt(sigma.a2)
+stopifnot(sigma.a2 < sigma.p2)
+```
+
+We deduce the error variance given that the intra-annual, individual-plant heritability is set at a particular value: $h^2 = \frac{\sigma_a^2}{\sigma_a^2 + \sigma^2}$.
+
+```{r simul_proc_t1_sigma2}
+h2 <- 0.3
+(sigma2 <- ((1 - h2) / h2) * sigma.a2)
+sqrt(sigma2)
+stopifnot(sigma2 + sigma.a2 < sigma.p2)
+```
+
+From all this, we deduce the year variance: $\sigma_\alpha^2 = \sigma_p^2 - \sigma_a^2 - \sigma^2$.
+
+```{r simul_proc_t1_sigma_alpha2}
+(sigma.alpha2 <- sigma.p2 - sigma.a2 - sigma2)
+sqrt(sigma.alpha2)
+```
+
+We can also compute the heritability of the design (from the statistical model above), for various number of plots per genotype per year:
+
+```{r simul_proc_t1_H2_design}
+(H2.design <- sigma.a2 / (sigma.a2 + sigma2 / (2 * mean(as.vector(table(p0.df$ind)))))) # compare with estimate in infer.Rmd
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 2))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 3))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 4))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 5))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 20)) # used for the evaluation
+```
+
+Based on the SNP genotypes, we can deduce the variance of the SNP effects, $\sigma_\beta^2$.
+
+```{r simul_proc_t1_sigma_beta2}
+(sigma.beta2 <- sigma.a2 / (2 * sum(afs[thin.snps] * (1 - afs[thin.snps]))))
+(constant <- 4 * sum(afs[thin.snps]^2))
+```
+
+Save all these values in a list:
+```{r simul_proc_t1_save_values}
+params.trait1 <- list(mu=mu, y.min=y.min, sigma.p2=sigma.p2,
+                      i=i, CV.g=CV.g, sigma.a2=sigma.a2,
+                      h2=h2, sigma2=sigma2, sigma.alpha2=sigma.alpha2,
+                      H2.design=H2.design, sigma.beta2=sigma.beta2)
+```
+
+## Simulation procedure for trait 2
+
+Here is the procedure for trait 2 of setting the variances required by the generative model above to sample data.
+
+We fix the initial phenotypic mean, $\mu_p$, to a global intercept which will be held constant during the whole game: $\mu_p = \mu$.
+
+```{r simul_proc_t2_mu}
+(mu <- 15)
+```
+
+We deduce the individual-plant phenotypic variance so that approximately 99% of all the phenotypes are above a minimal value: $\mu - 3 \sigma_p \ge y_{\text{min}}$.
+
+```{r simul_proc_t2_sigma_p2}
+y.min <- 5
+(sigma.p2 <- ((mu - y.min) / 3)^2)
+sqrt(sigma.p2)
+```
+
+We set the registration threshold (for this trait, there is no need to set a target selection intensity as $w=0$):
+
+```{r}
+register.min.trait2 <- mu
+```
+
+We deduce the (additive) genotypic variance given that the genotypic coef of variation is set at a particular value:
+
+```{r simul_proc_t2_sigma_a2}
+CV.g <- 0.06
+(sigma.a2 <- (CV.g * mu)^2)
+sqrt(sigma.a2)
+stopifnot(sigma.a2 < sigma.p2)
+```
+
+We deduce the error variance given that the intra-annual, individual-plant heritability is set at a particular value: $h^2 = \frac{\sigma_a^2}{\sigma_a^2 + \sigma^2}$.
+
+```{r simul_proc_t2_sigma2}
+h2 <- 0.6
+(sigma2 <- ((1 - h2) / h2) * sigma.a2)
+sqrt(sigma2)
+stopifnot(sigma2 + sigma.a2 < sigma.p2)
+```
+
+From all this, deduce the year variance: $\sigma_\alpha^2 = \sigma_p^2 - \sigma_a^2 - \sigma^2$.
+
+```{r simul_proc_t2_sigma_alpha2}
+(sigma.alpha2 <- sigma.p2 - sigma.a2 - sigma2)
+sqrt(sigma.alpha2)
+```
+
+We can also compute the heritability of the design (from the statistical model above), for various number of plots per genotype per year:
+
+```{r simul_proc_t2_H2_design}
+(H2.design <- sigma.a2 / (sigma.a2 + sigma2 / (2 * mean(as.vector(table(p0.df$ind)))))) # compare with estimate in infer.Rmd
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 2))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 3))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 4))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 5))
+sigma.a2 / (sigma.a2 + sigma2 / (2 * 20)) # used for the evaluation
+```
+
+Based on the SNP genotypes, we can deduce the variance of the SNP effects, $\sigma_\beta^2$.
+
+```{r simul_proc_t2_sigma_beta2}
+(sigma.beta2 <- sigma.a2 / (2 * sum(afs[thin.snps] * (1 - afs[thin.snps]))))
+(constant <- 4 * sum(afs[thin.snps]^2))
+```
+
+Save all these values in a list:
+```{r simul_proc_t2_save_values}
+params.trait2 <- list(mu=mu, y.min=y.min, sigma.p2=sigma.p2,
+                      CV.g=CV.g, sigma.a2=sigma.a2,
+                      h2=h2, sigma2=sigma2, sigma.alpha2=sigma.alpha2,
+                      H2.design=H2.design, sigma.beta2=sigma.beta2)
+```
+
+## Simulate traits 1 and 2
 
 Simulate the SNP effects for traits 1 and 2 jointly:
-```{r simum_snp_effects_trait1_trait2}
-set.seed(39452)
+```{r simul_snp_effects_trait1_trait2}
+(sigma.beta2 <- c(trait1=params.trait1$sigma.beta2,
+                  trait2=params.trait2$sigma.beta2))
 snp.effects12 <- simulSnpEffectsTraits12(snp.ids=thin.snps,
-                                         sigma.beta2=c(trait1=10^(-5),
-                                                       trait2=10^(-5)),
+                                         sigma.beta2=sigma.beta2,
                                          prop.pleio=0.4, cor.pleio=-0.7)
 ```
 
 Make phenotypes for traits 1 and 2 jointly:
 ```{r make_phenos_trait1_trait2}
-mu.traits12 <- c(trait1=40, trait2=14)
+mu.traits12 <- c(trait1=params.trait1$mu, trait2=params.trait2$mu)
+sigma.traits12 <- c(trait1=params.trait1$sigma2,
+                    trait2=params.trait2$sigma2)
+sigma.alpha2 <- c(trait1=params.trait1$sigma.alpha2,
+                  trait2=params.trait2$sigma.alpha2)
 p0 <- simulTraits12(dat=p0.df, mu=mu.traits12,
-                    sigma.alpha2=c(trait1=1.5^2, trait2=1^2),
+                    sigma.alpha2=sigma.alpha2,
                     X=coll$genos[levels(p0.df$ind), thin.snps],
+                    afs=afs[thin.snps],
                     Beta=snp.effects12$Beta,
-                    h2=c(trait1=0.3, trait2=0.4))
-regplot(p0$G.A[,1], p0$G.A[,2], xlab="p0$G.A[,1]", ylab="p0$G.A[,2]", las=1)
+                    sigma2=sigma.traits12)
 ```
 
-Do some visual checks:
+Do some checks:
 ```{r plots_phenos_trait1_trait2}
+hist(p0$G.A[,1], breaks="FD", las=1, col="grey", border="white")
+hist(p0$G.A[,2], breaks="FD", las=1, col="grey", border="white")
+regplot(p0$G.A[,1], p0$G.A[,2], xlab="p0$G.A[,1]", ylab="p0$G.A[,2]", las=1)
+summary(p0$Y[,1])
+summary(p0$Y[,2])
 hist(p0$Y[,1], breaks="FD", las=1, col="grey", border="white")
 boxplot(p0$Y[,1] ~ p0.df$year, las=1, main="p0$Y[,1]")
 abline(h=mean(p0$Y[,1]), lty=2)
@@ -421,19 +766,20 @@ for(j in 1:nlevels(p0.df$year)){
 }
 ```
 
-## Trait 3
+## Simulate trait 3
 
 Make the "pathogen" column:
 ```{r patho_years}
 p0.df$pathogen <- FALSE
-first.year <- as.numeric(levels(p0.df$year)[1])
 (years.with.patho <- seq(from=first.year, by=3, length.out=4))
 p0.df$pathogen[p0.df$year %in% years.with.patho] <- TRUE
 ```
 
 Make trait 3:
 ```{r make_trait3}
-p0$trait3 <- simulTrait3(dat=p0.df, X=p0$X, afs=p0$afs,
+p0$trait3 <- simulTrait3(dat=p0.df,
+                         X=coll$genos[levels(p0.df$ind), thin.snps],
+                         afs=afs[thin.snps],
                          subset.snps=subset.snps[["ld"]],
                          prob.resist.no.qtl=0.02)
 table(p0$trait3$y)
@@ -461,11 +807,14 @@ regplot(p0.df$trait1, p0.df$trait2, xlab="p0.df$trait1", ylab="p0.df$trait2",
         las=1)
 ```
 
+TODO: add missing data
+
 Save data:
 ```{r save_phenos}
 f <- paste0(truth.dir, "/p0.RData")
 save(p0, file=f)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 ```
 
 Export "phenotype" data.frame for players:
@@ -475,34 +824,38 @@ write.table(x=p0.df[, -grep("raw", colnames(p0.df))],
             file=gzfile(f), quote=FALSE,
             sep="\t", row.names=FALSE, col.names=TRUE)
 tools::md5sum(path.expand(f))
+file.info(f)$mtime
 ```
 
+# Controls and registration
 
-# Choose controls
+## Choose controls
 
 At the end of the game, each breeder has to submit at least one new variety.
 For them to be registered, they should be "better" than controls.
 The controls are chosen so that they have:
 
-* an "additive genotypic yield" among the 40% best lines,
+* an "additive genotypic yield" among the best lines,
 
 * an "additive genotypic quality" above the mean of all lines,
 
-* the resistant allele for some of them.
+* the resistant allele for some of them (if possible).
 
 Retrieve the breeding values of each line in the collection:
 ```{r rank_genos}
 BVs <- data.frame(trait1=p0$mu[1] + p0$G.A[,1],
                   trait2=p0$mu[2] + p0$G.A[,2],
-                  trait3=! p0$X[, p0$trait3$qtn.id] %in% p0$trait3$resist.genos,
-                  row.names=rownames(p0$X))
+                  trait3=! coll$genos[levels(p0.df$ind), p0$trait3$qtn.id] %in%
+                    p0$trait3$resist.genos,
+                  row.names=levels(p0.df$ind))
 summary(BVs)
 ```
 
 Identify potential controls:
 ```{r identify_potential_controls, eval=TRUE}
 BVs <- BVs[order(BVs$trait1, decreasing=TRUE),]
-length(idx1 <- 1:ceiling(0.4 * nrow(BVs)))
+prop.best.lines <- 0.1 # to be decreased, e.g. to 10% or even 5%
+length(idx1 <- 1:ceiling(prop.best.lines * nrow(BVs)))
 summary(BVs[idx1,])
 length(idx2 <- which(BVs$trait2 >= mean(BVs$trait2)))
 potential.controls <- BVs[intersect(idx1, idx2),]
@@ -553,6 +906,8 @@ f <- paste0(init.dir, "/controls.txt")
 write.table(x=controls, file=f, quote=FALSE, sep="\t", row.names=FALSE, col.names=FALSE)
 ```
 
+## Phenotype controls
+
 Make and save phenotypes of controls in several additionnal plots the last few years to give a good reference to the players:
 ```{r phenos_controls, eval=TRUE}
 nb.years.per.ctl <- 4
@@ -571,9 +926,12 @@ for(j in 1:nb.years.per.ctl){
                               nlevels(p0.df$plot))
   phectl <- simulTraits12(dat=phectl.df, mu=p0$mu,
                           Alpha=p0$Alpha[as.character(year), , drop=FALSE],
-                          X=p0$X[levels(phectl.df$ind),], Beta=p0$Beta,
+                          X=coll$genos[levels(phectl.df$ind), thin.snps],
+                          afs=afs[thin.snps],
+                          Beta=p0$Beta,
                           sigma2=p0$sigma2, verbose=1)
-  phectl$trait3 <- simulTrait3(dat=phectl.df, X=p0$X[levels(phectl.df$ind),],
+  phectl$trait3 <- simulTrait3(dat=phectl.df,
+                               X=coll$genos[levels(phectl.df$ind), thin.snps],
                                qtn.id=p0$trait3$qtn.id,
                                resist.genos=p0$trait3$resist.genos,
                                prob.resist.no.qtl=p0$trait3$prob.resist.no.qtl,
@@ -601,6 +959,8 @@ write.table(x=phectls.df, file=gzfile(fout), quote=FALSE,
             sep="\t", row.names=FALSE, col.names=TRUE)
 ```
 
+TODO: add spatial coordinates and missing data
+
 Free some memory:
 ```{r free_mem_phenos, eval=TRUE}
 rm(p0)
@@ -619,7 +979,7 @@ dbListTables(db)
 ## Constants
 
 Create the table with the constants (average phenotypes, unitary costs, etc):
-```{r}
+```{r table_constants_create}
 tbl <- "constants"
 if(tbl %in% dbListTables(db)){
   query <- paste0("DROP TABLE ", tbl)
@@ -631,8 +991,13 @@ query <- paste0("CREATE TABLE ", tbl,
 res <- dbExecute(conn=db, query)
 ```
 
-Fill the table with the constants used for the data simulation:
-```{r}
+### Simulation parameters
+
+Fill the table with the constants used for the data simulation.
+
+#### Haplotypes and genotypes
+
+```{r table_constants_fill_simul}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.chrs', '", nb.chrs, "')")
 res <- dbExecute(conn=db, query)
@@ -640,11 +1005,89 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('chr.length', '", L, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('mu.trait1', '", mu.traits12[1], "')")
+                " ('nb.snps', '", length(thin.snps), "')")
+res <- dbExecute(conn=db, query)
+```
+
+#### Phenotypes
+
+Trait 1:
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait1', '", params.trait1$mu, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('mu.trait2', '", mu.traits12[2], "')")
+                " ('y.min.trait1', '", params.trait1$y.min, "')")
 res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.p2.trait1', '", params.trait1$sigma.p2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('w.trait1', '", params.trait1$w, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('i.trait1', '", params.trait1$i, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('CV.g.trait1', '", params.trait1$CV.g, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.a2.trait1', '", params.trait1$sigma.a2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('h2.trait1', '", params.trait1$h2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma2.trait1', '", params.trait1$sigma2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.alpha2.trait1', '", params.trait1$sigma.alpha2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('H2.design.trait1', '", params.trait1$H2.design, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.beta2.trait1', '", params.trait1$sigma.beta2, "')")
+res <- dbExecute(conn=db, query)
+```
+
+Trait 2:
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('mu.trait2', '", params.trait2$mu, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('y.min.trait2', '", params.trait2$y.min, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.p2.trait2', '", params.trait2$sigma.p2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('CV.g.trait2', '", params.trait2$CV.g, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.a2.trait2', '", params.trait2$sigma.a2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('h2.trait2', '", params.trait2$h2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma2.trait2', '", params.trait2$sigma2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.alpha2.trait2', '", params.trait2$sigma.alpha2, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('H2.design.trait2', '", params.trait2$H2.design, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('sigma.beta2.trait2', '", params.trait2$sigma.beta2, "')")
+res <- dbExecute(conn=db, query)
+```
+
+#### Initial data
+
+```{r}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.inds.denovo', '", nb.inds.denovo, "')")
 res <- dbExecute(conn=db, query)
@@ -661,6 +1104,12 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.genotyped.coll', '", length(subset.coll), "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('max.nb.haplodiplos', '", 700, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('max.nb.inds', '", 1000, "')")
+res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.plots', '", nb.plots, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
@@ -673,15 +1122,17 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('nb.plots.per.ctl', '", nb.plots.per.ctl, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('register.min.trait1', '", 1.03, "')")
+                " ('register.min.trait1', '", register.min.trait1, "')")
 res <- dbExecute(conn=db, query)
 query <- paste0("INSERT INTO ", tbl, " VALUES",
-                " ('register.min.trait2', '", 14, "')")
+                " ('register.min.trait2', '", register.min.trait2, "')")
 res <- dbExecute(conn=db, query)
 ```
 
+### Time delays
+
 Fill the table with the constants specifying the time delays (in months):
-```{r}
+```{r table_constants_fill_time}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('first.year', '", first.year, "')")
 res <- dbExecute(conn=db, query)
@@ -714,8 +1165,10 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
 res <- dbExecute(conn=db, query)
 ```
 
+### Costs
+
 Fill the table with the constants specifying the costs:
-```{r}
+```{r table_constants_fill_costs}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('cost.pheno.field', '", 50, "')") # in Mendels
 res <- dbExecute(conn=db, query)
@@ -766,7 +1219,7 @@ res <- dbExecute(conn=db, query)
 ## Sessions
 
 Create the table describing the game sessions:
-```{r}
+```{r create_table_sessions}
 tbl <- "sessions"
 if(tbl %in% dbListTables(db)){
   query <- paste0("DROP TABLE ", tbl)
@@ -781,7 +1234,7 @@ res <- dbExecute(conn=db, query)
 ```
 
 Fill the table:
-```{r}
+```{r table_sessions_fill}
 query <- paste0("INSERT INTO ", tbl, " VALUES",
                 " ('1'",
                 ", '2018-02-15 09:00:00'",
@@ -820,9 +1273,13 @@ hashed.psw <- digest("", "md5", serialize=FALSE)
 for(breeder in breeders){
   query <- paste0("INSERT INTO ", tbl, " VALUES",
                   " ('", breeder)
-  if(breeder == "test"){
+  if(breeder == "admin"){
     query <- paste0(query,
                     "', 'game master",
+                    "', '", hashed.psw, "')")
+  } else if(breeder == "test"){
+    query <- paste0(query,
+                    "', 'tester",
                     "', '", hashed.psw, "')")
   } else
     query <- paste0(query,
@@ -834,9 +1291,9 @@ for(breeder in breeders){
 
 ## Plant material
 
-Create one table per breeder for their plant material:
+Create one table per breeder for their plant material, as well as annother table to be easily copied if new breeders are created via the interface:
 ```{r create_tables_plant_material}
-for(breeder in breeders){
+for(breeder in c(breeders, "init")){
   tbl <- paste0("plant_material_", breeder)
   if(tbl %in% dbListTables(db)){
     query <- paste0("DROP TABLE ", tbl)
@@ -852,30 +1309,47 @@ for(breeder in breeders){
 dbListTables(db)
 ```
 
-For each individual initially given to the players, save it into the table, and save its haplotypes into a file (slow, especially the first time):
+Save also the collection in the plant material table of each breeder:
 ```{r fill_table}
-f <- paste0(truth.dir, "/coll.Rdata")
-load(f)
+stopifnot("coll" %in% ls())
 ind.ids <- rownames(coll$genos)
-tmp.ids <- gsub("Coll", "Ind", ind.ids) # dummy identifiers for the parent1's
-for(i in 1:length(ind.ids)){
-  ind.id <- ind.ids[i]
-  ind <- list(haplos=getHaplosInd(haplos=coll$haplos, ind.name=ind.id))
-  f <- paste0(truth.dir, "/", ind.id, "_haplos.RData")
-  save(ind, file=f)
-  for(breeder in breeders){
-    fto <- paste0(truth.dir, "/", breeder, "/", ind.id, "_haplos.RData")
-    if(! file.exists(fto))
-      file.symlink(f, fto)
-    tbl <- paste0("plant_material_", breeder)
-    query <- paste0("INSERT INTO ", tbl, " VALUES",
-                    " ('", tmp.ids[i], "'",
-                    ", '", NA, "'",
-                    ", '", ind.id, "'",
-                    ", '", first.year, "-01-01 00:00:00')") # ISO-8601
-    res <- dbExecute(conn=db, query)
-  }
+all.values <- paste(gsub("Coll", "Ind", ind.ids),
+                    rep(NA, length(ind.ids)),
+                    ind.ids,
+                    rep(paste0(first.year, "-01-01 00:00:00"), length(ind.ids)),
+                    sep="','",collapse = "'),('")
+for(breeder in c(breeders, "init")){
+  tbl <- paste0("plant_material_", breeder)
+  query <- paste0("INSERT INTO ", tbl,
+                  " (parent1, parent2, child, avail_from)",
+                  " VALUES",
+                  " ('", all.values, "')")
+  res <- dbExecute(conn=db, query)
 }
+dbDisconnect(db)
+```
+
+For each individual initially given to the players, save its haplotypes into a file (slow):
+```{r save_haplos_in_files}
+system.time(
+    tmp <- mclapply(1:length(ind.ids), function(i){
+      ind.id <- ind.ids[i]
+      ind <- list(haplos=getHaplosInd(haplos=coll$haplos, ind.name=ind.id))
+      f <- paste0(truth.dir, "/", ind.id, "_haplos.RData")
+      save(ind, file=f)
+      for(breeder in breeders){
+        fto <- paste0(truth.dir, "/", breeder, "/", ind.id, "_haplos.RData")
+        if(! file.exists(fto))
+          file.symlink(f, fto)
+      }
+    }, mc.cores=nb.cores))
+```
+
+Save also the initial allele frequencies:
+```{r save_afs_in_file}
+f <- paste0(truth.dir, "/afs0.RData")
+afs0 <- afs[thin.snps]
+save(afs0, file=f)
 ```
 
 ## Example files
