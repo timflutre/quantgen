@@ -8,7 +8,7 @@
 
 rm(list=ls())
 prog.name <- "rmd2out.R"
-prog.version <- "0.2.0" # http://semver.org/
+prog.version <- "0.3.0" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -29,12 +29,13 @@ help <- function(){
   txt <- paste0(txt, "  -V, --version\toutput version information and exit\n")
   txt <- paste0(txt, "  -v, --verbose\tverbosity level (0/default=1/2/3)\n")
   txt <- paste0(txt, "  -i, --input\tpath to the input file (Rmd format)\n")
-  txt <- paste0(txt, "  -o, --output\toutput format (default=html/pdf)\n")
+  txt <- paste0(txt, "  -O, --outf\toutput format (default=html/pdf)\n")
+  txt <- paste0(txt, "  -o, --output\tpath to the output file (default=input.format\n")
   txt <- paste0(txt, "\n")
   txt <- paste0(txt, "Examples:\n")
-  txt <- paste0(txt, "  ", prog.name, " -i myreport.Rmd -o html\n")
+  txt <- paste0(txt, "  ", prog.name, " -i myreport.Rmd -O html\n")
   txt <- paste0(txt, "\n")
-  txt <- paste0(txt, "Report bugs to <timothee.flutre@supagro.inra.fr>.")
+  txt <- paste0(txt, "Report bugs to <timothee.flutre@inra.fr>.")
   write(txt, stdout())
 }
 
@@ -45,7 +46,7 @@ help <- function(){
 version <- function(){
   txt <- paste0(prog.name, " ", prog.version, "\n")
   txt <- paste0(txt, "\n")
-  txt <- paste0(txt, "Copyright (C) 2016 Institut national de la recherche agronomique.\n")
+  txt <- paste0(txt, "Copyright (C) 2016,2018 Institut national de la recherche agronomique.\n")
   txt <- paste0(txt, "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n")
   txt <- paste0(txt, "\n")
   txt <- paste0(txt, "Written by Timothée Flutre [cre,aut].")
@@ -81,8 +82,12 @@ parseCmdLine <- function(params){
       params$in.file <- args[i+1]
       i <- i + 1
     }
-    else if(args[i] == "-o" || args[i] == "--output"){
+    else if(args[i] == "-O" || args[i] == "--outf"){
       params$out.format <- args[i+1]
+      i <- i + 1
+    }
+    else if(args[i] == "-o" || args[i] == "--output"){
+      params$out.file <- args[i+1]
       i <- i + 1
     }
     else{
@@ -120,7 +125,8 @@ checkParams <- function(params){
 
 params <- list(verbose=1,
                in.file=NULL,
-               out.format="html")
+               out.format="html",
+               out.file=NULL)
 
 params <- parseCmdLine(params)
 
@@ -136,7 +142,9 @@ if(params$verbose > 0){
 }
 
 system.time(
-    rmarkdown::render(params$in.file, paste0(params$out.format, "_document"))
+    rmarkdown::render(input=params$in.file,
+                      output_format=paste0(params$out.format, "_document"),
+                      output_file=params$out.file)
 )
 
 if(params$verbose > 0){
