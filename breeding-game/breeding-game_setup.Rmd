@@ -1088,6 +1088,13 @@ query <- paste0("INSERT INTO ", tbl, " VALUES",
 res <- dbExecute(conn=db, query)
 ```
 
+Year effects:
+```{r}
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('seed.year.effect', '", 4321, "')")
+res <- dbExecute(conn=db, query)
+```
+
 #### Initial data
 
 ```{r}
