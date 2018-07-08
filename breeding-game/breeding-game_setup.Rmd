@@ -989,6 +989,9 @@ query <- paste0("CREATE TABLE ", tbl,
                 " (item TEXT",
                 ", value TEXT)")
 res <- dbExecute(conn=db, query)
+query <- paste0("INSERT INTO ", tbl, " VALUES",
+                " ('max.disk.usage', '", 10, "')") # in Gb
+res <- dbExecute(conn=db, query)
 ```
 
 ### Simulation parameters
