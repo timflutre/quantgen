@@ -48,6 +48,10 @@ t0 <- proc.time()
 
 Load the packages:
 ```{r load_pkg}
+suppressPackageStartupMessages(library(parallel))
+nb.cores <- 1
+if(Sys.info()["sysname"] != "Windows")
+  nb.cores <- detectCores() - 1
 suppressPackageStartupMessages(library(DBI))
 suppressPackageStartupMessages(library(RSQLite))
 stopifnot(compareVersion("2.0",
@@ -55,9 +59,8 @@ stopifnot(compareVersion("2.0",
           != 1)
 suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
-suppressPackageStartupMessages(library(parallel))
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.158.3",
+stopifnot(compareVersion("0.163.8",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -66,9 +69,6 @@ Set the seed:
 ```{r}
 RNGkind("L'Ecuyer-CMRG") # to make mclapply reproducible
 set.seed(1859)
-nb.cores <- 1
-if(Sys.info()["sysname"] != "Windows")
-  nb.cores <- detectCores() - 1
 ```
 
 Set up directories:
@@ -80,8 +80,12 @@ if(Sys.info()["user"] == "tflutre"){
 }
 if(! dir.exists(root.dir))
   dir.create(root.dir)
+## The test player is always created.
+## A game-master player should be created by "test" if none exists.
+## Other players are created via the interface.
 setup <- setUpBreedingGame(root.dir=root.dir,
-                           nb.breeders=0) # breeders will be created via the interface
+                           create.admin=TRUE,
+                           nb.breeders=0)
 truth.dir <- setup$truth.dir
 shared.dir <- setup$shared.dir
 init.dir <- setup$init.dir
