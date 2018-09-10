@@ -60,7 +60,7 @@ stopifnot(compareVersion("2.0",
 suppressPackageStartupMessages(library(digest))
 suppressPackageStartupMessages(library(MASS))
 suppressPackageStartupMessages(library(rutilstimflutre))
-stopifnot(compareVersion("0.163.8",
+stopifnot(compareVersion("0.164.0",
                          as.character(packageVersion("rutilstimflutre")))
           != 1)
 ```
@@ -80,18 +80,34 @@ if(Sys.info()["user"] == "tflutre"){
 }
 if(! dir.exists(root.dir))
   dir.create(root.dir)
-## The test player is always created.
-## A game-master player should be created by "test" if none exists.
-## Other players are created via the interface.
-setup <- setUpBreedingGame(root.dir=root.dir,
-                           create.admin=TRUE,
-                           nb.breeders=0)
-truth.dir <- setup$truth.dir
-shared.dir <- setup$shared.dir
-init.dir <- setup$init.dir
-breeders <- setup$breeders
-breeder.dirs <- setup$breeder.dirs
-dbname <- setup$dbname
+truth.dir <- paste0(root.dir, "/", "truth")
+if(! dir.exists(truth.dir))
+  dir.create(truth.dir)
+shared.dir <- paste0(root.dir, "/", "shared")
+if(! dir.exists(shared.dir))
+  dir.create(shared.dir)
+init.dir <- paste0(shared.dir, "/", "initial_data")
+if(! dir.exists(init.dir))
+  dir.create(init.dir)
+```
+
+Create the "admin" and "test" players (other players are created via the interface):
+```{r}
+breeders <- c("admin", "test")
+breeder.dirs <- c()
+for(breeder in breeders){
+  truth.breeder.dir <- paste0(truth.dir, "/", breeder)
+  if(! dir.exists(truth.breeder.dir))
+    dir.create(truth.breeder.dir)
+  breeder.dirs[[breeder]] <- paste0(shared.dir, "/", breeder)
+  if(! dir.exists(breeder.dirs[breeder]))
+    dir.create(breeder.dirs[breeder])
+}
+```
+
+Set up the name of the database:
+```{r}
+dbname <- paste0(root.dir, "/breeding-game.sqlite")
 ```
 
 
@@ -956,7 +972,7 @@ for(j in 1:nb.years.per.ctl){
 }
 regplot(phectls.df$trait1, phectls.df$trait2, xlab="phectls.df$trait1",
         ylab="phectls.df$trait2", las=1)
-fout <- paste0(setup$init.dir, "/phenos_controls.txt.gz")
+fout <- paste0(init.dir, "/phenos_controls.txt.gz")
 if(file.exists(fout))
   file.remove(fout)
 write.table(x=phectls.df, file=gzfile(fout), quote=FALSE,
@@ -1283,22 +1299,18 @@ query <- paste0("CREATE TABLE ", tbl,
                 ", status TEXT",
                 ", h_psw TEXT)")
 res <- dbExecute(conn=db, query)
-hashed.psw <- digest("", "md5", serialize=FALSE)
 for(breeder in breeders){
   query <- paste0("INSERT INTO ", tbl, " VALUES",
                   " ('", breeder)
   if(breeder == "admin"){
     query <- paste0(query,
                     "', 'game master",
-                    "', '", hashed.psw, "')")
+                    "', '", digest("1234", "md5", serialize=FALSE), "')")
   } else if(breeder == "test"){
     query <- paste0(query,
                     "', 'tester",
-                    "', '", hashed.psw, "')")
-  } else
-    query <- paste0(query,
-                    "', 'player",
-                    "', '", hashed.psw, "')")
+                    "', '", digest("", "md5", serialize=FALSE), "')")
+  }
   res <- dbExecute(conn=db, query)
 }
 ```
@@ -1384,7 +1396,7 @@ Make an example of an "data" file:
 Make a zip archive of the whole directory:
 ```{r make_zip}
 cwd <- getwd()
-setwd(dirname(setup$root.dir))
+setwd(dirname(root.dir))
 system.time(
     zip(zipfile="data.zip",
         files=list.files(path="data", full.names=TRUE, recursive=TRUE,
