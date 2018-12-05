@@ -8,7 +8,7 @@
 
 rm(list=ls())
 prog.name <- "rmd2out.R"
-prog.version <- "0.3.0" # http://semver.org/
+prog.version <- "0.4.0" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -30,7 +30,10 @@ help <- function(){
   txt <- paste0(txt, "  -v, --verbose\tverbosity level (0/default=1/2/3)\n")
   txt <- paste0(txt, "  -i, --input\tpath to the input file (Rmd format)\n")
   txt <- paste0(txt, "  -O, --outf\toutput format (default=html/pdf)\n")
-  txt <- paste0(txt, "  -o, --output\tpath to the output file (default=input.format\n")
+  txt <- paste0(txt, "  -o, --output\tpath to the output file\n")
+  txt <- paste0(txt, "\t\tdefault=<input prefix>.<format>\n")
+  txt <- paste0(txt, "  -r, --root\tworking directory in which to render the document\n")
+  txt <- paste0(txt, "\t\tdefault=use the directory of the input document\n")
   txt <- paste0(txt, "\n")
   txt <- paste0(txt, "Examples:\n")
   txt <- paste0(txt, "  ", prog.name, " -i myreport.Rmd -O html\n")
@@ -90,6 +93,10 @@ parseCmdLine <- function(params){
       params$out.file <- args[i+1]
       i <- i + 1
     }
+    else if(args[i] == "-r" || args[i] == "--root"){
+      params$root.dir <- args[i+1]
+      i <- i + 1
+    }
     else{
       write(paste0(prog.name, ": invalid option -- ", args[i], "\n"), stderr())
       help()
@@ -126,7 +133,8 @@ checkParams <- function(params){
 params <- list(verbose=1,
                in.file=NULL,
                out.format="html",
-               out.file=NULL)
+               out.file=NULL,
+               root.dir=NULL)
 
 params <- parseCmdLine(params)
 
@@ -144,7 +152,8 @@ if(params$verbose > 0){
 system.time(
     rmarkdown::render(input=params$in.file,
                       output_format=paste0(params$out.format, "_document"),
-                      output_file=params$out.file)
+                      output_file=params$out.file,
+                      knit_root_dir=params$root.dir)
 )
 
 if(params$verbose > 0){
