@@ -8,7 +8,7 @@
 
 rm(list=ls())
 prog.name <- "rmd2out.R"
-prog.version <- "0.4.0" # http://semver.org/
+prog.version <- "0.5.0" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -34,6 +34,11 @@ help <- function(){
   txt <- paste0(txt, "\t\tdefault=<input prefix>.<format>\n")
   txt <- paste0(txt, "  -r, --root\tworking directory in which to render the document\n")
   txt <- paste0(txt, "\t\tdefault=use the directory of the input document\n")
+  txt <- paste0(txt, "  -p, --param\tparameters to be passed on as a named list, separated by one space\n")
+  txt <- paste0(txt, "\t\tformat: 'name1=value name2=value etc'\n")
+  txt <- paste0(txt, "\t\tvalues made only of digits will be converted as numeric\n")
+  txt <- paste0(txt, "\t\texample 1: -p 'n=3'\n")
+  txt <- paste0(txt, "\t\texample 2: -p 'input=~/dat.txt n=3'\n")
   txt <- paste0(txt, "\n")
   txt <- paste0(txt, "Examples:\n")
   txt <- paste0(txt, "  ", prog.name, " -i myreport.Rmd -O html\n")
@@ -97,6 +102,26 @@ parseCmdLine <- function(params){
       params$root.dir <- args[i+1]
       i <- i + 1
     }
+    else if(args[i] == "-p" || args[i] == "--param"){
+      tmp <- args[i+1]
+      tmp <- strsplit(tmp, " ")[[1]]
+      if(length(tmp) > 0){
+        params$rmd.params <- list()
+        for(j in seq_along(tmp)){
+          if(! grepl("=", tmp[j])){
+            msg <- "WARNING: custom parameters should be formatted as name=value"
+            write(msg, stderr())
+            next
+          }
+          var.name <- strsplit(tmp[j], "=")[[1]][1]
+          var.value <- strsplit(tmp[j], "=")[[1]][2]
+          if(grepl("^[[:digit:]]+$", var.value))
+             var.value <- as.numeric(var.value)
+          params$rmd.params[[var.name]] <- var.value
+        }
+      }
+      i <- i + 1
+    }
     else{
       write(paste0(prog.name, ": invalid option -- ", args[i], "\n"), stderr())
       help()
@@ -134,7 +159,8 @@ params <- list(verbose=1,
                in.file=NULL,
                out.format="html",
                out.file=NULL,
-               root.dir=NULL)
+               root.dir=NULL,
+               rmd.params=NULL)
 
 params <- parseCmdLine(params)
 
@@ -153,7 +179,8 @@ system.time(
     rmarkdown::render(input=params$in.file,
                       output_format=paste0(params$out.format, "_document"),
                       output_file=params$out.file,
-                      knit_root_dir=params$root.dir)
+                      knit_root_dir=params$root.dir,
+                      params=params$rmd.params)
 )
 
 if(params$verbose > 0){
