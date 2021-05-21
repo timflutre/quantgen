@@ -108,9 +108,12 @@ parseCmdLine <- function(params){
       if(length(tmp) > 0){
         params$rmd.params <- list()
         for(j in seq_along(tmp)){
+          if(tmp[j] == "") # case happens when there are several successive spaces
+            next
           if(! grepl("=", tmp[j])){
             msg <- "WARNING: custom parameters should be formatted as name=value"
             write(msg, stderr())
+            print(tmp[j])
             next
           }
           var.name <- strsplit(tmp[j], "=")[[1]][1]
@@ -180,7 +183,8 @@ system.time(
                       output_format=paste0(params$out.format, "_document"),
                       output_file=params$out.file,
                       knit_root_dir=params$root.dir,
-                      params=params$rmd.params)
+                      params=params$rmd.params,
+                      quiet=TRUE)
 )
 
 if(params$verbose > 0){
