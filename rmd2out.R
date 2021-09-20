@@ -1,14 +1,14 @@
 #!/usr/bin/env Rscript
 
 # Aim: convert an Rmd file into html or pdf from the command-line
-# Copyright (C) 2016,2018 Timothée Flutre
+# Copyright (C) 2016,2018,2021 Timothée Flutre
 # License: GPL-3+
 # Persons: Timothée Flutre [cre,aut]
 # Versioning: https://github.com/timflutre/quantgen
 
 rm(list=ls())
 prog.name <- "rmd2out.R"
-prog.version <- "0.5.0" # http://semver.org/
+prog.version <- "0.5.1" # http://semver.org/
 
 R.v.maj <- as.numeric(R.version$major)
 R.v.min.1 <- as.numeric(strsplit(R.version$minor, "\\.")[[1]][1])
@@ -43,7 +43,7 @@ help <- function(){
   txt <- paste0(txt, "Examples:\n")
   txt <- paste0(txt, "  ", prog.name, " -i myreport.Rmd -O html\n")
   txt <- paste0(txt, "\n")
-  txt <- paste0(txt, "Report bugs to <timothee.flutre@inra.fr>.")
+  txt <- paste0(txt, "Report bugs to <timothee.flutre@inrae.fr>.")
   write(txt, stdout())
 }
 
@@ -54,7 +54,7 @@ help <- function(){
 version <- function(){
   txt <- paste0(prog.name, " ", prog.version, "\n")
   txt <- paste0(txt, "\n")
-  txt <- paste0(txt, "Copyright (C) 2016,2018 Institut national de la recherche agronomique.\n")
+  txt <- paste0(txt, "Copyright (C) 2016,2018,2021 Institut national de la recherche agronomique.\n")
   txt <- paste0(txt, "License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n")
   txt <- paste0(txt, "\n")
   txt <- paste0(txt, "Written by Timothée Flutre [cre,aut].")
@@ -176,6 +176,9 @@ if(params$verbose > 0){
   args <- commandArgs(trailingOnly=TRUE)
   write(paste("cmd-line:", prog.name, paste(args, collapse=" ")), stdout())
   write(paste0("cwd: ", getwd()), stdout())
+}
+if(params$verbose > 1){
+  print(params$rmd.params)
 }
 
 system.time(
