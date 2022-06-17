@@ -169,7 +169,9 @@ params <- parseCmdLine(params)
 
 checkParams(params)
 
-if(params$verbose > 0){
+verbose <- params$verbose
+
+if(verbose > 0){
   start.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
   write(paste0("START ", prog.name, " ", prog.version, " ", start.time),
         stdout())
@@ -177,7 +179,7 @@ if(params$verbose > 0){
   write(paste("cmd-line:", prog.name, paste(args, collapse=" ")), stdout())
   write(paste0("cwd: ", getwd()), stdout())
 }
-if(params$verbose > 1){
+if(verbose > 1){
   print(params$rmd.params)
 }
 
@@ -185,12 +187,14 @@ system.time(
     rmarkdown::render(input=params$in.file,
                       output_format=paste0(params$out.format, "_document"),
                       output_file=params$out.file,
+                      intermediates_dir=tempfile(pattern="dir"),
                       knit_root_dir=params$root.dir,
+                      clean=TRUE,
                       params=params$rmd.params,
                       quiet=TRUE)
 )
 
-if(params$verbose > 0){
+if(verbose > 0){
   end.time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
   difft <- as.numeric(
       difftime(as.POSIXct(end.time, format="%Y-%m-%d %H:%M:%S"),
