@@ -187,11 +187,12 @@ system.time(
     rmarkdown::render(input=params$in.file,
                       output_format=paste0(params$out.format, "_document"),
                       output_file=params$out.file,
-                      intermediates_dir=tempfile(pattern="dir"),
+                      ## intermediates_dir=tempfile(pattern="dir"),
                       knit_root_dir=params$root.dir,
                       clean=TRUE,
                       params=params$rmd.params,
-                      quiet=TRUE)
+                      quiet=TRUE,
+                      envir=new.env()) # https://stackoverflow.com/a/42104149/597069
 )
 
 if(verbose > 0){
