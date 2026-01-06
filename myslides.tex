@@ -1,4 +1,4 @@
-% Copyright (C) 2015,2024 Timothee Flutre
+% Copyright (C) 2015,2024,2026 Timothee Flutre
 % This work is licensed under a Creative Commons Attribution-ShareAlike 4.0 International License:
 % http://creativecommons.org/licenses/by-sa/4.0/
 
@@ -10,11 +10,15 @@
 \usepackage{amsmath}
 \usepackage{bm} % to have mathematical symbols in bold
 \usepackage{multirow}
-\usepackage{tikz}
+% \usepackage{tikz}
 \usepackage[francais]{babel}
 \usepackage[utf8]{inputenc}
 
 \graphicspath{{./figures/}}
+
+% definition of commands:
+\newcommand{\etal}{\textit{et al.}} % useful when citing a paper
+\newcommand{\E}{\text{E}} % useful when writing an expectation
 
 % -----------------------------------------------------------------------------
 
@@ -83,6 +87,14 @@
 \begin{document}
 
 \begin{frame}
+  \footnotesize
+  \begin{center}
+    Meeting ...
+  \end{center}
+  \normalsize
+
+  \bigskip
+  
   \titlepage
 \end{frame}
 
